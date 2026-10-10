@@ -9,11 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/clock/clocktest"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/scheduler"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg/tgtest"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/ui"
 )
 
 var t0 = time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
@@ -362,14 +365,281 @@ func TestDigestMoreThanAnHourLateSkippedButDone(t *testing.T) {
 	}
 }
 
-func TestDigestSendFailureStillDone(t *testing.T) {
+func TestDigestTransientErrorKeepsClaimThenRetries(t *testing.T) {
 	e := newEnv()
 	e.b.chats = []model.Chat{digestChat(500, t0)}
 	e.b.views[500] = model.DigestView{ChatID: 500, Loc: time.UTC, NoDateCount: 2}
-	e.snd.ErrFn = func(int64, tg.OutMessage) error { return errBoom }
+	fail := true
+	e.snd.ErrFn = func(int64, tg.OutMessage) error {
+		if fail {
+			return errBoom
+		}
+		return nil
+	}
+	ctx := context.Background()
+	e.s.Tick(ctx)
+	if len(e.b.digestsDone) != 0 {
+		t.Fatalf("DigestDone must not be called on a transient error: %v", e.b.digestsDone)
+	}
+	// Claim still held: nothing happens until it expires.
+	e.s.Tick(ctx)
+	if len(e.snd.Messages()) != 0 {
+		t.Fatal("claimed chat retried before its claim expired")
+	}
+	fail = false
+	e.clk.Advance(2 * time.Minute)
+	e.s.Tick(ctx)
+	if len(e.snd.Messages()) != 1 || len(e.b.digestsDone) != 1 {
+		t.Errorf("messages=%d done=%v", len(e.snd.Messages()), e.b.digestsDone)
+	}
+}
+
+func TestDigestPermanentErrorStillDone(t *testing.T) {
+	e := newEnv()
+	e.b.chats = []model.Chat{digestChat(500, t0)}
+	e.b.views[500] = model.DigestView{ChatID: 500, Loc: time.UTC, NoDateCount: 2}
+	e.snd.ErrFn = func(int64, tg.OutMessage) error { return &tg.APIError{Code: 403, Desc: "Forbidden: bot was blocked"} }
 	e.s.Tick(context.Background())
 	if len(e.b.digestsDone) != 1 {
 		t.Errorf("digestsDone = %v", e.b.digestsDone)
+	}
+}
+
+func TestDigestViewErrorKeepsClaim(t *testing.T) {
+	e := newEnv()
+	e.b.chats = []model.Chat{digestChat(500, t0)}
+	e.b.viewErr = errBoom
+	e.s.Tick(context.Background())
+	if len(e.b.digestsDone) != 0 {
+		t.Errorf("digestsDone = %v", e.b.digestsDone)
+	}
+}
+
+func TestDigestMigrateRetriesWithNewID(t *testing.T) {
+	e := newEnv()
+	e.b.chats = []model.Chat{digestChat(500, t0)}
+	e.b.views[500] = model.DigestView{ChatID: 500, Loc: time.UTC, NoDateCount: 1}
+	e.snd.ErrFn = func(chatID int64, _ tg.OutMessage) error {
+		if chatID == 500 {
+			return &tg.APIError{Code: 400, Desc: "upgraded", MigrateTo: -900}
+		}
+		return nil
+	}
+	e.s.Tick(context.Background())
+	msgs := e.snd.Messages()
+	if len(msgs) != 1 || msgs[0].ChatID != -900 || len(e.b.migrated) != 1 {
+		t.Errorf("messages=%+v migrated=%v", msgs, e.b.migrated)
+	}
+}
+
+func TestDigestRateLimitWithinBudgetWaits(t *testing.T) {
+	e := newEnv()
+	e.b.chats = []model.Chat{digestChat(500, t0)}
+	e.b.views[500] = model.DigestView{ChatID: 500, Loc: time.UTC, NoDateCount: 1}
+	calls := 0
+	e.snd.ErrFn = func(int64, tg.OutMessage) error {
+		calls++
+		if calls == 1 {
+			return &tg.APIError{Code: 429, RetryAfter: 10 * time.Second}
+		}
+		return nil
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); e.s.Tick(context.Background()) }()
+	eventually(t, "wait", func() bool { return e.clk.Waiters() == 1 })
+	e.clk.Advance(10 * time.Second)
+	<-done
+	if len(e.snd.Messages()) != 1 || len(e.b.digestsDone) != 1 {
+		t.Errorf("messages=%d done=%v", len(e.snd.Messages()), e.b.digestsDone)
+	}
+}
+
+func TestClaimErrorBacksOffInsteadOfSpinning(t *testing.T) {
+	e := newEnv() // default maxSleep 5m
+	e.b.addReminder(1, t0.Add(-time.Minute), model.TodoOpen)
+	e.b.claimErr = errBoom
+	stop := e.startRun(t)
+	defer stop()
+	eventually(t, "sleep", func() bool { return e.clk.Waiters() == 1 })
+	time.Sleep(30 * time.Millisecond) // frozen clock: a spinning loop would pile up calls
+	if c := e.b.claimCount(); c != 1 {
+		t.Fatalf("claim calls = %d, want 1", c)
+	}
+	e.clk.Advance(time.Second) // first backoff step
+	eventually(t, "second attempt", func() bool { return e.b.claimCount() == 2 })
+	eventually(t, "sleep again", func() bool { return e.clk.Waiters() == 1 })
+	e.clk.Advance(time.Second) // backoff doubled to 2s: not enough
+	time.Sleep(30 * time.Millisecond)
+	if c := e.b.claimCount(); c != 2 {
+		t.Fatalf("claim calls = %d after 1s of a 2s backoff, want 2", c)
+	}
+	e.b.mu.Lock()
+	e.b.claimErr = nil
+	e.b.mu.Unlock()
+	e.clk.Advance(time.Second)
+	eventually(t, "recovery delivers", func() bool { return e.b.sentCount(1) == 1 })
+}
+
+func TestBatchStopsWhenBudgetSpentAndOtherNodeTakesOver(t *testing.T) {
+	clk := clocktest.New(t0)
+	b := newFakeBackend(clk)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	snd1, snd2 := &tgtest.FakeSender{}, &tgtest.FakeSender{}
+	// s1's first send is slow: it takes longer than the whole claim.
+	slow := true
+	snd1.ErrFn = func(int64, tg.OutMessage) error {
+		if slow {
+			slow = false
+			clk.Advance(61 * time.Second) // past ClaimTTL/2
+		}
+		return nil
+	}
+	s1 := scheduler.New(b, snd1, clk, log, scheduler.WithClaimTTL(2*time.Minute))
+	s2 := scheduler.New(b, snd2, clk, log, scheduler.WithClaimTTL(2*time.Minute))
+	for i := int64(1); i <= 4; i++ {
+		b.addReminder(i, t0, model.TodoOpen)
+	}
+	s1.Tick(context.Background())
+	if n := len(snd1.Messages()); n != 1 {
+		t.Fatalf("s1 sent %d, want 1 (budget spent after the first)", n)
+	}
+	clk.Advance(2 * time.Minute) // s1's claim on rows 2..4 expires
+	s2.Tick(context.Background())
+
+	perChat := map[int64]int{}
+	for _, m := range append(snd1.Messages(), snd2.Messages()...) {
+		perChat[m.ChatID]++
+	}
+	if len(perChat) != 4 {
+		t.Fatalf("chats reached = %v", perChat)
+	}
+	for chat, n := range perChat {
+		if n != 1 {
+			t.Errorf("chat %d got %d messages", chat, n)
+		}
+	}
+}
+
+func TestRateLimitBudgetIsCumulativePerBatch(t *testing.T) {
+	e := newEnv(scheduler.WithClaimTTL(2 * time.Minute))
+	e.b.addReminder(1, t0, model.TodoOpen)
+	e.b.addReminder(2, t0, model.TodoOpen)
+	seen := map[int64]bool{}
+	e.snd.ErrFn = func(chatID int64, _ tg.OutMessage) error {
+		if !seen[chatID] {
+			seen[chatID] = true
+			return &tg.APIError{Code: 429, RetryAfter: 40 * time.Second}
+		}
+		return nil
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); e.s.Tick(context.Background()) }()
+	eventually(t, "first wait", func() bool { return e.clk.Waiters() == 1 })
+	e.clk.Advance(40 * time.Second)
+	<-done
+	// Row 1 waited 40s; row 2's 40s would end at 80s > 60s budget: handed back.
+	if e.b.sentCount(1) != 1 {
+		t.Error("row 1 should be sent")
+	}
+	if f := e.b.failed[2]; len(f) != 1 || f[0] {
+		t.Errorf("row 2 failed = %v, want one transient", f)
+	}
+}
+
+func TestSendRecordedDuringShutdown(t *testing.T) {
+	e := newEnv()
+	e.b.addReminder(1, t0, model.TodoOpen)
+	ctx, cancel := context.WithCancel(context.Background())
+	e.snd.ErrFn = func(int64, tg.OutMessage) error {
+		cancel() // SIGTERM lands while the send is in flight; the send succeeds
+		return nil
+	}
+	e.s.Tick(ctx)
+	if e.b.sentCount(1) != 1 {
+		t.Error("a delivered message must still be marked sent")
+	}
+}
+
+func TestCancelledSendDoesNotSpendAnAttempt(t *testing.T) {
+	e := newEnv()
+	e.b.addReminder(1, t0, model.TodoOpen)
+	ctx, cancel := context.WithCancel(context.Background())
+	e.snd.ErrFn = func(int64, tg.OutMessage) error {
+		cancel()
+		return context.Canceled
+	}
+	e.s.Tick(ctx)
+	if len(e.b.failed[1]) != 0 || e.b.sentCount(1) != 0 {
+		t.Errorf("failed=%v sent=%d", e.b.failed[1], e.b.sentCount(1))
+	}
+}
+
+func TestPanicInRowIsIsolated(t *testing.T) {
+	e := newEnv()
+	for i := int64(1); i <= 3; i++ {
+		e.b.addReminder(i, t0, model.TodoOpen)
+	}
+	e.snd.ErrFn = func(chatID int64, _ tg.OutMessage) error {
+		if chatID == 102 {
+			panic("sender exploded")
+		}
+		return nil
+	}
+	e.s.Tick(context.Background())
+	if f := e.b.failed[2]; len(f) != 1 || f[0] {
+		t.Errorf("poison row failed = %v, want one transient failure", f)
+	}
+	if e.b.sentCount(1) != 1 || e.b.sentCount(3) != 1 {
+		t.Errorf("other rows must be delivered: %v", e.b.sent)
+	}
+}
+
+func TestPanicInDigestStillAdvances(t *testing.T) {
+	e := newEnv()
+	e.b.chats = []model.Chat{digestChat(500, t0), digestChat(501, t0)}
+	e.b.viewPanic = true
+	e.s.Tick(context.Background())
+	if len(e.b.digestsDone) != 2 {
+		t.Errorf("digestsDone = %v, want both", e.b.digestsDone)
+	}
+}
+
+func TestReminderRendersInCreatorsPrefs(t *testing.T) {
+	tehran, err := time.LoadLocation("Asia/Tehran")
+	if err != nil {
+		t.Skip("tzdata unavailable")
+	}
+	fa := i18n.Locale{Lang: i18n.Fa, Cal: calendar.Jalali}
+	e := newEnv()
+	e.b.addReminder(1, t0.Add(-time.Hour), model.TodoOpen) // late, so the time is rendered
+	e.b.rows[0].dr.Todo.CreatedBy = 9
+	e.b.prefs[9] = model.Prefs{TZ: tehran, Locale: fa}
+	e.s.Tick(context.Background())
+
+	if got := e.b.prefsCalls; len(got) != 1 || got[0] != 9 {
+		t.Fatalf("Prefs called with %v, want [9] (todo.CreatedBy)", got)
+	}
+	want := ui.ReminderMsg(e.b.rows[0].dr, fa, tehran, t0, true)
+	msgs := e.snd.Messages()
+	if len(msgs) != 1 || msgs[0].Msg.Text != want.Text || msgs[0].Msg.Keyboard[0][0].Text != fa.T("ui.btn.done") {
+		t.Errorf("got %+v, want %+v", msgs, want)
+	}
+	other := ui.ReminderMsg(e.b.rows[0].dr, i18n.Locale{Lang: i18n.En}, time.UTC, t0, true)
+	if other.Text == want.Text {
+		t.Error("test is vacuous: Farsi/Tehran rendering equals English/UTC")
+	}
+}
+
+func TestDigestRendersWithViewLocale(t *testing.T) {
+	fa := i18n.Locale{Lang: i18n.Fa, Cal: calendar.Jalali}
+	e := newEnv()
+	e.b.chats = []model.Chat{digestChat(500, t0)}
+	v := model.DigestView{ChatID: 500, Loc: time.UTC, Locale: fa, NoDateCount: 3}
+	e.b.views[500] = v
+	e.s.Tick(context.Background())
+	msgs := e.snd.Messages()
+	if len(msgs) != 1 || msgs[0].Msg.Text != ui.Digest(v, t0).Text {
+		t.Errorf("messages = %+v", msgs)
 	}
 }
 

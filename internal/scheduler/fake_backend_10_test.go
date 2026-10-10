@@ -34,6 +34,9 @@ type fakeBackend struct {
 
 	chats       []model.Chat // digests, claimed when DigestNextAt <= now
 	digestClaim map[int64]time.Time
+	digestTok   map[int64]string
+	prefsCalls  []int64
+	viewPanic   bool
 	views       map[int64]model.DigestView
 
 	prefs map[int64]model.Prefs
@@ -49,6 +52,7 @@ type fakeBackend struct {
 
 	claimErr   error
 	prefsErr   error
+	viewErr    error
 	sentErrFor map[int64]error
 }
 
@@ -57,6 +61,7 @@ func newFakeBackend(clk clock.Clock) *fakeBackend {
 		clk:         clk,
 		claimTTL:    2 * time.Minute,
 		digestClaim: map[int64]time.Time{},
+		digestTok:   map[int64]string{},
 		views:       map[int64]model.DigestView{},
 		prefs:       map[int64]model.Prefs{},
 		sent:        map[int64]int{},
@@ -146,7 +151,10 @@ func (f *fakeBackend) held(r model.Reminder) *fakeRow {
 	return row
 }
 
-func (f *fakeBackend) ReminderSent(_ context.Context, id int64, _ int, _ time.Time) error {
+func (f *fakeBackend) ReminderSent(ctx context.Context, id int64, _ int, _ time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.sentErrFor[id]; err != nil {
@@ -193,14 +201,24 @@ func (f *fakeBackend) ClaimDigests(_ context.Context, now time.Time) ([]model.Ch
 			continue
 		}
 		f.digestClaim[c.ID] = now.Add(f.claimTTL)
+		f.nextTok++
+		c.DigestClaimToken = fmt.Sprintf("dtok%d", f.nextTok)
+		f.digestTok[c.ID] = c.DigestClaimToken
 		out = append(out, c)
 	}
 	return out, nil
 }
 
-func (f *fakeBackend) DigestDone(_ context.Context, c model.Chat, _ time.Time) error {
+func (f *fakeBackend) DigestDone(ctx context.Context, c model.Chat, _ time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.digestTok[c.ID] != c.DigestClaimToken || c.DigestClaimToken == "" {
+		return nil // claim lost: no-op
+	}
+	f.digestTok[c.ID] = ""
 	f.digestsDone = append(f.digestsDone, c.ID)
 	for i := range f.chats {
 		if f.chats[i].ID == c.ID {
@@ -213,6 +231,12 @@ func (f *fakeBackend) DigestDone(_ context.Context, c model.Chat, _ time.Time) e
 func (f *fakeBackend) DigestView(_ context.Context, chatID int64, _ time.Time) (model.DigestView, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.viewErr != nil {
+		return model.DigestView{}, f.viewErr
+	}
+	if f.viewPanic {
+		panic("view boom")
+	}
 	return f.views[chatID], nil
 }
 
@@ -226,6 +250,7 @@ func (f *fakeBackend) MigrateChat(_ context.Context, oldID, newID int64) error {
 func (f *fakeBackend) Prefs(_ context.Context, userID int64, _ string) (model.Prefs, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.prefsCalls = append(f.prefsCalls, userID)
 	if f.prefsErr != nil {
 		return model.Prefs{}, f.prefsErr
 	}

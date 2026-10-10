@@ -3,7 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
-	"log/slog"
+	"runtime/debug"
 	"time"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
@@ -16,17 +16,28 @@ const (
 	housekeepInterval = time.Hour
 	digestMaxLate     = time.Hour
 	maxSendAttempts   = 3
+	minBackoff        = time.Second
+	writeTimeout      = 5 * time.Second
 )
 
 // Run loops until ctx is cancelled: Tick, then sleep until the next wakeup
-// (capped at maxSleep), or until Wake is called.
+// (capped at maxSleep), or until Wake is called. After a failed claim the
+// sleep has a floor that doubles up to maxSleep, so a broken database is not
+// hammered.
 func (s *Scheduler) Run(ctx context.Context) error {
+	var backoff time.Duration
 	for ctx.Err() == nil {
-		s.Tick(ctx)
+		failed := s.tick(ctx)
 		if ctx.Err() != nil {
 			break
 		}
 		d := s.sleepFor(ctx)
+		if failed {
+			backoff = min(max(backoff*2, minBackoff), s.maxSleep)
+			d = max(d, backoff)
+		} else {
+			backoff = 0
+		}
 		select {
 		case <-ctx.Done():
 		case <-s.wake:
@@ -50,33 +61,63 @@ func (s *Scheduler) sleepFor(ctx context.Context) time.Duration {
 }
 
 // Tick delivers everything due at clk.Now(). Exported for tests.
-func (s *Scheduler) Tick(ctx context.Context) {
-	s.tickReminders(ctx)
-	s.tickDigests(ctx)
+func (s *Scheduler) Tick(ctx context.Context) { s.tick(ctx) }
+
+// tick reports whether a claim call failed.
+func (s *Scheduler) tick(ctx context.Context) (claimFailed bool) {
+	f1 := s.tickReminders(ctx)
+	f2 := s.tickDigests(ctx)
 	s.housekeep(ctx)
+	return f1 || f2
 }
 
-func (s *Scheduler) tickReminders(ctx context.Context) {
+// budgetEnd is the last moment a node may keep waiting on Telegram for rows
+// claimed at claimedAt: half the claim TTL, so the claim is still ours.
+func (s *Scheduler) budgetEnd(claimedAt time.Time) time.Time {
+	return claimedAt.Add(s.claimTTL / 2)
+}
+
+// detached returns a context that survives cancellation of ctx for a short
+// time, so a message already sent can still be recorded during shutdown.
+func detached(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+}
+
+func (s *Scheduler) tickReminders(ctx context.Context) (claimFailed bool) {
 	for ctx.Err() == nil {
-		batch, err := s.b.ClaimReminders(ctx, s.clk.Now(), batchSize)
+		claimedAt := s.clk.Now()
+		batch, err := s.b.ClaimReminders(ctx, claimedAt, batchSize)
 		if err != nil {
 			s.log.Error("scheduler: claim reminders", "err", err)
-			return
+			return true
 		}
+		end := s.budgetEnd(claimedAt)
 		for _, dr := range batch {
 			if ctx.Err() != nil {
-				return
+				return false
 			}
-			s.deliverReminder(ctx, dr)
+			if !s.clk.Now().Before(end) {
+				// Out of budget: the rest stay claimed and expire for another node.
+				s.log.Warn("scheduler: claim budget spent, leaving rest of batch to expire")
+				return false
+			}
+			s.deliverReminder(ctx, dr, end)
 		}
 		if len(batch) < batchSize {
-			return
+			return false
 		}
 	}
+	return false
 }
 
-func (s *Scheduler) deliverReminder(ctx context.Context, dr model.DueReminder) {
+func (s *Scheduler) deliverReminder(ctx context.Context, dr model.DueReminder, end time.Time) {
 	log := s.log.With("reminder", dr.ID, "todo", dr.TodoID, "chat", dr.ChatID)
+	defer func() {
+		if p := recover(); p != nil {
+			log.Error("scheduler: panic delivering reminder", "panic", p, "stack", string(debug.Stack()))
+			s.fail(ctx, dr.Reminder, false)
+		}
+	}()
 	if dr.Todo.Status != model.TodoOpen {
 		if err := s.b.CancelReminder(ctx, dr.Reminder); err != nil {
 			log.Error("scheduler: cancel reminder", "err", err)
@@ -93,95 +134,135 @@ func (s *Scheduler) deliverReminder(ctx context.Context, dr model.DueReminder) {
 	late := now.Sub(dr.FireAt) > LateAfter
 	msg := ui.ReminderMsg(dr, prefs.Locale, prefs.TZ, now, late)
 
-	msgID, err := s.sendWithRetry(ctx, &dr, msg)
+	msgID, _, err := s.sendWithRetry(ctx, dr.ChatID, msg, end)
 	if err != nil {
+		if ctx.Err() != nil {
+			return // shutting down: let the claim expire
+		}
 		log.Warn("scheduler: send reminder", "err", err)
 		s.fail(ctx, dr.Reminder, tg.IsPermanent(err))
 		return
 	}
-	if err := s.b.ReminderSent(ctx, dr.ID, msgID, s.clk.Now()); err != nil {
+	wctx, cancel := detached(ctx)
+	defer cancel()
+	if err := s.b.ReminderSent(wctx, dr.ID, msgID, s.clk.Now()); err != nil {
 		// The claim will expire and the reminder is sent again (at-least-once).
 		log.Error("scheduler: mark reminder sent", "err", err)
 	}
 }
 
-// sendWithRetry sends msg to dr's chat, waiting out a short 429 and retrying
-// after a chat migration. dr.ChatID is updated on migration.
-func (s *Scheduler) sendWithRetry(ctx context.Context, dr *model.DueReminder, msg tg.OutMessage) (int, error) {
+// sendWithRetry sends msg, waiting out a 429 only while the wait ends before
+// end, and retrying after a chat migration. It returns the chat id the message
+// finally went to.
+func (s *Scheduler) sendWithRetry(ctx context.Context, chatID int64, msg tg.OutMessage, end time.Time) (int, int64, error) {
 	var lastErr error
 	for range maxSendAttempts {
-		id, err := s.send.Send(ctx, dr.ChatID, msg)
+		id, err := s.send.Send(ctx, chatID, msg)
 		if err == nil {
-			return id, nil
+			return id, chatID, nil
 		}
 		lastErr = err
 		var ae *tg.APIError
 		if !errors.As(err, &ae) {
-			return 0, err
+			return 0, chatID, err
 		}
 		switch {
 		case ae.MigrateTo != 0:
-			if merr := s.b.MigrateChat(ctx, dr.ChatID, ae.MigrateTo); merr != nil {
-				s.log.Error("scheduler: migrate chat", "old", dr.ChatID, "new", ae.MigrateTo, "err", merr)
-				return 0, err
+			if merr := s.b.MigrateChat(ctx, chatID, ae.MigrateTo); merr != nil {
+				s.log.Error("scheduler: migrate chat", "old", chatID, "new", ae.MigrateTo, "err", merr)
+				return 0, chatID, err
 			}
-			dr.ChatID = ae.MigrateTo
-		case ae.Code == 429 && ae.RetryAfter < s.claimTTL/2:
+			chatID = ae.MigrateTo
+		case ae.Code == 429 && s.clk.Now().Add(ae.RetryAfter).Before(end):
 			select {
 			case <-ctx.Done():
-				return 0, ctx.Err()
+				return 0, chatID, ctx.Err()
 			case <-s.clk.After(ae.RetryAfter):
 			}
 		default:
-			return 0, err
+			return 0, chatID, err
 		}
 	}
-	return 0, lastErr
+	return 0, chatID, lastErr
 }
 
 func (s *Scheduler) fail(ctx context.Context, r model.Reminder, permanent bool) {
+	if ctx.Err() != nil {
+		return
+	}
 	if err := s.b.ReminderFailed(ctx, r, s.clk.Now(), permanent); err != nil {
 		s.log.Error("scheduler: mark reminder failed", "reminder", r.ID, "err", err)
 	}
 }
 
-func (s *Scheduler) tickDigests(ctx context.Context) {
-	chats, err := s.b.ClaimDigests(ctx, s.clk.Now())
+func (s *Scheduler) tickDigests(ctx context.Context) (claimFailed bool) {
+	claimedAt := s.clk.Now()
+	chats, err := s.b.ClaimDigests(ctx, claimedAt)
 	if err != nil {
 		s.log.Error("scheduler: claim digests", "err", err)
-		return
+		return true
 	}
+	end := s.budgetEnd(claimedAt)
 	for _, c := range chats {
 		if ctx.Err() != nil {
-			return
+			return false
 		}
-		s.deliverDigest(ctx, c)
+		if !s.clk.Now().Before(end) {
+			s.log.Warn("scheduler: claim budget spent, leaving rest of digests to expire")
+			return false
+		}
+		s.deliverDigest(ctx, c, end)
 	}
+	return false
 }
 
-func (s *Scheduler) deliverDigest(ctx context.Context, c model.Chat) {
+// deliverDigest sends a chat's digest. DigestDone is called after a success,
+// an empty view, a permanent error or an over-1h skip. On a transient error
+// the claim is left to expire so any node retries within the lateness window.
+func (s *Scheduler) deliverDigest(ctx context.Context, c model.Chat, end time.Time) {
 	log := s.log.With("chat", c.ID)
+	done := func() {
+		wctx, cancel := detached(ctx)
+		defer cancel()
+		if err := s.b.DigestDone(wctx, c, s.clk.Now()); err != nil {
+			log.Error("scheduler: digest done", "err", err)
+		}
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			log.Error("scheduler: panic delivering digest", "panic", p, "stack", string(debug.Stack()))
+			done()
+		}
+	}()
 	now := s.clk.Now()
-	if c.DigestNextAt == nil || now.Sub(*c.DigestNextAt) <= digestMaxLate {
-		s.sendDigest(ctx, c, now, log)
+	if c.DigestNextAt != nil && now.Sub(*c.DigestNextAt) > digestMaxLate {
+		done()
+		return
 	}
-	if err := s.b.DigestDone(ctx, c, s.clk.Now()); err != nil {
-		log.Error("scheduler: digest done", "err", err)
-	}
-}
-
-func (s *Scheduler) sendDigest(ctx context.Context, c model.Chat, now time.Time, log *slog.Logger) {
 	v, err := s.b.DigestView(ctx, c.ID, now)
 	if err != nil {
 		log.Error("scheduler: digest view", "err", err)
 		return
 	}
 	if len(v.Overdue) == 0 && len(v.Today) == 0 && v.NoDateCount == 0 {
+		done()
 		return
 	}
-	if _, err := s.send.Send(ctx, c.ID, ui.Digest(v, now)); err != nil {
-		log.Warn("scheduler: send digest", "err", err)
+	_, chatID, err := s.sendWithRetry(ctx, c.ID, ui.Digest(v, now), end)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		if tg.IsPermanent(err) {
+			log.Warn("scheduler: send digest (permanent)", "err", err)
+			done()
+			return
+		}
+		log.Warn("scheduler: send digest, will retry", "err", err)
+		return
 	}
+	c.ID = chatID
+	done()
 }
 
 func (s *Scheduler) housekeep(ctx context.Context) {
