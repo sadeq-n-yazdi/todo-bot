@@ -44,8 +44,10 @@ func Register(scheme string, o Opener) {
 //	mysql://u:p@h:3306/db?tls=true
 //
 // The sqlite provider (registered by #25) rejects a non-empty host, so
-// "sqlite://rel/x.db" is an error rather than host "rel". Build URLs from
-// paths with url.URL{Scheme: "sqlite", Path: p}.String().
+// "sqlite://rel/x.db" is an error rather than host "rel". To build a URL
+// from a file path use url.URL{Scheme: "sqlite", Path: p} for an absolute p
+// and url.URL{Scheme: "sqlite", Opaque: p} for a relative one (Path with a
+// relative p would render as "sqlite://p", i.e. a host).
 func Open(ctx context.Context, rawURL string) (Store, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
