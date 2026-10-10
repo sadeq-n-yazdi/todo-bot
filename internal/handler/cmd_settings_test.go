@@ -161,7 +161,7 @@ func TestCmdRemindByNumber(t *testing.T) {
 		t.Fatalf("remindAt = %v", hh.svc.remindAt)
 	}
 
-	hh.private("/remind 1 yesterday 09:00")
+	hh.private("/remind 1 today 9am")
 	hh.private("/remind 9 tomorrow 18:00")
 	if len(hh.svc.remindAt) != 1 {
 		t.Fatal("past time / missing item must not create reminders")
@@ -278,5 +278,20 @@ func TestCmdRemindServiceEmptyText(t *testing.T) {
 	}
 	if len(hh.svc.todos) != 0 {
 		t.Fatal("no item expected")
+	}
+}
+
+func TestCmdRemindPastTimeBothForms(t *testing.T) {
+	hh := newHarness12(t)
+	hh.svc.addTodo(1, "call mom")
+	for _, in := range []string{"/remind 1 today 9am", "/remind pay rent today 9am"} {
+		hh.fs.Reset()
+		hh.private(in)
+		if got := hh.last().Msg.Text; got != i18n.Default("en").T("settings.remind.past") {
+			t.Errorf("%s: got %q", in, got)
+		}
+	}
+	if len(hh.svc.todos) != 1 || len(hh.svc.remindAt) != 0 {
+		t.Fatal("nothing may be created")
 	}
 }

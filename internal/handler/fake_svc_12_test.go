@@ -148,6 +148,9 @@ func (f *fakeSvc12) AddTodo(_ context.Context, a service.Actor, r nlparse.Result
 	if f.emptyText != "" && r.Text == f.emptyText {
 		return model.Todo{}, service.ErrEmptyText
 	}
+	if r.Due != nil && r.Due.Before(f.clk.Now()) {
+		return model.Todo{}, service.ErrInPast
+	}
 	td := f.addTodo(a.ChatID, r.Text)
 	f.mu.Lock()
 	defer f.mu.Unlock()

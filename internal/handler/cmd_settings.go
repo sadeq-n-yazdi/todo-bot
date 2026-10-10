@@ -51,6 +51,9 @@ func (h *Handler) cmdRemind(ctx context.Context, m *tg.Message, r req, args stri
 	if errors.Is(err, service.ErrEmptyText) {
 		return h.say(ctx, m, lc.T("settings.remind.empty"))
 	}
+	if errors.Is(err, service.ErrInPast) {
+		return h.say(ctx, m, lc.T("settings.remind.past"))
+	}
 	if err != nil {
 		return err
 	}
