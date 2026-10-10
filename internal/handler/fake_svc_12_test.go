@@ -367,6 +367,20 @@ func (f *fakeSvc12) MarkUpdate(_ context.Context, id int64) (bool, error) {
 	return true, nil
 }
 
+// Assignment (#58): not used by the #12 tests.
+
+func (f *fakeSvc12) NoteUsername(context.Context, int64, string) error { return nil }
+
+func (f *fakeSvc12) UserByUsername(context.Context, string) (model.User, error) {
+	return model.User{}, service.ErrNotFound
+}
+
+func (f *fakeSvc12) AddTodoFor(ctx context.Context, a service.Actor, _ int64, r nlparse.Result) (model.Todo, error) {
+	return f.AddTodo(ctx, a, r)
+}
+
+func (f *fakeSvc12) ListAssigned(context.Context, int64) ([]model.Todo, error) { return nil, nil }
+
 // harness12 wires a Handler to a fakeSvc12 and a FakeSender.
 type harness12 struct {
 	t   *testing.T

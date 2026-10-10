@@ -86,6 +86,32 @@ type Service interface {
 	// already handled (re-delivery after a poller failover or webhook retry).
 	// Called only by handler.Handle, the single dedupe gate.
 	MarkUpdate(ctx context.Context, updateID int64) (first bool, err error)
+
+	// ---- Assignment (#58, ARCHITECTURE §11) ----
+	//
+	// Item actions (Todo, Complete, Delete, Edit, Remind, Snooze,
+	// AckReminder) are allowed when the item belongs to a.ChatID OR
+	// a.UserID is its AssigneeID; otherwise ErrForeignChat.
+
+	// NoteUsername records username (Telegram @username without "@"; ""
+	// = none) as userID's, creating the user with defaults if needed. It
+	// writes only when the stored name differs (compared with the database
+	// row, never an in-memory cache); a name taken over from another
+	// account is cleared from that account. The handler calls it for every
+	// update from an allowlisted user.
+	NoteUsername(ctx context.Context, userID int64, username string) error
+	// UserByUsername resolves a @username (case-insensitive, leading "@"
+	// optional) to a user who has talked to the bot; ErrNotFound if none.
+	// It does not check the allowlist: the handler does.
+	UserByUsername(ctx context.Context, username string) (model.User, error)
+	// AddTodoFor is AddTodo with an assignee. assigneeID 0, or the
+	// assignee's own private chat (assigneeID == a.ChatID), stores no
+	// assignee. ErrNotFound if the assignee does not exist.
+	AddTodoFor(ctx context.Context, a Actor, assigneeID int64, r nlparse.Result) (model.Todo, error)
+	// ListAssigned returns the open items assigned to userID that live in
+	// other chats than userID's private chat, ordered by due time (undated
+	// last). /list in a private chat shows them under "Assigned to me".
+	ListAssigned(ctx context.Context, userID int64) ([]model.Todo, error)
 }
 
 // Config holds service defaults.
