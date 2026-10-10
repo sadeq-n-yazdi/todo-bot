@@ -87,6 +87,16 @@ func TestPanicRecovered(t *testing.T) {
 
 type prefsPanics struct{ service.Service }
 
+// NoteUsername is called by newReq on every update (#58); without these
+// methods the call would panic on the nil embedded interface.
+func (prefsOnly) NoteUsername(context.Context, int64, string) error { return nil }
+
+func (prefsOnly) UserByUsername(context.Context, string) (model.User, error) {
+	return model.User{}, service.ErrNotFound
+}
+
+func (prefsPanics) NoteUsername(context.Context, int64, string) error { return nil }
+
 // dedupeSvc records MarkUpdate calls; seen ids return first=false.
 type dedupeSvc struct {
 	prefsOnly

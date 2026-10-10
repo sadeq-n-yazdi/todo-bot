@@ -70,7 +70,7 @@ func (h *Handler) listView(ctx context.Context, chatID int64, r req, page int, s
 			return tg.OutMessage{}, err
 		}
 	}
-	out := ui.TodoList(ts, r.Prefs.Locale, tzOf(r), h.Clock.Now(), page, pages)
+	out := h.renderList(ctx, r, chatID, ts, page, pages)
 	if status != "" {
 		out.Text = status + "\n\n" + out.Text
 	}
@@ -101,6 +101,7 @@ func (h *Handler) actionCallback(ctx context.Context, cb *tg.Callback, r req, ac
 		} else if err != nil {
 			return "", err
 		}
+		h.notifyDid(ctx, r, td)
 		h.editCallbackMsg(ctx, cb, tg.OutMessage{Text: lc.T("settings.cb.ack", echo(td.Text))})
 		return "", nil
 	case ui.ActSnooze:
@@ -125,6 +126,7 @@ func (h *Handler) actionCallback(ctx context.Context, cb *tg.Callback, r req, ac
 		} else if err != nil {
 			return "", err
 		}
+		h.notifyDid(ctx, r, done)
 		return "", h.showList(ctx, cb, r, 0, lc.T("settings.cb.done", echo(done.Text)))
 	case ui.ActDeleteConfirm:
 		err := h.Svc.Delete(ctx, r.Actor, act.ID)
