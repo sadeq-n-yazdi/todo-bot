@@ -123,13 +123,16 @@ func Parse(s string) (Rule, error) {
 			return Rule{}, invalid("interval %q must end in d", f[1])
 		}
 		v, e := strconv.Atoi(n)
-		if e != nil || v < 1 {
-			return Rule{}, invalid("interval %q must be >= 1", f[1])
+		if e != nil || v < 1 || v > 36500 {
+			return Rule{}, invalid("interval %q must be in 1..36500", f[1])
 		}
 		r.Interval = v
 		t, e := time.Parse("2006-01-02", f[2])
 		if e != nil {
 			return Rule{}, invalid("anchor %q is not YYYY-MM-DD", f[2])
+		}
+		if t.Year() < 1900 || t.Year() > 2200 {
+			return Rule{}, invalid("anchor year %d not in 1900..2200", t.Year())
 		}
 		r.Anchor = calendar.Date{Year: t.Year(), Month: int(t.Month()), Day: t.Day()}
 		r.Hour, r.Minute, err = parseClock(f[3])
@@ -215,7 +218,7 @@ func (r Rule) Next(after time.Time, loc *time.Location) time.Time {
 		anchor := time.Date(r.Anchor.Year, time.Month(r.Anchor.Month), r.Anchor.Day, 0, 0, 0, 0, time.UTC)
 		day := anchor
 		if start.After(anchor) {
-			diff := int(start.Sub(anchor) / (24 * time.Hour)) // UTC dates: exact multiple of 24h
+			diff := int(start.Unix()/86400 - anchor.Unix()/86400) // UTC-midnight dates: whole days
 			k := (diff + r.Interval - 1) / r.Interval
 			day = anchor.AddDate(0, 0, k*r.Interval)
 		}

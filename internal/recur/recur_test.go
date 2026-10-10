@@ -64,7 +64,8 @@ func TestParseInvalid(t *testing.T) {
 		"monthly 0 10:00", "monthly 32 10:00", "monthly x 10:00", "monthly 5 10:00 hijri",
 		"monthly 5 10:00 gregorian", "monthly 5 25:00 jalali",
 		"every 0d 2026-10-10 09:00", "every -1d 2026-10-10 09:00", "every 3 2026-10-10 09:00",
-		"every 3d 2026-13-10 09:00", "every 3d 2026-10-10", "every 3d 2026-02-30 09:00",
+		"every 3d 2026-13-10 09:00", "every 36501d 2026-10-10 09:00", "every 99999999999999999999d 2026-10-10 09:00",
+		"every 3d 1899-12-31 09:00", "every 3d 2201-01-01 09:00", "every 3d 2026-10-10", "every 3d 2026-02-30 09:00",
 	} {
 		_, err := Parse(s)
 		if !errors.Is(err, ErrInvalid) {
@@ -165,6 +166,8 @@ func TestNextDST(t *testing.T) {
 		{"Berlin spring gap", "daily 02:30", berlin, at(berlin, 2026, 3, 28, 2, 30), at(berlin, 2026, 3, 29, 3, 30)},
 		{"Berlin fall daily", "daily 08:00", berlin, at(berlin, 2026, 10, 24, 8, 0), at(berlin, 2026, 10, 25, 8, 0)},
 		{"Berlin weekly across fall", "weekly sun 08:00", berlin, at(berlin, 2026, 10, 18, 8, 0), at(berlin, 2026, 10, 25, 8, 0)},
+		{"NY every-N across fall", "every 2d 2026-10-30 09:00", ny, at(ny, 2026, 10, 30, 9, 0), at(ny, 2026, 11, 1, 9, 0)},
+		{"far-past anchor", "every 7d 1950-01-02 09:00", ny, at(ny, 2026, 10, 10, 10, 0), at(ny, 2026, 10, 12, 9, 0)},
 		{"NY every-N across spring", "every 2d 2026-03-06 09:00", ny, at(ny, 2026, 3, 6, 9, 0), at(ny, 2026, 3, 8, 9, 0)},
 		{"Berlin monthly across fall", "monthly 25 08:00", berlin, at(berlin, 2026, 9, 25, 8, 0), at(berlin, 2026, 10, 25, 8, 0)},
 	}
