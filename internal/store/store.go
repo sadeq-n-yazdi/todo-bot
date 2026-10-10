@@ -1,5 +1,8 @@
-// Package store defines the persistence contract. The only implementation is
-// internal/store/sqlite. All times are passed and returned in UTC.
+// Package store defines the persistence contract and the provider registry.
+// Providers (internal/store/sqlite; postgres and mysql in v0.2) register an
+// Opener for their URL scheme in init(). All times are passed and returned in
+// UTC. Several processes may share one database (multi-node): row claims,
+// the lease, MarkUpdate and TakePrompt are the coordination primitives.
 package store
 
 import (
@@ -42,22 +45,69 @@ type Store interface {
 	// InsertReminder assigns r.ID.
 	InsertReminder(ctx context.Context, r *model.Reminder) error
 	GetReminder(ctx context.Context, id int64) (model.Reminder, error)
+	// UpdateReminder overwrites the row unconditionally and clears its claim.
+	// Use it for user actions (snooze, re-time); the scheduler path uses the
+	// conditional RescheduleClaimed / MarkReminderSent instead.
 	UpdateReminder(ctx context.Context, r model.Reminder) error
 	// CancelPending cancels pending reminders of a todo; no kinds = all kinds.
 	CancelPending(ctx context.Context, todoID int64, kinds ...model.ReminderKind) error
-	// DueReminders returns pending reminders with fire_at <= now, oldest first.
-	DueReminders(ctx context.Context, now time.Time, limit int) ([]model.DueReminder, error)
-	// NextReminderAt returns the earliest pending fire_at, ok=false if none.
+	// ClaimReminders atomically (one statement, or one transaction) claims up
+	// to limit pending reminders with fire_at <= now that are unclaimed or
+	// whose claim expired (claim_until <= now), stamping claim_token=token and
+	// claim_until=until, and returns them oldest first with ClaimToken set.
+	// token must be unique per call (providers may read rows back by token).
+	// A claimed row is invisible to other claimers until claim_until.
+	ClaimReminders(ctx context.Context, token string, now, until time.Time, limit int) ([]model.DueReminder, error)
+	// RescheduleClaimed writes r.FireAt, r.Attempts and r.State and clears the
+	// claim, but only WHERE state='pending' AND claim_token=r.ClaimToken.
+	// ok=false means the claim was lost (expired and taken by another node,
+	// or the reminder was already sent): the caller must not retry. Used for
+	// failure backoff, permanent failure and cancelling.
+	RescheduleClaimed(ctx context.Context, r model.Reminder) (ok bool, err error)
+	// MarkReminderSent is the conditional pending->sent transition (sets
+	// msg_id, sent_at, clears the claim). ok=false if it was no longer pending.
+	MarkReminderSent(ctx context.Context, id int64, msgID int, at time.Time) (ok bool, err error)
+	// NextReminderAt returns the earliest time a pending reminder becomes
+	// claimable: MIN(max(fire_at, claim_until)). ok=false if none.
 	NextReminderAt(ctx context.Context) (t time.Time, ok bool, err error)
 
-	// DueDigests returns chats with digest_next_at <= now.
-	DueDigests(ctx context.Context, now time.Time) ([]model.Chat, error)
+	// ClaimDigests claims chats with digest_next_at <= now whose digest claim
+	// is free or expired, like ClaimReminders (DigestClaimToken set; token
+	// unique per call). SetDigest clears the claim.
+	ClaimDigests(ctx context.Context, token string, now, until time.Time, limit int) ([]model.Chat, error)
+	// AdvanceDigest sets digest_next_at=next and clears the claim, only WHERE
+	// digest_claim_token=token. ok=false: the claim was lost.
+	AdvanceDigest(ctx context.Context, chatID int64, token string, next time.Time) (ok bool, err error)
+	// NextDigestAt is MIN(max(digest_next_at, digest_claim_until)).
 	NextDigestAt(ctx context.Context) (t time.Time, ok bool, err error)
 
-	// WithTx runs fn in a transaction. Inside fn use ONLY tx: the pool has a
-	// single connection, so using the outer Store deadlocks.
+	// AcquireLease takes or renews the named lease. It succeeds if the lease
+	// is missing, expired (until <= now) or held by holder, and then sets
+	// holder and until=now+ttl. Epoch is incremented on every acquisition
+	// that is not the renewal of a live lease by the same holder (a holder
+	// re-taking its own expired lease gets a new epoch too). It returns the
+	// row as it is afterwards, with a nil error also when another holder has
+	// it; the caller compares Holder. holder must be unique per process
+	// (lease uses NodeID+":"+random).
+	AcquireLease(ctx context.Context, name, holder string, now time.Time, ttl time.Duration) (model.Lease, error)
+	// ReleaseLease sets until to the Unix epoch (0) if holder holds the lease,
+	// so another node can take it immediately. No-op otherwise.
+	ReleaseLease(ctx context.Context, name, holder string) error
+
+	// PutPrompt stores (upserts on ChatID+MsgID) a pending force-reply prompt.
+	PutPrompt(ctx context.Context, p model.Prompt) error
+	// TakePrompt deletes and returns the prompt (chatID, msgID) if it belongs
+	// to userID and has not expired; exactly one concurrent caller wins.
+	// Missing, another user's (row kept), expired (row left for Purge) or
+	// lost to a concurrent caller -> ErrNotFound.
+	TakePrompt(ctx context.Context, chatID int64, msgID int, userID int64, now time.Time) (model.Prompt, error)
+	// MarkUpdate records a Telegram update_id; first=false if already seen.
+	MarkUpdate(ctx context.Context, updateID int64, now time.Time) (first bool, err error)
+	// Purge deletes expired prompts and update ids older than 48h.
+	Purge(ctx context.Context, now time.Time) error
+
+	// WithTx runs fn in a transaction. Inside fn use ONLY tx (with SQLite the
+	// pool has a single connection, so using the outer Store deadlocks).
 	WithTx(ctx context.Context, fn func(tx Store) error) error
-	// Backup writes a consistent copy of the database to path (VACUUM INTO).
-	Backup(ctx context.Context, path string) error
 	Close() error
 }

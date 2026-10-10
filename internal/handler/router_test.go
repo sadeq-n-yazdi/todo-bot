@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -83,3 +84,45 @@ func TestPanicRecovered(t *testing.T) {
 }
 
 type prefsPanics struct{ service.Service }
+
+// dedupeSvc records MarkUpdate calls; seen ids return first=false.
+type dedupeSvc struct {
+	prefsOnly
+	seen map[int64]bool
+	err  error
+}
+
+func (d *dedupeSvc) MarkUpdate(_ context.Context, id int64) (bool, error) {
+	if d.err != nil {
+		return false, d.err
+	}
+	if d.seen[id] {
+		return false, nil
+	}
+	d.seen[id] = true
+	return true, nil
+}
+
+func TestHandleDedupesUpdates(t *testing.T) {
+	fs := &tgtest.FakeSender{}
+	svc := &dedupeSvc{seen: map[int64]bool{}}
+	h := New(Deps{Svc: svc, Send: fs, Allowed: map[int64]bool{1: true}})
+	u := tg.Update{ID: 42, Message: &tg.Message{ChatID: 99, ChatKind: model.ChatPrivate, FromID: 99, Text: "/whoami"}}
+	for range 2 {
+		if err := h.Handle(context.Background(), u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(fs.Messages()); n != 1 {
+		t.Fatalf("replayed update handled %d times, want 1", n)
+	}
+
+	svc.err = errors.New("db down")
+	u.ID = 43
+	if err := h.Handle(context.Background(), u); err == nil {
+		t.Fatal("want error when the update cannot be recorded")
+	}
+	if n := len(fs.Messages()); n != 1 {
+		t.Fatalf("unrecorded update was acted on (%d messages)", n)
+	}
+}

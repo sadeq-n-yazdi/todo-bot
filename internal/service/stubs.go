@@ -61,19 +61,28 @@ func (s *Svc) MigrateChat(ctx context.Context, oldID, newID int64) error { retur
 func (s *Svc) NextWakeup(ctx context.Context) (time.Time, bool, error) {
 	return time.Time{}, false, errNotImplemented
 }
-func (s *Svc) DueReminders(ctx context.Context, now time.Time, limit int) ([]model.DueReminder, error) {
+func (s *Svc) ClaimReminders(ctx context.Context, now time.Time, limit int) ([]model.DueReminder, error) {
 	return nil, errNotImplemented
 }
 func (s *Svc) ReminderSent(ctx context.Context, id int64, msgID int, now time.Time) error {
 	return errNotImplemented
 }
-func (s *Svc) ReminderFailed(ctx context.Context, id int64, now time.Time, permanent bool) error {
+func (s *Svc) ReminderFailed(ctx context.Context, r model.Reminder, now time.Time, permanent bool) error {
 	return errNotImplemented
 }
-func (s *Svc) CancelReminder(ctx context.Context, id int64) error { return errNotImplemented }
-func (s *Svc) DueDigests(ctx context.Context, now time.Time) ([]model.Chat, error) {
+func (s *Svc) CancelReminder(ctx context.Context, r model.Reminder) error { return errNotImplemented }
+func (s *Svc) ClaimDigests(ctx context.Context, now time.Time) ([]model.Chat, error) {
 	return nil, errNotImplemented
 }
-func (s *Svc) DigestDone(ctx context.Context, chatID int64, now time.Time) error {
+func (s *Svc) DigestDone(ctx context.Context, c model.Chat, now time.Time) error {
 	return errNotImplemented
+}
+func (s *Svc) Housekeep(ctx context.Context, now time.Time) error { return errNotImplemented }
+
+func (s *Svc) PutPrompt(ctx context.Context, p model.Prompt) error { return errNotImplemented }
+func (s *Svc) TakePrompt(ctx context.Context, chatID int64, msgID int, userID int64) (model.Prompt, error) {
+	return model.Prompt{}, errNotImplemented
+}
+func (s *Svc) MarkUpdate(ctx context.Context, updateID int64) (bool, error) {
+	return false, errNotImplemented
 }

@@ -33,7 +33,6 @@ type Deps struct {
 // Handler dispatches updates. Handle is safe for concurrent use.
 type Handler struct {
 	Deps
-	prompts *prompts // pending ForceReply prompts (flows.go)
 }
 
 // New returns a Handler.
@@ -41,7 +40,7 @@ func New(d Deps) *Handler {
 	if d.Log == nil {
 		d.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Handler{Deps: d, prompts: newPrompts()}
+	return &Handler{Deps: d}
 }
 
 // req is the context every command, callback and flow receives.
@@ -71,19 +70,36 @@ var commands = map[string]cmdFunc{
 	"calendar": (*Handler).cmdCalendar,
 }
 
-// Handle processes one update. It never panics.
-func (h *Handler) Handle(ctx context.Context, u tg.Update) {
+// Handle processes one update and implements tg.Handler. It never panics.
+//
+// It is the single dedupe gate for every transport: an update whose ID was
+// already recorded (MarkUpdate) is dropped, so each update is acted on at
+// most once across nodes. It returns an error only when the update could not
+// be recorded; then nothing was done and the transport may redeliver it.
+func (h *Handler) Handle(ctx context.Context, u tg.Update) error {
 	defer func() {
 		if p := recover(); p != nil {
 			h.Log.Error("handler panic", "panic", p, "stack", string(debug.Stack()))
 		}
 	}()
+	if u.ID != 0 {
+		first, err := h.Svc.MarkUpdate(ctx, u.ID)
+		if err != nil {
+			h.Log.Error("mark update", "update", u.ID, "err", err)
+			return fmt.Errorf("handler: mark update %d: %w", u.ID, err)
+		}
+		if !first {
+			h.Log.Debug("duplicate update dropped", "update", u.ID)
+			return nil
+		}
+	}
 	switch {
 	case u.Callback != nil:
 		h.handleCallback(ctx, u.Callback)
 	case u.Message != nil:
 		h.handleMessage(ctx, u.Message)
 	}
+	return nil
 }
 
 func (h *Handler) handleCallback(ctx context.Context, cb *tg.Callback) {
