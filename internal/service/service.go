@@ -55,8 +55,9 @@ type Service interface {
 	List(ctx context.Context, chatID int64, page int) ([]model.Todo, int, error)
 	ByNum(ctx context.Context, chatID int64, num int) (model.Todo, error)
 	// Todo returns the item with the global id, including done items. It
-	// returns ErrNotFound if it is missing or deleted and ErrForeignChat if its ChatID
-	// differs from a.ChatID.
+	// returns ErrNotFound if it is missing or deleted and ErrForeignChat
+	// unless its ChatID equals a.ChatID or a.UserID is its assignee acting
+	// from their own private chat (a.ChatID == a.UserID).
 	Todo(ctx context.Context, a Actor, id int64) (model.Todo, error)
 	Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, error)
 	Delete(ctx context.Context, a Actor, todoID int64) error
@@ -89,15 +90,17 @@ type Service interface {
 
 	// ---- Assignment (#58, ARCHITECTURE §11) ----
 	//
-	// The methods below are stubs until #58 part 2 implements them. That
-	// PR also widens the rule for item actions (Todo, Complete, Delete,
-	// Edit, Remind, Snooze, AckReminder): they will be allowed when the
-	// item belongs to a.ChatID OR a.UserID is its AssigneeID, and
-	// otherwise fail with ErrForeignChat. Until then only the chat check
-	// applies.
+	// Item actions (Todo, Complete, Delete, Edit, Remind, Snooze,
+	// AckReminder) are allowed when the item belongs to a.ChatID, OR
+	// a.UserID is its AssigneeID and the actor is in their own private
+	// chat (a.ChatID == a.UserID); otherwise they fail with
+	// ErrForeignChat. For Snooze and AckReminder the check is made on the
+	// reminder's todo, not on the reminder's chat.
 
 	// NoteUsername records username (Telegram @username without "@"; ""
-	// = none) as userID's, creating the user with defaults if needed. It
+	// = none) as userID's. It does nothing if the user does not exist yet
+	// (the next update records the name), so it never fixes a first-time
+	// user's language before Prefs applies it. It
 	// writes only when the stored name differs (compared with the database
 	// row, never an in-memory cache); a name taken over from another
 	// account is cleared from that account. It calls store.SetUsername on
