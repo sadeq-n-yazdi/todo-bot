@@ -23,7 +23,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 10 | 3 | Scheduler | ✅ merged | #41 |
 | 11 | 3 | Handlers: todo commands | ✅ merged | #43 |
 | 12 | 3 | Handlers: callbacks, prompts, settings | 🔍 in review (fixes pushed) | #44 |
-| 13 | 4 | Main wiring | ⏳ todo | |
+| 13 | 4 | Main wiring | 🔨 in progress | |
 | 14 | 4 | End-to-end tests | ⏳ todo | |
 | 15 | 4 | User documentation (en + fa) | ⏳ todo | |
 | 16 | 5 | Release v0.1.0 and deploy to vps00 | ⏳ todo | |
