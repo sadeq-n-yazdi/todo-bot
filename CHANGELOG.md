@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Service layer (#8):
+  - todos, reminders, recurrence in the user's zone and calendar (DST- and Jalali-safe), snooze, digests and preferences;
+  - every write after a claim is conditional on the claim token;
+  - edits and preference changes are done inside a single transaction.
 - A storage layer that is ready for several nodes (#25, #26):
   - `sqlstore` with per-database dialects, and SQLite ported onto it;
   - atomic claims for reminders and digests, a leader lease, update dedupe and persisted prompts;

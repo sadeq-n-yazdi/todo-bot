@@ -14,15 +14,15 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 5 | 1 | Natural-language parser (en + fa, Jalali) | ✅ merged | #22 |
 | 25 | 2 | sqlstore + Dialect; port SQLite; multi-node methods | ✅ merged | #42 |
 | 26 | 2 | storetest conformance suite | ✅ merged | #42 |
-| 27 | 2 | Leader lease loop | 🔨 in progress | |
+| 27 | 2 | Leader lease loop | 🔍 in review | #47 |
 | 6 | 2 | Telegram adapter | ✅ merged | #40 |
 | 7 | 2 | UI rendering and callback codec | ✅ merged | #20 |
-| 8 | 2 | Service layer | 🔨 in progress | |
+| 8 | 2 | Service layer | ✅ merged | #48 |
 | 9 | 2 | Deployment tooling | ✅ merged | #37 |
 | 17 | 2 | App and bot icon | ✅ merged | #23 |
 | 10 | 3 | Scheduler | ✅ merged | #41 |
 | 11 | 3 | Handlers: todo commands | ✅ merged | #43 |
-| 12 | 3 | Handlers: callbacks, prompts, settings | 🔍 in review | #44 |
+| 12 | 3 | Handlers: callbacks, prompts, settings | 🔍 in review (fixes pushed) | #44 |
 | 13 | 4 | Main wiring | ⏳ todo | |
 | 14 | 4 | End-to-end tests | ⏳ todo | |
 | 15 | 4 | User documentation (en + fa) | ⏳ todo | |
