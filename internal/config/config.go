@@ -4,9 +4,18 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
+	"os"
+	"path"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 )
 
 // Config is the validated configuration.
@@ -51,11 +60,166 @@ const (
 	ModeWebhook = "webhook"
 )
 
-var errNotImplemented = errors.New("config: not implemented")
+// hostname is os.Hostname; tests replace it.
+var hostname = os.Hostname
 
-// Load reads configuration through getenv (os.Getenv in production).
+var webhookSecretRE = regexp.MustCompile(`^[A-Za-z0-9_-]{16,256}$`)
+
+// Load reads configuration through getenv (os.Getenv in production). It
+// reports every problem at once. Error messages name the variable and the
+// rule but never echo the token, a URL's userinfo or the webhook secret.
 func Load(getenv func(string) string) (Config, error) {
-	return Config{}, errNotImplemented // TODO(#2)
+	var errs []error
+	bad := func(format string, a ...any) { errs = append(errs, fmt.Errorf(format, a...)) }
+	get := func(k string) string { return strings.TrimSpace(getenv(k)) }
+
+	c := Config{}
+
+	if c.Token = get("TELEGRAM_TOKEN"); c.Token == "" {
+		bad("TELEGRAM_TOKEN is required")
+	}
+
+	c.AllowedUsers = map[int64]bool{}
+	if raw := get("TODO_ALLOWED_USERS"); raw == "" {
+		bad("TODO_ALLOWED_USERS is required (comma-separated user ids)")
+	} else {
+		for _, part := range strings.Split(raw, ",") {
+			id, err := strconv.ParseInt(strings.TrimSpace(i18n.NormalizeDigits(part)), 10, 64)
+			if err != nil {
+				bad("TODO_ALLOWED_USERS: entry %q is not an integer user id", part)
+				continue
+			}
+			c.AllowedUsers[id] = true
+		}
+	}
+
+	c.DefaultTZ = time.UTC
+	if tz := get("TODO_DEFAULT_TZ"); tz != "" {
+		loc, err := time.LoadLocation(tz)
+		if err != nil {
+			bad("TODO_DEFAULT_TZ: unknown time zone %q", tz)
+		} else {
+			c.DefaultTZ = loc
+		}
+	}
+
+	c.DefaultHour, c.DefaultMinute = 9, 0
+	if t := get("TODO_DEFAULT_TIME"); t != "" {
+		h, m, ok := parseHHMM(i18n.NormalizeDigits(t))
+		if !ok {
+			bad("TODO_DEFAULT_TIME: %q is not a valid HH:MM time", t)
+		} else {
+			c.DefaultHour, c.DefaultMinute = h, m
+		}
+	}
+
+	c.LogLevel = slog.LevelInfo
+	if l := get("TODO_LOG_LEVEL"); l != "" {
+		if err := c.LogLevel.UnmarshalText([]byte(l)); err != nil {
+			bad("TODO_LOG_LEVEL: %q is not one of debug, info, warn, error", l)
+		}
+	}
+
+	c.DBURL = dbURL(get)
+	if u, err := url.Parse(c.DBURL); err != nil || u.Scheme == "" {
+		// Never include the raw value: it may carry a password.
+		bad("TODO_DB_URL: not a valid URL with a scheme (e.g. sqlite:///var/lib/todo-bot/todo.db)")
+	}
+
+	c.NodeID = get("TODO_NODE_ID")
+	if c.NodeID == "" {
+		h, err := hostname()
+		if err != nil || h == "" {
+			bad("TODO_NODE_ID is unset and the hostname is unavailable")
+		}
+		c.NodeID = h
+	}
+
+	c.Mode = ModePolling
+	if m := get("TODO_MODE"); m != "" {
+		c.Mode = m
+	}
+	if c.Mode != ModePolling && c.Mode != ModeWebhook {
+		bad("TODO_MODE: %q is not %q or %q", c.Mode, ModePolling, ModeWebhook)
+	}
+
+	c.HTTPAddr = get("TODO_HTTP_ADDR")
+	c.WebhookURL = get("TODO_WEBHOOK_URL")
+	c.WebhookSecret = get("TODO_WEBHOOK_SECRET")
+	if c.Mode == ModeWebhook {
+		if u, err := url.Parse(c.WebhookURL); c.WebhookURL == "" || err != nil || u.Scheme != "https" || u.Host == "" {
+			bad("TODO_WEBHOOK_URL: an https URL with a host is required in webhook mode")
+		}
+		if !webhookSecretRE.MatchString(c.WebhookSecret) {
+			bad("TODO_WEBHOOK_SECRET: 16-256 characters from [A-Za-z0-9_-] required in webhook mode")
+		}
+		if c.HTTPAddr == "" {
+			bad("TODO_HTTP_ADDR is required in webhook mode")
+		}
+	}
+
+	c.LeaseTTL = duration(get, "TODO_LEASE_TTL", 30*time.Second, bad)
+	c.ClaimTTL = duration(get, "TODO_CLAIM_TTL", 2*time.Minute, bad)
+	c.SchedMaxSleep = duration(get, "TODO_SCHED_MAX_SLEEP", 5*time.Minute, bad)
+
+	if err := errors.Join(errs...); err != nil {
+		return Config{}, err
+	}
+	return c, nil
+}
+
+// dbURL applies the TODO_DB_URL fallback chain.
+func dbURL(get func(string) string) string {
+	if v := get("TODO_DB_URL"); v != "" {
+		return v
+	}
+	p := get("TODO_DB_PATH")
+	if p == "" {
+		if sd := get("STATE_DIRECTORY"); sd != "" {
+			first, _, _ := strings.Cut(sd, ":")
+			p = path.Join(first, "todo.db")
+		}
+	}
+	if p == "" {
+		p = "todo.db"
+	}
+	return sqliteURL(p)
+}
+
+// sqliteURL builds a sqlite URL from a file path: sqlite:///abs or sqlite:rel.
+func sqliteURL(p string) string {
+	if strings.HasPrefix(p, "/") {
+		u := url.URL{Scheme: "sqlite", Path: p}
+		return u.String()
+	}
+	u := url.URL{Scheme: "sqlite", Opaque: p}
+	return u.String()
+}
+
+func parseHHMM(s string) (h, m int, ok bool) {
+	hs, ms, found := strings.Cut(s, ":")
+	if !found || len(hs) == 0 || len(hs) > 2 || len(ms) != 2 {
+		return 0, 0, false
+	}
+	h, err1 := strconv.Atoi(hs)
+	m, err2 := strconv.Atoi(ms)
+	if err1 != nil || err2 != nil || h < 0 || h > 23 || m < 0 || m > 59 {
+		return 0, 0, false
+	}
+	return h, m, true
+}
+
+func duration(get func(string) string, key string, def time.Duration, bad func(string, ...any)) time.Duration {
+	raw := get(key)
+	if raw == "" {
+		return def
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		bad("%s: %q is not a positive duration (e.g. 30s, 2m)", key, raw)
+		return def
+	}
+	return d
 }
 
 // NewLogger returns a text slog.Logger writing to w at cfg.LogLevel.
