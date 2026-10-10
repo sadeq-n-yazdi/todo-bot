@@ -25,6 +25,10 @@ type mockTelegram struct {
 
 	// onSend, if set, runs inside sendMessage before it answers.
 	onSend func(c tgCall)
+
+	// blocked lists chats for which sendMessage answers 403 "bot was blocked
+	// by the user", like Telegram does for a user who blocked the bot.
+	blocked map[int64]bool
 }
 
 // tgCall is one recorded Bot API call.
@@ -78,6 +82,14 @@ func (m *mockTelegram) serve(w http.ResponseWriter, r *http.Request) {
 			onSend(c)
 		}
 		m.mu.Lock()
+		isBlocked := m.blocked[c.ChatID]
+		m.mu.Unlock()
+		if isBlocked {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":403,"description":"Forbidden: bot was blocked by the user"}`))
+			return
+		}
+		m.mu.Lock()
 		m.nextMsg++
 		id := m.nextMsg
 		m.mu.Unlock()
@@ -86,6 +98,16 @@ func (m *mockTelegram) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
 	}
+}
+
+// blockChat makes sendMessage to chat fail with 403.
+func (m *mockTelegram) blockChat(chat int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.blocked == nil {
+		m.blocked = map[int64]bool{}
+	}
+	m.blocked[chat] = true
 }
 
 func (m *mockTelegram) pending(offset int64) []string {
