@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- End-to-end tests (#14), run on the real stack with a fake clock. They cover:
+  - snooze and Done, the DST change, Farsi/Jalali monthly items, and catch-up after downtime;
+  - digests, group chats and restart;
+  - two nodes sharing one database, with exactly-once delivery and failover after both a clean stop and a crash.
 - Inline buttons and settings (#12):
   - list buttons (✅ ✏️ ⏰ 🗑) with paging, and reminder buttons (Done, 10m, 1h, Tomorrow);
   - reply prompts for edit and remind;
