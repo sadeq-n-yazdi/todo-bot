@@ -12,6 +12,9 @@ func Encode(a Action) string {
 	if !knownKind(a.Kind) {
 		return ""
 	}
+	if a.Kind == ActPage {
+		a.ID = 0
+	}
 	s := string(a.Kind) + ":" + strconv.FormatInt(a.ID, 10)
 	if (a.Kind == ActSnooze || a.Kind == ActPage) && validArg(a.Kind, a.Arg) {
 		s += ":" + a.Arg
@@ -49,6 +52,9 @@ func Decode(s string) (Action, error) {
 	}
 	id, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil || strconv.FormatInt(id, 10) != parts[1] {
+		return Action{}, ErrBadAction
+	}
+	if k == ActPage && id != 0 {
 		return Action{}, ErrBadAction
 	}
 	arg := ""

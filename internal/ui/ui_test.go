@@ -16,8 +16,12 @@ func FuzzEncodeDecode(f *testing.F) {
 	f.Add("rs", int64(-9223372036854775808), "10m")
 	f.Add("lp", int64(0), "12")
 	f.Add("rs", int64(9223372036854775807), strings.Repeat("x", 200))
+	f.Add("lp:7:3", int64(7), "3")
 	kinds := []ActionKind{ActDone, ActDelete, ActDeleteConfirm, ActEdit, ActRemind, ActPage, ActReminderDone, ActSnooze, ActCancel}
 	f.Fuzz(func(t *testing.T, kind string, id int64, arg string) {
+		if got, err := Decode(kind); err == nil && Encode(got) != kind {
+			t.Fatalf("Decode(%q)=%+v re-encodes to %q", kind, got, Encode(got))
+		}
 		a := Action{Kind: ActionKind(kind), ID: id, Arg: arg}
 		if len(Encode(a)) > 64 {
 			t.Fatalf("Encode(%+v) too long", a)
@@ -36,7 +40,7 @@ func FuzzEncodeDecode(f *testing.F) {
 				want.Arg = ""
 			}
 			if k == ActPage {
-				want.ID = id
+				want.ID = 0
 			}
 			got, err := Decode(s)
 			if err != nil || got != want {
@@ -66,7 +70,7 @@ func TestEncodeDecode(t *testing.T) {
 }
 
 func TestDecodeRejects(t *testing.T) {
-	for _, s := range []string{"", "td", "td:", "td:x", "td:01", "td:+1", "zz:1", "td:1:2", "td:1:", "rs:1", "rs:1:5m", "rs:1:10m:x", "lp:0", "lp:0:-1", "lp:0:x", "td:99999999999999999999"} {
+	for _, s := range []string{"", "td", "td:", "td:x", "td:01", "td:+1", "zz:1", "td:1:2", "td:1:", "rs:1", "rs:1:5m", "rs:1:10m:x", "lp:0", "lp:0:-1", "lp:0:x", "lp:7:3", "td:99999999999999999999"} {
 		if _, err := Decode(s); !errors.Is(err, ErrBadAction) {
 			t.Errorf("Decode(%q) err=%v, want ErrBadAction", s, err)
 		}

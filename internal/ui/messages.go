@@ -33,6 +33,6 @@ func init() {
 		"ui.digest.overdue":   "⚠️ عقب\u200cافتاده",
 		"ui.digest.today":     "📅 امروز",
 		"ui.digest.nodate":    "+%s بدون تاریخ",
-		"ui.digest.empty":     "امروز کاری نداری 🎉",
+		"ui.digest.empty":     "امروز کاری ندارید 🎉",
 	})
 }
