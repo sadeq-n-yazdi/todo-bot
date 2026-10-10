@@ -283,6 +283,32 @@ var rows = []row{
 	{in: "بردن پسر از مدرسه فردا ساعت ۱۵ @wife", wantText: "بردن پسر از مدرسه @wife", wantDue: "2026-10-11 15:00", wantTime: true},
 	{in: "@wife بردن پسر از مدرسه فردا ساعت ۱۵", wantText: "@wife بردن پسر از مدرسه", wantDue: "2026-10-11 15:00", wantTime: true},
 	{in: "بردن پسر از مدرسه @wife فردا ساعت ۱۵", wantText: "بردن پسر از مدرسه @wife", wantDue: "2026-10-11 15:00", wantTime: true},
+	// ---- a date phrase at the START of the text ----
+	{in: "امروز ساعت ۱۵ بچه را از مدرسه بردار", wantText: "بچه را از مدرسه بردار", wantDue: "2026-10-10 15:00", wantTime: true},
+	{in: "tomorrow 9am call mom", wantText: "call mom", wantDue: "2026-10-11 09:00", wantTime: true},
+	{in: "@sara_home tomorrow 9am call mom", wantText: "@sara_home call mom", wantDue: "2026-10-11 09:00", wantTime: true},
+	{in: "tomorrow @sara_home 9am call mom", wantText: "@sara_home call mom", wantDue: "2026-10-11 09:00", wantTime: true},
+	{in: "فردا ساعت ۹ صبح نان بخر", wantText: "نان بخر", wantDue: "2026-10-11 09:00", wantTime: true},
+	{in: "every day 9am take pills", wantText: "take pills", wantDue: "2026-10-10 09:00", wantTime: true, wantRule: daily(9, 0)},
+	{in: "tomorrow, call mom", wantText: "call mom", wantDue: "2026-10-11 09:00"},
+	{in: "tomorrow call mom @wife", wantText: "call mom @wife", wantDue: "2026-10-11 09:00"},
+	{in: "tomorrow 5 apples", wantText: "5 apples", wantDue: "2026-10-11 09:00"},
+	{in: "in 2h stretch", wantText: "stretch", wantDue: "2026-10-10 10:15", wantTime: true},
+	{in: "next monday gym", wantText: "gym", wantDue: "2026-10-12 09:00"},
+	{in: "هر روز ساعت ۹ قرص بخور", wantText: "قرص بخور", wantDue: "2026-10-10 09:00", wantTime: true, wantRule: daily(9, 0)},
+	// trailing phrase wins over a leading one
+	{in: "tomorrow call mom today 10:00", wantText: "tomorrow call mom", wantDue: "2026-10-10 10:00", wantTime: true},
+	{in: "tomorrow 9am call mom 5pm", wantText: "tomorrow 9am call mom", wantDue: "2026-10-10 17:00", wantTime: true},
+	// a leading bare number is not a time
+	{in: "2 eggs", wantText: "2 eggs"},
+	{in: "۳ نان", wantText: "۳ نان"},
+	{in: "9 lives of a cat", wantText: "9 lives of a cat"},
+	{in: "10 push ups", wantText: "10 push ups"},
+	{in: "3 kids to school", wantText: "3 kids to school"},
+	{in: "@wife 2 eggs", wantText: "@wife 2 eggs"},
+	{in: "sun block", wantText: "sun block"},
+	{in: "monday 9am meeting notes", wantText: "meeting notes", wantDue: "2026-10-12 09:00", wantTime: true},
+	{in: "may the force", wantText: "may the force"},
 }
 
 func parseNow(t *testing.T, s, tz string) time.Time {
