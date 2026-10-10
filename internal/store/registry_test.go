@@ -5,13 +5,24 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 )
 
+var (
+	regtestOnce sync.Once
+	regtestGot  func(*url.URL)
+	errRegtest  = errors.New("opened")
+)
+
 func TestRegistry(t *testing.T) {
-	want := errors.New("opened")
 	var got *url.URL
-	Register("regtest", func(_ context.Context, u *url.URL) (Store, error) { got = u; return nil, want })
+	// The registry is process-global; register once so -count=N works.
+	regtestOnce.Do(func() {
+		Register("regtest", func(_ context.Context, u *url.URL) (Store, error) { regtestGot(u); return nil, errRegtest })
+	})
+	regtestGot = func(u *url.URL) { got = u }
+	want := errRegtest
 
 	if _, err := Open(context.Background(), "REGTEST:///tmp/x.db"); !errors.Is(err, want) {
 		t.Fatalf("Open = %v, want opener error", err)
