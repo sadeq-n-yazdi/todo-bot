@@ -6,16 +6,33 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
+)
+
+const (
+	maxTextUnits    = 4096 // Telegram's limit on message text, in UTF-16 code units
+	maxCallbackData = 64   // Telegram's limit on callback_data, in bytes
+)
+
+var (
+	// ErrMessageTooLong is returned by Send and Edit, without calling the API,
+	// when the text exceeds 4096 UTF-16 code units. Text is never split because
+	// splitting HTML safely is not possible here; callers paginate.
+	ErrMessageTooLong = errors.New("tgbot: message text longer than 4096 UTF-16 code units")
+	// ErrCallbackDataTooLong is returned by Send and Edit, without calling the
+	// API, when a button's Data exceeds 64 bytes.
+	ErrCallbackDataTooLong = errors.New("tgbot: callback data longer than 64 bytes")
 )
 
 // Options configures the adapter.
@@ -32,6 +49,7 @@ type Command struct {
 // Bot is a long-polling Telegram client implementing tg.Sender.
 type Bot struct {
 	b        *bot.Bot
+	token    string
 	username string
 
 	mu      sync.Mutex
@@ -40,10 +58,23 @@ type Bot struct {
 
 // New creates the client and calls getMe.
 func New(ctx context.Context, token string, opt Options) (*Bot, error) {
-	w := &Bot{}
+	if opt.ServerURL != "" {
+		u, err := url.Parse(opt.ServerURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, errors.New("tgbot: ServerURL must be an http(s) URL with a host")
+		}
+	}
+	w := &Bot{token: token}
 	opts := []bot.Option{
 		bot.WithSkipGetMe(), // getMe is called below, with our ctx and error mapping
 		bot.WithNotAsyncHandlers(),
+		// Unbuffered: the library confirms an update to Telegram by asking for a
+		// higher offset, and it does so only after the whole fetched batch was
+		// handed to the worker. With no buffer, cancelling ctx (lease handover)
+		// leaves every update that was not handled unconfirmed, so the next
+		// leader receives it again; at most the one in-flight update can be
+		// processed twice, which dedupe by update ID absorbs.
+		bot.WithUpdatesChannelCap(0),
 		bot.WithDefaultHandler(w.dispatch),
 		bot.WithErrorsHandler(func(err error) { slog.Error("telegram client", "err", err) }),
 		bot.WithAllowedUpdates(bot.AllowedUpdates{"message", "callback_query"}),
@@ -53,13 +84,13 @@ func New(ctx context.Context, token string, opt Options) (*Bot, error) {
 	}
 	b, err := bot.New(token, opts...)
 	if err != nil {
-		return nil, err
+		return nil, w.mapErr(err)
 	}
 	w.b = b
 
 	me, err := b.GetMe(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("tgbot: getMe: %w", mapErr(err))
+		return nil, fmt.Errorf("tgbot: getMe: %w", w.mapErr(err))
 	}
 	w.username = me.Username
 	return w, nil
@@ -75,9 +106,10 @@ func (b *Bot) Poller() tg.Source { return poller{b} }
 
 type poller struct{ b *Bot }
 
-// Run polls until ctx is done and calls h synchronously for every update. The
-// library moves the offset forward before h runs, so an update whose handler
-// failed is logged and not redelivered.
+// Run polls until ctx is done and calls h synchronously for every update. An
+// update whose handler failed is logged and not redelivered. Run returns
+// within 1s of ctx being done only if h honours ctx, because the worker is
+// synchronous and Run waits for the handler in flight.
 func (p poller) Run(ctx context.Context, h tg.Handler) error {
 	p.b.mu.Lock()
 	if p.b.handler != nil {
@@ -118,7 +150,7 @@ func (b *Bot) dispatch(ctx context.Context, _ *bot.Bot, upd *models.Update) {
 // calls it on gaining the lease.
 func (b *Bot) DeleteWebhook(ctx context.Context) error {
 	_, err := b.b.DeleteWebhook(ctx, &bot.DeleteWebhookParams{})
-	return mapErr(err)
+	return b.mapErr(err)
 }
 
 // SetCommands registers the command menu for one language ("" = default,
@@ -129,11 +161,14 @@ func (b *Bot) SetCommands(ctx context.Context, cmds []Command, lang string) erro
 		list = append(list, models.BotCommand{Command: c.Name, Description: c.Description})
 	}
 	_, err := b.b.SetMyCommands(ctx, &bot.SetMyCommandsParams{Commands: list, LanguageCode: lang})
-	return mapErr(err)
+	return b.mapErr(err)
 }
 
 // Send sends m (HTML) to chatID and returns the new message's ID.
 func (b *Bot) Send(ctx context.Context, chatID int64, m tg.OutMessage) (int, error) {
+	if err := validate(m); err != nil {
+		return 0, err
+	}
 	p := &bot.SendMessageParams{
 		ChatID:      chatID,
 		Text:        m.Text,
@@ -145,7 +180,7 @@ func (b *Bot) Send(ctx context.Context, chatID int64, m tg.OutMessage) (int, err
 	}
 	msg, err := b.b.SendMessage(ctx, p)
 	if err != nil {
-		return 0, mapErr(err)
+		return 0, b.mapErr(err)
 	}
 	return msg.ID, nil
 }
@@ -153,6 +188,9 @@ func (b *Bot) Send(ctx context.Context, chatID int64, m tg.OutMessage) (int, err
 // Edit replaces the text and inline keyboard of an existing message. An empty
 // keyboard removes it.
 func (b *Bot) Edit(ctx context.Context, chatID int64, msgID int, m tg.OutMessage) error {
+	if err := validate(m); err != nil {
+		return err
+	}
 	_, err := b.b.EditMessageText(ctx, &bot.EditMessageTextParams{
 		ChatID:      chatID,
 		MessageID:   msgID,
@@ -160,13 +198,33 @@ func (b *Bot) Edit(ctx context.Context, chatID int64, msgID int, m tg.OutMessage
 		ParseMode:   models.ParseModeHTML,
 		ReplyMarkup: editMarkup(m),
 	})
-	return mapErr(err)
+	err = b.mapErr(err)
+	var ae *tg.APIError
+	if errors.As(err, &ae) && ae.Code == 400 && strings.Contains(ae.Desc, "message is not modified") {
+		return nil // a repeated edit is not a failure
+	}
+	return err
 }
 
 // AnswerCallback acknowledges a button press, optionally showing text.
 func (b *Bot) AnswerCallback(ctx context.Context, callbackID, text string) error {
 	_, err := b.b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: callbackID, Text: text})
-	return mapErr(err)
+	return b.mapErr(err)
+}
+
+// validate checks the limits for which Telegram would reject the whole request.
+func validate(m tg.OutMessage) error {
+	if len(utf16.Encode([]rune(m.Text))) > maxTextUnits {
+		return ErrMessageTooLong
+	}
+	for _, row := range m.Keyboard {
+		for _, btn := range row {
+			if len(btn.Data) > maxCallbackData {
+				return fmt.Errorf("%w: %q", ErrCallbackDataTooLong, btn.Data)
+			}
+		}
+	}
+	return nil
 }
 
 // markup builds the reply markup of a sent message. Telegram accepts a single
@@ -271,12 +329,43 @@ func normalizeCommand(text, username string) string {
 
 var rawErrRE = regexp.MustCompile(`, (\d{3}) (.*)$`)
 
-// mapErr converts a go-telegram/bot error into *tg.APIError. Errors that did
-// not come from the Bot API (network, context) are returned unchanged.
-func mapErr(err error) error {
+// mapErr converts a go-telegram/bot error into *tg.APIError and removes the
+// bot token from the message. Errors that did not come from the Bot API
+// (network, context) keep their chain.
+func (b *Bot) mapErr(err error) error {
 	if err == nil {
 		return nil
 	}
+	err = convertErr(err)
+	var ae *tg.APIError
+	if errors.As(err, &ae) {
+		ae.Desc = b.redact(ae.Desc)
+		return ae
+	}
+	if msg := err.Error(); b.token != "" && strings.Contains(msg, b.token) {
+		return &redactedError{msg: b.redact(msg), err: err}
+	}
+	return err
+}
+
+func (b *Bot) redact(s string) string {
+	if b.token == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, b.token, "<token>")
+}
+
+// redactedError prints a token-free message and keeps the original chain for
+// errors.Is and errors.As.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
+
+func convertErr(err error) error {
 	var tooMany *bot.TooManyRequestsError
 	var migrate *bot.MigrateError
 	switch {
