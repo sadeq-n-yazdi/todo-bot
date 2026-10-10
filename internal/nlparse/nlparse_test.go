@@ -3,6 +3,7 @@ package nlparse
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,13 +87,13 @@ var rows = []row{
 	// ---- English: weekdays ----
 	{in: "gym next monday", wantText: "gym", wantDue: "2026-10-12 09:00"},
 	{in: "gym on friday at 14:30", wantText: "gym", wantDue: "2026-10-16 14:30", wantTime: true},
-	{in: "gym mon", wantText: "gym", wantDue: "2026-10-12 09:00"},
-	{in: "gym tue", wantText: "gym", wantDue: "2026-10-13 09:00"},
-	{in: "gym wed", wantText: "gym", wantDue: "2026-10-14 09:00"},
-	{in: "gym thu", wantText: "gym", wantDue: "2026-10-15 09:00"},
-	{in: "gym fri", wantText: "gym", wantDue: "2026-10-16 09:00"},
-	{in: "gym sat", wantText: "gym", wantDue: "2026-10-10 09:00"},
-	{in: "gym sun", wantText: "gym", wantDue: "2026-10-11 09:00"},
+	{in: "gym on mon", wantText: "gym", wantDue: "2026-10-12 09:00"},
+	{in: "gym on tue", wantText: "gym", wantDue: "2026-10-13 09:00"},
+	{in: "gym on wed", wantText: "gym", wantDue: "2026-10-14 09:00"},
+	{in: "gym on thu", wantText: "gym", wantDue: "2026-10-15 09:00"},
+	{in: "gym on fri", wantText: "gym", wantDue: "2026-10-16 09:00"},
+	{in: "gym on sat", wantText: "gym", wantDue: "2026-10-10 09:00"},
+	{in: "gym on sun", wantText: "gym", wantDue: "2026-10-11 09:00"},
 	{in: "gym next saturday", wantText: "gym", wantDue: "2026-10-17 09:00"},
 	{in: "gym saturday 7am", wantText: "gym", wantDue: "2026-10-17 07:00", wantTime: true},
 	{in: "18:00 friday", wantText: "", wantDue: "2026-10-16 18:00", wantTime: true},
@@ -123,7 +124,7 @@ var rows = []row{
 	{in: "tax 25/7/1405", cal: jal, wantText: "tax", wantDue: "2026-10-17 09:00"},
 	// ---- English: recurrence ----
 	{in: "pills every day 9am", wantText: "pills", wantDue: "2026-10-10 09:00", wantTime: true, wantRule: daily(9, 0)},
-	{in: "pills daily", wantText: "pills", wantDue: "2026-10-10 09:00", wantRule: daily(9, 0)},
+	{in: "pills daily 9am", wantText: "pills", wantDue: "2026-10-10 09:00", wantTime: true, wantRule: daily(9, 0)},
 	{in: "pills daily at 7:15", wantText: "pills", wantDue: "2026-10-11 07:15", wantTime: true, wantRule: daily(7, 15)},
 	{in: "pills everyday 21:00", wantText: "pills", wantDue: "2026-10-10 21:00", wantTime: true, wantRule: daily(21, 0)},
 	{in: "report weekdays 9:30", wantText: "report", wantDue: "2026-10-12 09:30", wantTime: true, wantRule: weekly(9, 30, monFri...)},
@@ -227,7 +228,42 @@ var rows = []row{
 	{in: "call in 2 days at 9", tz: "America/New_York", now: "2026-11-01 08:00", wantText: "call", wantDue: "2026-11-03 09:00", wantTime: true},
 	{in: "pills every day 9am", tz: "America/New_York", now: "2026-11-01 08:00", wantText: "pills", wantDue: "2026-11-01 09:00", wantTime: true, wantRule: daily(9, 0)},
 	{in: "x tomorrow", tz: "Europe/London", now: "2026-03-28 22:00", wantText: "x", wantDue: "2026-03-29 09:00"},
-	{in: "x monthly", now: "2026-10-31 08:00", cal: greg, wantText: "x", wantDue: "2026-10-31 09:00", wantRule: monthly(greg, 31, 9, 0)},
+	{in: "x every month", now: "2026-10-31 08:00", cal: greg, wantText: "x", wantDue: "2026-10-31 09:00", wantRule: monthly(greg, 31, 9, 0)},
+	// ---- review fixes ----
+	{in: "stretch in 2h", tz: "America/New_York", now: "2026-03-08 01:30", wantText: "stretch", wantDue: "2026-03-08 04:30", wantTime: true},
+	{in: "stretch in 90m", tz: "America/New_York", now: "2026-03-08 01:30", wantText: "stretch", wantDue: "2026-03-08 04:00", wantTime: true},
+	{in: "stretch in 2h", tz: "America/New_York", now: "2026-11-01 00:30", wantText: "stretch", wantDue: "2026-11-01 01:30", wantTime: true},
+	{in: "x 10 Oct", now: "2026-10-10 15:00", wantText: "x", wantDue: "2026-10-10 23:59"},
+	{in: "x 10/10", now: "2026-10-10 15:00", wantText: "x", wantDue: "2026-10-10 23:59"},
+	{in: "x 18 Mehr", now: "2026-10-10 15:00", cal: jal, wantText: "x", wantDue: "2026-10-10 23:59"},
+	{in: "x today", now: "2026-10-10 15:00", wantText: "x", wantDue: "2026-10-10 23:59"},
+	{in: "x امروز", now: "2026-10-10 15:00", wantText: "x", wantDue: "2026-10-10 23:59"},
+	{in: "x tonight", now: "2026-10-10 21:00", wantText: "x", wantDue: "2026-10-10 23:59"},
+	{in: "x امشب", now: "2026-10-10 21:00", wantText: "x", wantDue: "2026-10-10 23:59"},
+	{in: "x today 9am", now: "2026-10-10 15:00", wantText: "x", wantDue: "2026-10-10 09:00", wantTime: true},
+	{in: "x 9am", now: "2026-10-10 15:00", wantText: "x", wantDue: "2026-10-11 09:00", wantTime: true},
+	{in: "x tonight 9am", wantText: "x", wantDue: "2026-10-11 09:00", wantTime: true},
+	{in: "x tonight at 9", wantText: "x", wantDue: "2026-10-10 21:00", wantTime: true},
+	{in: "x tonight at 3", wantText: "x", wantDue: "2026-10-10 15:00", wantTime: true},
+	{in: "x tonight at 3", now: "2026-10-10 16:00", wantText: "x", wantDue: "2026-10-10 03:00", wantTime: true},
+	{in: "خرید نان ساعت۱۸", wantText: "خرید نان", wantDue: "2026-10-10 18:00", wantTime: true},
+	{in: "مالیات ۲۵مین مهر", cal: jal, wantText: "مالیات", wantDue: "2026-10-17 09:00"},
+	{in: "مالیات ۲۵ ام مهر", cal: jal, wantText: "مالیات", wantDue: "2026-10-17 09:00"},
+	{in: "اجاره هر ماه ۱مین", cal: jal, wantText: "اجاره", wantDue: "2026-10-23 09:00", wantRule: monthly(jal, 1, 9, 0)},
+	{in: "اجاره هر ماه ۱ ام", cal: jal, wantText: "اجاره", wantDue: "2026-10-23 09:00", wantRule: monthly(jal, 1, 9, 0)},
+	{in: "خريد نان فردا", wantText: "خريد نان", wantDue: "2026-10-11 09:00"},
+	{in: "باشگاه يكشنبه", wantText: "باشگاه", wantDue: "2026-10-11 09:00"},
+	{in: "feed the cat sat 9am", wantText: "feed the cat", wantDue: "2026-10-10 09:00", wantTime: true},
+	{in: "run weekly on sat", wantText: "run", wantDue: "2026-10-10 09:00", wantRule: weekly(9, 0, time.Saturday)},
+	{in: "run next sat", wantText: "run", wantDue: "2026-10-17 09:00"},
+	{in: "تماس با ۱۱۰", wantText: "تماس با ۱۱۰"},
+	{in: "کتاب ۱۰۰ سال تنهایی", wantText: "کتاب ۱۰۰ سال تنهایی"},
+	{in: "meeting with Sam on project", wantText: "meeting with Sam on project"},
+	{in: "pay 3 bills", wantText: "pay 3 bills"},
+	{in: "watch the sun", wantText: "watch the sun"},
+	{in: "feed the cat sat", wantText: "feed the cat sat"},
+	{in: "send weekly", wantText: "send weekly"},
+	{in: "pills daily", wantText: "pills daily"},
 }
 
 func parseNow(t *testing.T, s, tz string) time.Time {
@@ -321,6 +357,9 @@ func TestParseWhen(t *testing.T) {
 		{in: "tomorrow buy milk", wantErr: true},
 		{in: "fix 2 bugs", wantErr: true},
 		{in: "5", wantErr: true},
+		{in: "mon", wantDue: "2026-10-12 09:00"},
+		{in: "daily", wantDue: "2026-10-10 09:00", wantRule: daily(9, 0)},
+		{in: "watch the sun", wantErr: true},
 		{in: "", wantErr: true},
 		{in: "خرید ۲ نان", wantErr: true},
 	}
@@ -363,5 +402,28 @@ func TestWeekdayOnSameDay(t *testing.T) {
 		if got.Due == nil || got.Due.Format(layout) != want {
 			t.Errorf("%q: due = %v, want %s", in, got.Due, want)
 		}
+	}
+}
+
+func TestInElapsedKeepsSeconds(t *testing.T) {
+	now := parseNow(t, "", "").Add(45 * time.Second)
+	got, _ := Parser{}.Parse("x in 10m", now, greg)
+	if got.Due == nil || !got.Due.Equal(now.Add(10*time.Minute)) {
+		t.Fatalf("due = %v", got.Due)
+	}
+}
+
+func TestLongInputIsFast(t *testing.T) {
+	for _, unit := range []string{"at ", "on ", "every ", "5 "} {
+		in := strings.Repeat(unit, 4096/len(unit))
+		start := time.Now()
+		got, err := Parser{}.Parse(in, parseNow(t, "", ""), greg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := time.Since(start); d > 50*time.Millisecond {
+			t.Errorf("%q: took %v", unit, d)
+		}
+		_ = got
 	}
 }

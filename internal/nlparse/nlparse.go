@@ -25,7 +25,22 @@
 //
 // Rules of thumb:
 //   - A time with no date that already passed today means tomorrow.
-//   - A date with no time uses Parser.DefaultHour/DefaultMinute.
+//   - A date with no time uses Parser.DefaultHour/DefaultMinute. If that is
+//     today and the slot has already passed ("today", "10 Oct" on 10 Oct,
+//     "tonight" after 20:00), Due is today 23:59 and HasTime is false: the
+//     service creates no reminder when HasTime is false and Due has already
+//     passed.
+//   - An explicit time on an explicit day ("today 9am" at 15:00) is kept as
+//     given, in the past; only a bare time with no day rolls to tomorrow.
+//   - "tonight 9am" is tomorrow 09:00; "tonight 9" and "tonight at 3" mean
+//     21:00 and 15:00 (the latter only while still ahead).
+//   - "in 2h" and "in 90m" are elapsed time (now.Add); "in 3 days" and "in 2
+//     weeks" are calendar days at the default or given time.
+//   - Three-letter weekdays (sun..sat) and the words daily/weekly/monthly are
+//     a date phrase only after on/next/every/each, together with a time, or
+//     as the whole ParseWhen input, so "watch the sun" and "send weekly"
+//     stay text. Full weekday names always count at the end of the text.
+//   - Phrases may start only within the last 16 tokens of the input.
 //   - A bare weekday means its next occurrence, today included when the time
 //     is still ahead; "next monday" is never today.
 //   - A date without a year is its next occurrence (this or a later year).
@@ -71,8 +86,8 @@ var ErrNoDate = errors.New("no date or time found")
 func (p Parser) Parse(input string, now time.Time, cal calendar.Kind) (Result, error) {
 	toks := tokenize(i18n.NormalizeDigits(input))
 	runes := []rune(input)
-	for s := range toks {
-		res, ok := p.match(toks, s, now, cal)
+	for s := max(0, len(toks)-maxStartTokens); s < len(toks); s++ {
+		res, ok := p.match(toks, s, now, cal, false)
 		if !ok {
 			continue
 		}
@@ -87,23 +102,27 @@ func (p Parser) Parse(input string, now time.Time, cal calendar.Kind) (Result, e
 func (p Parser) ParseWhen(input string, now time.Time, cal calendar.Kind) (time.Time, *recur.Rule, error) {
 	toks := tokenize(i18n.NormalizeDigits(input))
 	if len(toks) > 0 {
-		if res, ok := p.match(toks, 0, now, cal); ok {
+		if res, ok := p.match(toks, 0, now, cal, true); ok {
 			return *res.Due, res.Rule, nil
 		}
 	}
 	return time.Time{}, nil, ErrNoDate
 }
 
-func (p Parser) match(toks []token, start int, now time.Time, cal calendar.Kind) (Result, bool) {
+func (p Parser) match(toks []token, start int, now time.Time, cal calendar.Kind, lenient bool) (Result, bool) {
 	if !cal.Valid() {
 		cal = calendar.Gregorian
 	}
-	ph, ok := parseFrom(toks, start, cal)
+	ph, ok := parseFrom(toks, start, cal, lenient)
 	if !ok {
 		return Result{}, false
 	}
 	return p.resolve(ph, now, cal)
 }
+
+// maxStartTokens bounds how far from the end a date phrase may start; it
+// keeps parsing linear on long inputs.
+const maxStartTokens = 16
 
 func cleanText(s string) string {
 	return strings.TrimRight(strings.TrimSpace(s), " \t,;:-–—")

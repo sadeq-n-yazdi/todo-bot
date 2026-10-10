@@ -42,7 +42,7 @@ func tokenize(normalised string) []token {
 	return toks
 }
 
-var numRe = regexp.MustCompile(`^(\d{1,4})(st|nd|rd|th|ام|م)?$`)
+var numRe = regexp.MustCompile(`^(\d{1,4})(st|nd|rd|th|مین|ام|م)?$`)
 
 // parseNum parses "15", "1st", "31st", "1ام".
 func parseNum(key string) (int, bool) {

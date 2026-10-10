@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
@@ -28,7 +29,10 @@ type dateSpec struct {
 	hasYear bool
 }
 
-type timeSpec struct{ h, m int }
+type timeSpec struct {
+	h, m     int
+	explicit bool // am/pm or a Farsi day-period word was given
+}
 
 type relSpec struct {
 	n int
@@ -49,6 +53,7 @@ type phrase struct {
 	rel     *relSpec
 	rec     *recSpec
 	tonight bool
+	ambig   bool // matched a word that is only a date at the end of text in some contexts
 }
 
 type parser struct {
@@ -66,19 +71,22 @@ func (p *parser) key(k int) string {
 }
 
 // parseFrom reports whether toks[start:] is, in full, one date phrase.
-func parseFrom(toks []token, start int, cal calendar.Kind) (phrase, bool) {
+func parseFrom(toks []token, start int, cal calendar.Kind, lenient bool) (phrase, bool) {
 	p := &parser{toks: toks, i: start, cal: cal}
 	for p.i < len(toks) {
 		switch {
 		case p.i == start && p.matchRecurrence():
 		case p.matchRel(), p.matchTime(), p.matchDate():
-		case isConnector(p.key(p.i)) && p.i+1 < len(toks):
+		case isConnector(p.key(p.i)) && (p.i == start || !isConnector(p.key(p.i-1))) && p.i+1 < len(toks):
 			p.i++
 		default:
 			return phrase{}, false
 		}
 	}
 	ph := p.ph
+	if ph.ambig && ph.tm == nil && !lenient {
+		return phrase{}, false
+	}
 	if ph.date == nil && ph.tm == nil && ph.rel == nil && ph.rec == nil {
 		return phrase{}, false
 	}
@@ -102,11 +110,15 @@ func (p *parser) matchTime() bool {
 	}
 	j := p.i
 	conn := false
-	if isAtWord(p.key(j)) {
+	tk := p.key(j)
+	if isAtWord(tk) {
 		conn = true
 		j++
+		tk = p.key(j)
+	} else if rest, ok := strings.CutPrefix(tk, "ساعت"); ok && rest != "" {
+		conn, tk = true, rest // "ساعت۱۸"
 	}
-	m := timeRe.FindStringSubmatch(p.key(j))
+	m := timeRe.FindStringSubmatch(tk)
 	if m == nil {
 		return false
 	}
@@ -153,7 +165,7 @@ func (p *parser) matchTime() bool {
 			return false
 		}
 	}
-	p.ph.tm = &timeSpec{h, mi}
+	p.ph.tm = &timeSpec{h: h, m: mi, explicit: suffix != "" || period != 0}
 	p.i = j
 	return true
 }
@@ -271,6 +283,9 @@ func (p *parser) matchDate() bool {
 		return false
 	}
 	if wd, n, ok := p.wdAt(p.i); ok {
+		if n == 1 && shortWeekday[k] && p.key(p.i-1) != "on" {
+			p.ph.ambig = true
+		}
 		next := false
 		if nk := p.key(p.i + n); nk == "آینده" || nk == "بعد" || nk == "بعدی" {
 			next = true
@@ -390,8 +405,7 @@ func (p *parser) yearAt(j int, cal calendar.Kind) (int, bool) {
 func (p *parser) matchMonthName() bool {
 	i := p.i
 	// "15 Oct [2026]", "۱۵ مهر ۱۴۰۵", "15th of Oct"
-	if d, ok := parseNum(p.key(i)); ok && d >= 1 && d <= 31 {
-		j := i + 1
+	if d, j, ok := p.numAt(i); ok && d >= 1 && d <= 31 {
 		if p.key(j) == "of" {
 			j++
 		}
@@ -401,8 +415,8 @@ func (p *parser) matchMonthName() bool {
 	}
 	// "Oct 15 [2026]"
 	if mr, ok := monthWords[p.key(i)]; ok {
-		if d, ok := parseNum(p.key(i + 1)); ok && d >= 1 && d <= 31 {
-			return p.setMonthDate(mr, d, i+2)
+		if d, j, ok := p.numAt(i + 1); ok && d >= 1 && d <= 31 {
+			return p.setMonthDate(mr, d, j)
 		}
 	}
 	return false
@@ -468,13 +482,18 @@ func (p *parser) matchRecurrence() bool {
 	j := p.i
 	switch p.key(j) {
 	case "daily", "everyday", "روزانه":
+		p.ph.ambig = p.key(j) == "daily"
 		return p.setRec(recSpec{freq: recur.Daily}, j+1)
 	case "weekdays", "weekday":
 		return p.setRec(recSpec{freq: recur.Weekly, wds: weekdaysMonFri}, j+1)
 	case "weekly", "هفتگی":
-		return p.weeklyTail(j + 1)
+		ok := p.weeklyTail(j + 1)
+		p.ph.ambig = p.key(j) == "weekly" && p.i == j+1
+		return ok
 	case "monthly", "ماهانه":
-		return p.monthlyTail(j + 1)
+		ok := p.monthlyTail(j + 1)
+		p.ph.ambig = p.key(j) == "monthly" && p.i == j+1
+		return ok
 	case "روزهای":
 		if p.key(j+1) == "کاری" {
 			return p.setRec(recSpec{freq: recur.Weekly, wds: workdaysFa}, j+2)
@@ -539,8 +558,8 @@ func (p *parser) monthlyTail(j int) bool {
 	if k := p.key(j); k == "day" || k == "روز" {
 		j++
 	}
-	if d, ok := parseNum(p.key(j)); ok && d >= 1 && d <= 31 && !p.timeWordAt(j+1) {
-		return p.setRec(recSpec{freq: recur.Monthly, monthDay: d}, j+1)
+	if d, nj, ok := p.numAt(j); ok && d >= 1 && d <= 31 && !p.timeWordAt(nj) {
+		return p.setRec(recSpec{freq: recur.Monthly, monthDay: d}, nj)
 	}
 	return p.setRec(recSpec{freq: recur.Monthly}, start)
 }
@@ -551,3 +570,22 @@ func (p *parser) timeWordAt(j int) bool {
 	k := p.key(j)
 	return k == "am" || k == "pm" || periodWords[k] != 0
 }
+
+// numAt parses a day-like number at token j, with an ordinal suffix attached
+// ("1st", "۱ام", "۱۵مین") or as the next token ("۱ ام"). It returns the token
+// index after the number.
+func (p *parser) numAt(j int) (int, int, bool) {
+	n, ok := parseNum(p.key(j))
+	if !ok {
+		return 0, 0, false
+	}
+	next := j + 1
+	if _, plain := parsePlainNum(p.key(j)); plain {
+		if k := p.key(next); k == "ام" || k == "م" || k == "مین" {
+			next++
+		}
+	}
+	return n, next, true
+}
+
+var shortWeekday = map[string]bool{"sun": true, "mon": true, "tue": true, "wed": true, "thu": true, "fri": true, "sat": true}

@@ -19,16 +19,27 @@ func (p Parser) resolve(ph phrase, now time.Time, cal calendar.Kind) (Result, bo
 	loc := now.Location()
 	h, m := p.defaults()
 	hasTime := false
+	ny, nm, nd := now.Date()
+	tonightShift := 0 // days added to "tonight"
 	switch {
 	case ph.tm != nil:
 		h, m, hasTime = ph.tm.h, ph.tm.m, true
-		if ph.tonight && h >= 1 && h < 12 {
-			h += 12
+		if ph.tonight {
+			switch {
+			case ph.tm.explicit:
+				if h < 12 { // "tonight 9am" is not tonight
+					tonightShift = 1
+				}
+			case h >= 1 && h < 12:
+				// "tonight 9" is 21:00; "tonight at 3" is 15:00 if still ahead.
+				if h >= 6 || time.Date(ny, nm, nd, h+12, m, 0, 0, loc).After(now) {
+					h += 12
+				}
+			}
 		}
 	case ph.tonight:
 		h, m, hasTime = 20, 0, true
 	}
-	ny, nm, nd := now.Date()
 	at := func(offset, hh, mm int) time.Time { return time.Date(ny, nm, nd+offset, hh, mm, 0, 0, loc) }
 
 	var due time.Time
@@ -41,10 +52,10 @@ func (p Parser) resolve(ph phrase, now time.Time, cal calendar.Kind) (Result, bo
 	case ph.rel != nil:
 		switch ph.rel.u {
 		case unitMinute:
-			due = time.Date(ny, nm, nd, now.Hour(), now.Minute()+ph.rel.n, 0, 0, loc)
+			due = now.Add(time.Duration(ph.rel.n) * time.Minute)
 			hasTime = true
 		case unitHour:
-			due = time.Date(ny, nm, nd, now.Hour()+ph.rel.n, now.Minute(), 0, 0, loc)
+			due = now.Add(time.Duration(ph.rel.n) * time.Hour)
 			hasTime = true
 		case unitDay:
 			due = at(ph.rel.n, h, m)
@@ -53,8 +64,16 @@ func (p Parser) resolve(ph phrase, now time.Time, cal calendar.Kind) (Result, bo
 		}
 	case ph.date != nil:
 		var ok bool
-		if due, ok = resolveDate(ph.date, now, h, m); !ok {
+		ds := *ph.date
+		ds.offset += tonightShift
+		if due, ok = resolveDate(&ds, now, h, m); !ok {
 			return Result{}, false
+		}
+		// A day with no time whose default slot has passed stays that day,
+		// at the end of it, without a time: the service creates no
+		// reminder for it. An explicit time is kept as given, even if past.
+		if ph.tm == nil && sameDay(due, now) && !due.After(now) {
+			due, hasTime = at(0, 23, 59), false
 		}
 	default: // time of day only
 		due = at(0, h, m)
@@ -89,7 +108,7 @@ func resolveDate(d *dateSpec, now time.Time, h, m int) (time.Time, bool) {
 		if d.d > d.cal.MonthLength(y, d.m) {
 			continue
 		}
-		if t := d.cal.At(calendar.Date{Year: y, Month: d.m, Day: d.d}, h, m, loc); t.After(now) {
+		if t := d.cal.At(calendar.Date{Year: y, Month: d.m, Day: d.d}, h, m, loc); t.After(now) || sameDay(t, now) {
 			return t, true
 		}
 	}
@@ -161,4 +180,10 @@ func hasWeekday(list []time.Weekday, w time.Weekday) bool {
 		}
 	}
 	return false
+}
+
+func sameDay(a, b time.Time) bool {
+	ay, am, ad := a.Date()
+	by, bm, bd := b.In(a.Location()).Date()
+	return ay == by && am == bm && ad == bd
 }
