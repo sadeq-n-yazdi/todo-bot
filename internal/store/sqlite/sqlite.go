@@ -9,8 +9,9 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
-	_ "modernc.org/sqlite" // registers the "sqlite" driver
+	modernc "modernc.org/sqlite" // registers the "sqlite" driver
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store/sqlstore"
@@ -48,7 +49,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		return nil, fmt.Errorf("sqlite: open %s: %w", path, err)
 	}
 	sdb.SetMaxOpenConns(1)
-	if err := sdb.PingContext(ctx); err != nil {
+	if err := ping(ctx, sdb); err != nil {
 		_ = sdb.Close()
 		return nil, fmt.Errorf("sqlite: ping %s: %w", path, err)
 	}
@@ -60,10 +61,45 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	return d, nil
 }
 
+const (
+	pingTries = 50
+	pingWait  = 20 * time.Millisecond
+)
+
+// isBusy reports SQLITE_BUSY (5) or an extended code of it, by driver code.
+func isBusy(err error) bool {
+	var se *modernc.Error
+	return errors.As(err, &se) && se.Code()&0xff == 5
+}
+
+// ping connects, retrying on SQLITE_BUSY for about a second. Several
+// processes opening a brand-new file at once can hit BUSY in the connection
+// pragmas (journal_mode=WAL), which busy_timeout does not cover.
+func ping(ctx context.Context, db *sql.DB) error {
+	var err error
+	for range pingTries {
+		if err = db.PingContext(ctx); err == nil || !isBusy(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pingWait):
+		}
+	}
+	return err
+}
+
 // opener implements store.Opener. An absolute path is u.Path
 // (sqlite:///var/lib/x.db), a relative one u.Opaque (sqlite:todo.db). A host
-// is rejected. Errors never contain the URL.
+// is rejected, and so are credentials, a query and a fragment. Errors never contain the URL.
 func opener(ctx context.Context, u *url.URL) (store.Store, error) {
+	if u.User != nil {
+		return nil, errors.New("sqlite: database URL must not have credentials")
+	}
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return nil, errors.New("sqlite: database URL must not have a query or fragment")
+	}
 	if u.Host != "" {
 		return nil, errors.New("sqlite: database URL must not have a host (use sqlite:///abs/path or sqlite:rel/path)")
 	}
@@ -77,7 +113,11 @@ func opener(ctx context.Context, u *url.URL) (store.Store, error) {
 	if path == "" {
 		return nil, errors.New("sqlite: database URL has no path")
 	}
-	return Open(ctx, path)
+	d, err := Open(ctx, path)
+	if err != nil {
+		return nil, err // not "return Open(...)": that would wrap a nil *DB in a non-nil interface
+	}
+	return d, nil
 }
 
 // Backup writes a consistent copy of the database to path using VACUUM INTO.

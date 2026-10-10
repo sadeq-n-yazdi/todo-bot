@@ -17,7 +17,8 @@ const updateRetention = 48 * time.Hour
 // ---- reminder claims ----
 
 // ClaimReminders claims up to limit due reminders (limit <= 0 claims none).
-// The UPDATE stamps a per-call token; the rows are then read back by token,
+// The claim predicate is repeated in the outer WHERE so that databases which
+// re-check only the outer predicate after a lock wait stay correct. The UPDATE stamps a per-call token; the rows are then read back by token,
 // so concurrent claimers never see each other's rows.
 func (d *DB) ClaimReminders(ctx context.Context, token string, now, until time.Time, limit int) ([]model.DueReminder, error) {
 	if token == "" {
@@ -29,8 +30,9 @@ func (d *DB) ClaimReminders(ctx context.Context, token string, now, until time.T
 	sub := d.d.ClaimSubquery(`SELECT id FROM reminders
 WHERE state = 'pending' AND fire_at <= ? AND claim_until <= ? ORDER BY fire_at, id LIMIT ?`)
 	_, err := d.q.ExecContext(ctx,
-		"UPDATE reminders SET claim_token = ?, claim_until = ? WHERE id IN ("+sub+")",
-		token, until.Unix(), now.Unix(), now.Unix(), limit)
+		"UPDATE reminders SET claim_token = ?, claim_until = ? WHERE id IN ("+sub+")"+
+			" AND state = 'pending' AND fire_at <= ? AND claim_until <= ?",
+		token, until.Unix(), now.Unix(), now.Unix(), limit, now.Unix(), now.Unix())
 	if err != nil {
 		return nil, fmt.Errorf("sqlstore: claim reminders: %w", err)
 	}
@@ -50,7 +52,6 @@ WHERE r.claim_token = ? AND r.state = 'pending' ORDER BY r.fire_at, r.id`, token
 		}
 		rfinish()
 		tfinish()
-		dr.ClaimToken = token
 		out = append(out, dr)
 	}
 	if err := rows.Err(); err != nil {
@@ -108,8 +109,9 @@ func (d *DB) ClaimDigests(ctx context.Context, token string, now, until time.Tim
 WHERE digest_next_at IS NOT NULL AND digest_next_at <= ? AND digest_claim_until <= ?
 ORDER BY digest_next_at, id LIMIT ?`)
 	_, err := d.q.ExecContext(ctx,
-		"UPDATE chats SET digest_claim_token = ?, digest_claim_until = ? WHERE id IN ("+sub+")",
-		token, until.Unix(), now.Unix(), now.Unix(), limit)
+		"UPDATE chats SET digest_claim_token = ?, digest_claim_until = ? WHERE id IN ("+sub+")"+
+			" AND digest_next_at IS NOT NULL AND digest_next_at <= ? AND digest_claim_until <= ?",
+		token, until.Unix(), now.Unix(), now.Unix(), limit, now.Unix(), now.Unix())
 	if err != nil {
 		return nil, fmt.Errorf("sqlstore: claim digests: %w", err)
 	}
@@ -117,9 +119,6 @@ ORDER BY digest_next_at, id LIMIT ?`)
 		"SELECT "+chatCols+" FROM chats WHERE digest_claim_token = ? ORDER BY digest_next_at, id", token)
 	if err != nil {
 		return nil, err
-	}
-	for i := range chats {
-		chats[i].DigestClaimToken = token
 	}
 	return chats, nil
 }

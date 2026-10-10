@@ -41,4 +41,8 @@ type Dialect interface {
 	// LegacyVersion returns the schema version tracked outside
 	// schema_migrations (SQLite: PRAGMA user_version), 0 if none.
 	LegacyVersion(ctx context.Context, db *sql.DB) (int, error)
+	// RecordVersion is called inside each migration's transaction after the
+	// schema_migrations row is written. SQLite keeps PRAGMA user_version in
+	// step so an older binary does not re-run migrations; others do nothing.
+	RecordVersion(ctx context.Context, q Querier, version int) error
 }

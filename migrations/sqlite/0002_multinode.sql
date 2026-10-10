@@ -5,6 +5,10 @@ ALTER TABLE reminders ADD COLUMN claim_until INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE chats ADD COLUMN digest_claim_token TEXT;
 ALTER TABLE chats ADD COLUMN digest_claim_until INTEGER NOT NULL DEFAULT 0;
 
+-- Read-back of a claim by its token.
+CREATE INDEX reminders_claim ON reminders (claim_token) WHERE claim_token IS NOT NULL;
+CREATE INDEX chats_digest_claim ON chats (digest_claim_token) WHERE digest_claim_token IS NOT NULL;
+
 CREATE TABLE leases (
   name       TEXT    PRIMARY KEY,
   holder     TEXT    NOT NULL,

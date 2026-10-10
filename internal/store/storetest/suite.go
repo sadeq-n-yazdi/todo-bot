@@ -38,6 +38,7 @@ func Run(t *testing.T, f Factory) {
 		{"ClaimReminders", testClaimReminders},
 		{"ClaimRemindersConcurrent", testClaimRemindersConcurrent},
 		{"RescheduleClaimed", testRescheduleClaimed},
+		{"UpdateReminderClearsClaim", testUpdateReminderClearsClaim},
 		{"StaleClaimerReminder", testStaleClaimerReminder},
 		{"MarkReminderSentConcurrent", testMarkReminderSentConcurrent},
 		{"NextReminderAtWithClaims", testNextReminderAt},

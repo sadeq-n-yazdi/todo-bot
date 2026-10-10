@@ -99,15 +99,16 @@ func testChatsAndDigest(t *testing.T, open func() store.Store) {
 	if err != nil || len(by7) != 1 || by7[0].ID != 1 {
 		t.Fatalf("by7 = %+v, %v", by7, err)
 	}
-	if due, _ := d.ClaimDigests(ctx, "t0", base, base, 10); len(due) != 0 {
+	if due, _ := d.ClaimDigests(ctx, "t0", base, base.Add(claimTTL), 10); len(due) != 0 {
 		t.Fatalf("not yet due: %+v", due)
 	}
-	due, err := d.ClaimDigests(ctx, "t1", next, next, 10)
+	due, err := d.ClaimDigests(ctx, "t1", next, next.Add(claimTTL), 10)
 	if err != nil || len(due) != 1 || due[0].ID != 1 {
 		t.Fatalf("due = %+v, %v", due, err)
 	}
+	// Chat 1 is claimed, so it counts from its claim_until.
 	n, ok, err := d.NextDigestAt(ctx)
-	if err != nil || !ok || !n.Equal(next) || n.Location() != time.UTC {
+	if err != nil || !ok || !n.Equal(next.Add(claimTTL)) || n.Location() != time.UTC {
 		t.Fatalf("next = %v %v %v", n, ok, err)
 	}
 	if err := d.SetDigest(ctx, 1, "", 0, nil); err != nil {
@@ -273,11 +274,13 @@ func testReminders(t *testing.T, open func() store.Store) {
 	if err != nil || !ok || !next.Equal(*tp(1)) {
 		t.Fatalf("next = %v %v %v", next, ok, err)
 	}
-	due, err := d.ClaimReminders(ctx, "t1", *tp(2), *tp(2), 10)
+	due, err := d.ClaimReminders(ctx, "t1", *tp(2), tp(2).Add(claimTTL), 10)
 	if err != nil || len(due) != 2 || due[0].ID != r2.ID || due[1].ID != r1.ID || due[0].Todo.ID != td.ID || due[0].Todo.Text != "a" {
 		t.Fatalf("due = %+v, %v", due, err)
 	}
-	if lim, _ := d.ClaimReminders(ctx, "t2", *tp(2), *tp(2), 1); len(lim) != 1 {
+	// Both are claimed until tp(2)+ttl; once that passes, two are claimable and limit 1 takes one.
+	retake := tp(2).Add(claimTTL)
+	if lim, _ := d.ClaimReminders(ctx, "t2", retake, retake.Add(claimTTL), 1); len(lim) != 1 {
 		t.Fatalf("limit ignored: %d", len(lim))
 	}
 

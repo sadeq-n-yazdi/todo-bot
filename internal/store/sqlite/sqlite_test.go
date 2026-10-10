@@ -249,6 +249,11 @@ func TestOpenByURL(t *testing.T) {
 		{"sqlite://u:secret@host/x.db", ""},
 		{"sqlite:", ""},
 		{"sqlite://", ""},
+		{"sqlite://u:secret@/abs/x.db", ""},
+		{"sqlite:todo.db?mode=ro", ""},
+		{"sqlite:todo.db#frag", ""},
+		{"sqlite:todo.db?", ""},
+		{"sqlite:///nonexistent-dir/sub/x.db", ""},
 	}
 	for _, c := range cases {
 		s, err := store.Open(ctx, c.raw)
@@ -257,6 +262,9 @@ func TestOpenByURL(t *testing.T) {
 				_ = s.Close()
 				t.Errorf("%q: want an error", c.raw)
 				continue
+			}
+			if s != nil { // a typed nil *DB inside the interface would also land here
+				t.Errorf("%q: store.Store must be nil on error, got %T", c.raw, s)
 			}
 			if (len(c.raw) > 10 && strings.Contains(err.Error(), c.raw)) || strings.Contains(err.Error(), "secret") {
 				t.Errorf("%q: error contains the URL: %v", c.raw, err)
@@ -271,5 +279,26 @@ func TestOpenByURL(t *testing.T) {
 		if _, err := os.Stat(c.want); err != nil {
 			t.Errorf("%q: %v", c.raw, err)
 		}
+	}
+}
+
+func TestUserVersionFollowsMigrations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "uv.db")
+	d, err := sqlite.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Close()
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	var v int
+	if err := raw.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != 2 {
+		t.Fatalf("user_version = %d, want 2", v)
 	}
 }

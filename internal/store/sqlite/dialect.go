@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store/sqlstore"
@@ -66,4 +67,9 @@ func (dialect) LegacyVersion(ctx context.Context, db *sql.DB) (int, error) {
 	var v int
 	err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v)
 	return v, err
+}
+
+func (dialect) RecordVersion(ctx context.Context, q sqlstore.Querier, version int) error {
+	_, err := q.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version))
+	return err
 }

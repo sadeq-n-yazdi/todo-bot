@@ -11,7 +11,7 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 )
 
-const chatCols = "id, kind, title, digest_time, digest_by, digest_next_at, created_at"
+const chatCols = "id, kind, title, digest_time, digest_by, digest_next_at, created_at, COALESCE(digest_claim_token, '')"
 
 func scanChat(s scanner) (model.Chat, error) {
 	var c model.Chat
@@ -19,7 +19,7 @@ func scanChat(s scanner) (model.Chat, error) {
 	var dtime sql.NullString
 	var by, next sql.NullInt64
 	var created int64
-	if err := s.Scan(&c.ID, &kind, &c.Title, &dtime, &by, &next, &created); err != nil {
+	if err := s.Scan(&c.ID, &kind, &c.Title, &dtime, &by, &next, &created, &c.DigestClaimToken); err != nil {
 		return model.Chat{}, err
 	}
 	c.Kind, c.DigestTime, c.DigestBy = model.ChatKind(kind), dtime.String, by.Int64

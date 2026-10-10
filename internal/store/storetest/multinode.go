@@ -87,24 +87,59 @@ func testClaimReminders(t *testing.T, open func() store.Store) {
 	if got, err := d.ClaimReminders(ctx, "e", now, now.Add(claimTTL), 0); err != nil || len(got) != 0 {
 		t.Fatalf("limit 0 = %v, %v", got, err)
 	}
+	if _, err := d.ClaimReminders(ctx, "", now, now.Add(claimTTL), 5); err == nil {
+		t.Fatal("empty token must be an error")
+	}
+	if _, err := d.ClaimReminders(ctx, "", now, now.Add(claimTTL), 0); err == nil {
+		t.Fatal("empty token must be an error, also with limit 0")
+	}
 }
 
-func testClaimRemindersConcurrent(t *testing.T, open func() store.Store) {
+// UpdateReminder (a user action) clears a claim: the old claimer loses and
+// the reminder can be claimed at once.
+func testUpdateReminderClearsClaim(t *testing.T, open func() store.Store) {
 	ctx := context.Background()
-	hs := handles(open, 4)
-	const n = 40
-	want := map[int64]bool{}
-	for i := range n {
-		want[reminder(t, hs[0], i%3, model.ReminderDue).ID] = true
+	a, b := open(), open()
+	r := reminder(t, a, 1, model.ReminderDue)
+	now := *tp(2)
+	ra := again0(t, a, "A", now)
+	if g := getReminder(t, b, r.ID); g.ClaimToken != "A" {
+		t.Fatalf("claim token not stored: %+v", g)
 	}
-	now := *tp(5)
+	snoozed := getReminder(t, b, r.ID)
+	snoozed.FireAt = now.Add(time.Minute)
+	if err := b.UpdateReminder(ctx, snoozed); err != nil {
+		t.Fatal(err)
+	}
+	if g := getReminder(t, b, r.ID); g.ClaimToken != "" {
+		t.Fatalf("claim survived UpdateReminder: %+v", g)
+	}
+	ra.FireAt = now.Add(time.Hour)
+	if ok, err := a.RescheduleClaimed(ctx, ra); err != nil || ok {
+		t.Fatalf("old claimer: ok=%v err=%v", ok, err)
+	}
+	if g := getReminder(t, b, r.ID); !g.FireAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("old claimer overwrote the update: %+v", g)
+	}
+	// Claimable immediately, long before the old claim_until.
+	if got, _ := b.ClaimReminders(ctx, "B", now.Add(time.Minute), now.Add(claimTTL), 10); len(got) != 1 {
+		t.Fatalf("not claimable after UpdateReminder: %v", ids(got))
+	}
+}
+
+// claimAll drains claims through 3 handles x 4 goroutines in batches of 7
+// (the shape #26 specifies) and checks that every id was claimed exactly once.
+// claim must use the token it is given, which is unique per call.
+func claimAll(t *testing.T, hs []store.Store, want int, claim func(h store.Store, token string, limit int) ([]int64, error)) {
+	t.Helper()
 	var mu sync.Mutex
 	seen := map[int64]string{}
 	var calls atomic.Int64
-	parallel(8, func(i int) {
+	parallel(12, func(i int) {
+		h := hs[i/4]
 		for {
-			token := fmt.Sprintf("tok-%d", calls.Add(1)) // unique per call
-			got, err := hs[i%len(hs)].ClaimReminders(ctx, token, now, now.Add(claimTTL), 3)
+			token := fmt.Sprintf("tok-%d", calls.Add(1))
+			got, err := claim(h, token, 7)
 			if err != nil {
 				t.Error(err)
 				return
@@ -112,22 +147,41 @@ func testClaimRemindersConcurrent(t *testing.T, open func() store.Store) {
 			if len(got) == 0 {
 				return
 			}
+			if len(got) > 7 {
+				t.Errorf("batch of %d exceeds the limit", len(got))
+			}
 			mu.Lock()
-			for _, g := range got {
-				if prev, dup := seen[g.ID]; dup {
-					t.Errorf("reminder %d claimed by %s and %s", g.ID, prev, token)
+			for _, id := range got {
+				if prev, dup := seen[id]; dup {
+					t.Errorf("id %d claimed by %s and %s", id, prev, token)
 				}
-				if g.ClaimToken != token {
-					t.Errorf("token = %q, want %q", g.ClaimToken, token)
-				}
-				seen[g.ID] = token
+				seen[id] = token
 			}
 			mu.Unlock()
 		}
 	})
-	if len(seen) != n {
-		t.Fatalf("claimed %d of %d reminders", len(seen), n)
+	if len(seen) != want {
+		t.Fatalf("claimed %d of %d", len(seen), want)
 	}
+}
+
+func testClaimRemindersConcurrent(t *testing.T, open func() store.Store) {
+	ctx := context.Background()
+	hs := handles(open, 3)
+	const n = 100
+	for i := range n {
+		reminder(t, hs[0], i%3, model.ReminderDue)
+	}
+	now := *tp(5)
+	claimAll(t, hs, n, func(h store.Store, token string, limit int) ([]int64, error) {
+		got, err := h.ClaimReminders(ctx, token, now, now.Add(claimTTL), limit)
+		for _, g := range got {
+			if g.ClaimToken != token {
+				t.Errorf("token = %q, want %q", g.ClaimToken, token)
+			}
+		}
+		return ids(got), err
+	})
 }
 
 func testRescheduleClaimed(t *testing.T, open func() store.Store) {
@@ -264,7 +318,7 @@ func testMarkReminderSentConcurrent(t *testing.T, open func() store.Store) {
 
 func testNextReminderAt(t *testing.T, open func() store.Store) {
 	ctx := context.Background()
-	d := open()
+	d, o := open(), open() // d claims, o (another node) reads
 	if _, ok, err := d.NextReminderAt(ctx); err != nil || ok {
 		t.Fatalf("empty: ok=%v err=%v", ok, err)
 	}
@@ -281,7 +335,7 @@ func testNextReminderAt(t *testing.T, open func() store.Store) {
 	if got, _ := d.ClaimReminders(ctx, "a", now, until, 1); len(got) != 1 {
 		t.Fatalf("claim = %v", ids(got))
 	}
-	next, ok, _ = d.NextReminderAt(ctx)
+	next, ok, _ = o.NextReminderAt(ctx)
 	if !ok || !next.Equal(until) {
 		t.Fatalf("claimed: next = %v, want %v", next, until)
 	}
@@ -290,7 +344,7 @@ func testNextReminderAt(t *testing.T, open func() store.Store) {
 	if got, _ := d.ClaimReminders(ctx, "b", now.Add(11*time.Minute), *tp(8), 1); len(got) != 1 {
 		t.Fatalf("claim b = %v", ids(got))
 	}
-	next, _, _ = d.NextReminderAt(ctx)
+	next, _, _ = o.NextReminderAt(ctx)
 	if !next.Equal(*tp(5)) {
 		t.Fatalf("next = %v, want %v", next, *tp(5))
 	}
@@ -368,8 +422,15 @@ func testClaimDigests(t *testing.T, open func() store.Store) {
 		t.Fatalf("after SetDigest: %v", chatIDs(got))
 	}
 
-	// NextDigestAt counts a claimed chat from its claim_until.
-	next, ok, err := d.NextDigestAt(ctx)
+	if _, err := d.ClaimDigests(ctx, "", now, now.Add(claimTTL), 5); err == nil {
+		t.Fatal("empty token must be an error")
+	}
+	if _, err := d.ClaimDigests(ctx, "", now, now.Add(claimTTL), 0); err == nil {
+		t.Fatal("empty token must be an error, also with limit 0")
+	}
+
+	// A second node's NextDigestAt counts a claimed chat from its claim_until.
+	next, ok, err := open().NextDigestAt(ctx)
 	want := now.Add(claimTTL) // chat 2 claimed by "e"; chat 3 is at tp(9)
 	if err != nil || !ok || !next.Equal(want) {
 		t.Fatalf("next = %v %v %v, want %v", next, ok, err, want)
@@ -378,39 +439,21 @@ func testClaimDigests(t *testing.T, open func() store.Store) {
 
 func testClaimDigestsConcurrent(t *testing.T, open func() store.Store) {
 	ctx := context.Background()
-	hs := handles(open, 4)
-	const n = 24
+	hs := handles(open, 3)
+	const n = 100
 	for i := range n {
 		digestChat(t, hs[0], int64(i+1), *tp(1))
 	}
 	now := *tp(2)
-	var mu sync.Mutex
-	seen := map[int64]string{}
-	var calls atomic.Int64
-	parallel(8, func(i int) {
-		for {
-			token := fmt.Sprintf("tok-%d", calls.Add(1)) // unique per call
-			got, err := hs[i%len(hs)].ClaimDigests(ctx, token, now, now.Add(claimTTL), 3)
-			if err != nil {
-				t.Error(err)
-				return
+	claimAll(t, hs, n, func(h store.Store, token string, limit int) ([]int64, error) {
+		got, err := h.ClaimDigests(ctx, token, now, now.Add(claimTTL), limit)
+		for _, c := range got {
+			if c.DigestClaimToken != token {
+				t.Errorf("token = %q, want %q", c.DigestClaimToken, token)
 			}
-			if len(got) == 0 {
-				return
-			}
-			mu.Lock()
-			for _, c := range got {
-				if prev, dup := seen[c.ID]; dup {
-					t.Errorf("chat %d claimed by %s and %s", c.ID, prev, token)
-				}
-				seen[c.ID] = token
-			}
-			mu.Unlock()
 		}
+		return chatIDs(got), err
 	})
-	if len(seen) != n {
-		t.Fatalf("claimed %d of %d chats", len(seen), n)
-	}
 }
 
 func testStaleClaimerDigest(t *testing.T, open func() store.Store) {
@@ -495,13 +538,14 @@ func testLease(t *testing.T, open func() store.Store) {
 	}
 }
 
-func testLeaseConcurrent(t *testing.T, open func() store.Store) {
-	ctx := context.Background()
-	hs := handles(open, 4)
+// leaseRace has 8 contenders (2 per handle) acquire at the same instant and
+// returns the single winner's row. All callers must see the same row.
+func leaseRace(t *testing.T, hs []store.Store, now time.Time) model.Lease {
+	t.Helper()
 	const n = 8
 	res := make([]model.Lease, n)
 	parallel(n, func(i int) {
-		l, err := hs[i%len(hs)].AcquireLease(ctx, "poller", fmt.Sprintf("n%d", i), base, time.Minute)
+		l, err := hs[i%len(hs)].AcquireLease(context.Background(), "poller", fmt.Sprintf("n%d", i), now, time.Minute)
 		if err != nil {
 			t.Error(err)
 		}
@@ -512,12 +556,40 @@ func testLeaseConcurrent(t *testing.T, open func() store.Store) {
 		if l.Holder == fmt.Sprintf("n%d", i) {
 			winners++
 		}
-		if l.Holder != res[0].Holder || l.Epoch != 1 {
+		if l != res[0] {
 			t.Fatalf("callers disagree: %+v", res)
 		}
 	}
 	if winners != 1 {
 		t.Fatalf("%d winners, want 1: %+v", winners, res)
+	}
+	return res[0]
+}
+
+func testLeaseConcurrent(t *testing.T, open func() store.Store) {
+	ctx := context.Background()
+	hs := handles(open, 4)
+	l := leaseRace(t, hs, base)
+	if l.Epoch != 1 || !l.Until.Equal(base.Add(time.Minute)) {
+		t.Fatalf("first race = %+v", l)
+	}
+	// The holder renews: same epoch.
+	r, err := hs[0].AcquireLease(ctx, "poller", l.Holder, base.Add(10*time.Second), time.Minute)
+	if err != nil || r.Holder != l.Holder || r.Epoch != 1 {
+		t.Fatalf("renewal = %+v, %v", r, err)
+	}
+	// At expiry (<= now) exactly one new holder, epoch+1.
+	exp := r.Until
+	l2 := leaseRace(t, hs, exp)
+	if l2.Epoch != 2 {
+		t.Fatalf("after expiry = %+v", l2)
+	}
+	// After ReleaseLease the lease is free at the same instant: one winner, epoch+1.
+	if err := hs[1].ReleaseLease(ctx, "poller", l2.Holder); err != nil {
+		t.Fatal(err)
+	}
+	if l3 := leaseRace(t, hs, exp); l3.Epoch != 3 {
+		t.Fatalf("after release = %+v", l3)
 	}
 }
 

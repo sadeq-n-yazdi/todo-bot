@@ -128,6 +128,9 @@ func (d *DB) applyMigration(ctx context.Context, m migration, body string) error
 		m.version, m.name, time.Now().Unix()); err != nil {
 		return fmt.Errorf("sqlstore: record %s: %w", m.name, err)
 	}
+	if err := d.d.RecordVersion(ctx, tx, m.version); err != nil {
+		return fmt.Errorf("sqlstore: record version of %s: %w", m.name, err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("sqlstore: commit %s: %w", m.name, err)
 	}

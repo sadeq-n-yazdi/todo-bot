@@ -10,16 +10,16 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 )
 
-const reminderCols = "id, todo_id, chat_id, fire_at, kind, state, attempts, sent_at, message_id, created_at"
+const reminderCols = "id, todo_id, chat_id, fire_at, kind, state, attempts, sent_at, message_id, created_at, COALESCE(claim_token, '')"
 
 // reminderColsR is reminderCols qualified with the "r" alias, for joins.
-const reminderColsR = "r.id, r.todo_id, r.chat_id, r.fire_at, r.kind, r.state, r.attempts, r.sent_at, r.message_id, r.created_at"
+const reminderColsR = "r.id, r.todo_id, r.chat_id, r.fire_at, r.kind, r.state, r.attempts, r.sent_at, r.message_id, r.created_at, COALESCE(r.claim_token, '')"
 
 func reminderDest(r *model.Reminder) (dest []any, finish func()) {
 	var fire, created int64
 	var kind, state string
 	var sent, msg sql.NullInt64
-	dest = []any{&r.ID, &r.TodoID, &r.ChatID, &fire, &kind, &state, &r.Attempts, &sent, &msg, &created}
+	dest = []any{&r.ID, &r.TodoID, &r.ChatID, &fire, &kind, &state, &r.Attempts, &sent, &msg, &created, &r.ClaimToken}
 	finish = func() {
 		r.FireAt, r.Kind, r.State = fromUnix(fire), model.ReminderKind(kind), model.ReminderState(state)
 		r.SentAt, r.MessageID, r.CreatedAt = ptrTime(sent), int(msg.Int64), fromUnix(created)
