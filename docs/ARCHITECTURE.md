@@ -238,7 +238,7 @@ TODO_SCHED_MAX_SLEEP=5m                # use ~30s with several nodes
 TODO_MODE=polling                      # webhook from v0.2, with TODO_HTTP_ADDR, TODO_WEBHOOK_URL, TODO_WEBHOOK_SECRET
 ```
 
-If `GOMEMLIMIT` is unset, `main` sets `debug.SetMemoryLimit(40 << 20)`.
+The binary does not set a memory limit itself. The systemd unit sets `GOMEMLIMIT=40MiB`; when running outside systemd, set it in the environment.
 
 ## 8. Deployment
 
