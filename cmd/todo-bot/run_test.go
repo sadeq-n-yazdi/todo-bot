@@ -147,6 +147,14 @@ func TestErrorsDoNotLeakSecrets(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name+"/"+c.sub, func(t *testing.T) {
 			tgServerURL = c.tgURL
+			if c.tgURL != "" {
+				// Migrate first so the short deadline below times startup,
+				// not schema creation (slow under -race on CI runners).
+				var discard syncBuf
+				if code := run(context.Background(), []string{"migrate"}, envOf(c.env), &discard, &discard); code != 0 {
+					t.Fatalf("migrate exit %d: %s", code, discard.String())
+				}
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 			defer cancel()
 			var out, errb syncBuf
