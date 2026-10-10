@@ -73,6 +73,9 @@ type Chat struct {
 	DigestBy     int64  // user who set the digest; their TZ and locale are used
 	DigestNextAt *time.Time
 	CreatedAt    time.Time
+	// DigestClaimToken is set on chats returned by ClaimDigests; conditional
+	// writes (AdvanceDigest) succeed only while this claim is still ours.
+	DigestClaimToken string
 }
 
 // Todo is one item on a chat's list. Num is the short per-chat number shown
@@ -104,6 +107,9 @@ type Reminder struct {
 	SentAt    *time.Time
 	MessageID int // Telegram message ID once sent (for editing on Done)
 	CreatedAt time.Time
+	// ClaimToken is set on reminders returned by ClaimReminders; conditional
+	// writes (RescheduleClaimed) succeed only while this claim is still ours.
+	ClaimToken string
 }
 
 // DueReminder is a pending reminder joined with its todo.

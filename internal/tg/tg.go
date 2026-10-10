@@ -96,8 +96,14 @@ func containsAny(s string, subs ...string) bool {
 	return false
 }
 
+// Handler processes one update. A non-nil error means the update could not
+// be recorded (dedupe store unreachable) and should be redelivered if the
+// transport can: the webhook answers 500; the poller logs it and moves on.
+// Errors while acting on an update are handled (and logged) inside.
+type Handler func(context.Context, Update) error
+
 // Source delivers updates to h until ctx is done (long polling in v0.1;
 // webhook in v0.2). h is called synchronously, one update at a time.
 type Source interface {
-	Run(ctx context.Context, h func(context.Context, Update)) error
+	Run(ctx context.Context, h Handler) error
 }

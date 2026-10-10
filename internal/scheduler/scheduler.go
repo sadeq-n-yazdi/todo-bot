@@ -1,5 +1,7 @@
-// Package scheduler delivers reminders and digests. One goroutine; SQLite
-// (through Backend) is the only source of truth. See ARCHITECTURE §5.
+// Package scheduler delivers reminders and digests. One goroutine per
+// process; the database (through Backend) is the only source of truth, and
+// every node may run a scheduler: rows are claimed before delivery, so each
+// is handled by one node at a time. See ARCHITECTURE §5 and §9.
 package scheduler
 
 import (
@@ -25,15 +27,17 @@ type Backend interface {
 	// (one transaction). Calling it twice advances once.
 	ReminderSent(ctx context.Context, id int64, msgID int, now time.Time) error
 	// ReminderFailed bumps attempts and reschedules with backoff, or marks
-	// failed; either way it releases the claim.
-	ReminderFailed(ctx context.Context, id int64, now time.Time, permanent bool) error
-	// CancelReminder cancels a reminder whose todo is no longer open.
-	CancelReminder(ctx context.Context, id int64) error
+	// failed; either way it releases the claim. r is the claimed reminder
+	// (r.ClaimToken); if the claim was lost meanwhile it is a no-op.
+	ReminderFailed(ctx context.Context, r model.Reminder, now time.Time, permanent bool) error
+	// CancelReminder cancels a claimed reminder whose todo is no longer open
+	// (no-op if the claim was lost).
+	CancelReminder(ctx context.Context, r model.Reminder) error
 	// ClaimDigests claims chats whose digest is due, like ClaimReminders.
 	ClaimDigests(ctx context.Context, now time.Time) ([]model.Chat, error)
 	// DigestDone computes and stores the chat's next digest time and clears
-	// its claim.
-	DigestDone(ctx context.Context, chatID int64, now time.Time) error
+	// its claim (c is the claimed chat; no-op if the claim was lost).
+	DigestDone(ctx context.Context, c model.Chat, now time.Time) error
 	DigestView(ctx context.Context, chatID int64, now time.Time) (model.DigestView, error)
 	MigrateChat(ctx context.Context, oldID, newID int64) error
 	// Prefs gives the TZ and locale a reminder is rendered in (the todo's
@@ -49,8 +53,23 @@ type Backend interface {
 // created on a node that then died is picked up by another.
 const MaxSleep = 5 * time.Minute
 
+// DefaultClaimTTL matches service.Config's default claim TTL.
+const DefaultClaimTTL = 2 * time.Minute
+
 // Option configures a Scheduler.
 type Option func(*Scheduler)
+
+// WithClaimTTL tells the scheduler how long its claims last (the value given
+// to service.Config.ClaimTTL). A 429 RetryAfter is waited out inline only
+// while it is shorter than ClaimTTL/2; otherwise the reminder is handed back
+// with ReminderFailed(permanent=false). d <= 0 keeps DefaultClaimTTL.
+func WithClaimTTL(d time.Duration) Option {
+	return func(s *Scheduler) {
+		if d > 0 {
+			s.claimTTL = d
+		}
+	}
+}
 
 // WithMaxSleep overrides MaxSleep; d <= 0 keeps the default.
 func WithMaxSleep(d time.Duration) Option {
@@ -73,11 +92,12 @@ type Scheduler struct {
 	wake chan struct{}
 
 	maxSleep time.Duration
+	claimTTL time.Duration
 }
 
 // New returns a Scheduler.
 func New(b Backend, s tg.Sender, c clock.Clock, log *slog.Logger, opts ...Option) *Scheduler {
-	sc := &Scheduler{b: b, send: s, clk: c, log: log, wake: make(chan struct{}, 1), maxSleep: MaxSleep}
+	sc := &Scheduler{b: b, send: s, clk: c, log: log, wake: make(chan struct{}, 1), maxSleep: MaxSleep, claimTTL: DefaultClaimTTL}
 	for _, o := range opts {
 		o(sc)
 	}

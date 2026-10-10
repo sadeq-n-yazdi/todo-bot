@@ -36,8 +36,16 @@ func Register(scheme string, o Opener) {
 }
 
 // Open parses rawURL and opens it with the provider registered for its
-// scheme, e.g. "sqlite:///var/lib/todo-bot/todo.db", "sqlite:todo.db",
-// "postgres://u:p@h/db?sslmode=verify-full", "mysql://u:p@h/db?tls=true".
+// scheme. Accepted forms:
+//
+//	sqlite:///var/lib/todo-bot/todo.db   absolute path (u.Path)
+//	sqlite:todo.db, sqlite:data/todo.db  relative path (u.Opaque)
+//	postgres://u:p@h:5432/db?sslmode=verify-full
+//	mysql://u:p@h:3306/db?tls=true
+//
+// The sqlite provider (registered by #25) rejects a non-empty host, so
+// "sqlite://rel/x.db" is an error rather than host "rel". Build URLs from
+// paths with url.URL{Scheme: "sqlite", Path: p}.String().
 func Open(ctx context.Context, rawURL string) (Store, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {

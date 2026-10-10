@@ -127,8 +127,8 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
 
 - **Migrations** are files named `migrations/<dialect>/NNNN_*.sql`, embedded in the binary. The runner records applied versions in a `schema_migrations` table and applies each newer file in its own transaction. It holds a migration lock while it runs, so two nodes starting at the same time don't race. Until #25 lands, SQLite still tracks versions with `PRAGMA user_version`, and #25 seeds `schema_migrations` from it.
 - **Times** are stored as INTEGER Unix seconds in UTC.
-- **DSN:** `file:<path>?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-2000)`. The pool is limited to one connection (`SetMaxOpenConns(1)`).
-- **Schema:** see `migrations/0001_init.sql`.
+- **DSN:** `file:<path>?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-2000)`. The pool is limited to one connection (`SetMaxOpenConns(1)`).
+- **Schema:** see `migrations/sqlite/0001_init.sql` and, from #25, `0002_multinode.sql` (§9).
   - `users`: id, tz, lang and calendar.
   - `chats`: kind, title, `next_num` (per-chat item numbering), and digest settings (`digest_time`, `digest_by`, `digest_next_at`).
   - `todos`: num (per chat), text, status, `due_at`, `recur`, `tz`, `created_by`.
@@ -143,28 +143,28 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
 
 ## 5. Scheduler
 
-There is one goroutine, and SQLite is the only source of truth. There is no in-memory heap, so nothing can fall out of sync.
+Each process runs one scheduler goroutine, and the database is the only source of truth. There is no in-memory heap, so nothing can fall out of sync. Every node runs a scheduler. Rows are **claimed** before delivery, so each reminder and digest is handled by one node at a time (§9).
 
 ```
 Run: loop {
   Tick(now)
-  next = NextWakeup()          // min(pending reminder fire_at, chat digest_next_at)
-  d = clamp(next-now, 0, 5m)   // cap guards against suspend / wall-clock jumps
+  next = NextWakeup()          // min over claimable rows of max(fire_at, claim_until)
+  d = clamp(next-now, 0, max)  // max = WithMaxSleep, default 5m (30s multi-node)
   select { ctx.Done | wake | clock.After(d) }
 }
 ```
 
 Startup runs `Tick` straight away, which is how missed reminders are caught up.
 
-`Tick` processes due reminders in batches of 50. For each one:
-1. If the todo is done or deleted, the reminder is cancelled.
+`Tick` claims due reminders in batches of 50 (`ClaimReminders`). For each one:
+1. If the todo is done or deleted, the reminder is cancelled (`CancelReminder`, conditional on the claim).
 2. Otherwise it sends `ui.ReminderMsg` with the buttons [Done] [10m] [1h] [Tomorrow].
-3. It then calls `ReminderSent`. In one transaction this marks the reminder as sent. If the reminder is a recurring `due` reminder, the same transaction also sets the todo's `due_at = rule.Next(max(now, fire_at))` and inserts the next `due` reminder.
+3. It then calls `ReminderSent`. In one transaction this marks the reminder as sent (`MarkReminderSent`, conditional on `state='pending'`). Only if that transition wins, and the reminder is a recurring `due` reminder, the same transaction also sets the todo's `due_at = rule.Next(max(now, fire_at))` and inserts the next `due` reminder.
 
-**Delivery is at-least-once.** A crash between sending a reminder and marking it sent means it is sent again.
+**Delivery is at-least-once.** A crash between sending a reminder and marking it sent means it is sent again once the claim expires (ClaimTTL, 2m). Failure and cancel writes are conditional on the claim token, so a node whose claim has expired can never set a reminder another node already sent back to pending.
 
 **Send errors:**
-- A 429 means waiting for the `retry_after` the API returned.
+- A 429 is waited out inline only while `retry_after` is shorter than ClaimTTL/2 (`WithClaimTTL`). Otherwise the reminder is handed back with `ReminderFailed(permanent=false)`.
 - A transient error reschedules the reminder at `now + 2^attempts` minutes. After 5 attempts it is marked `failed`.
 - A permanent error (403, chat not found) marks it `failed` immediately.
 - A 400 that carries a migrate ID calls `MigrateChat` and then retries.
@@ -204,7 +204,7 @@ Startup runs `Tick` straight away, which is how missed reminders are caught up.
 | `/lang [en\|fa]`, `/calendar [gregorian\|jalali]` | Shows or sets your language and calendar. Farsi examples: `خرید نان فردا ساعت ۱۸`, `اجاره هر ماه ۱ام ساعت ۱۰`, `جلسه ۱۵ مهر ساعت ۹`. |
 
 **Buttons and prompts:**
-- The ✏️ and ⏰ buttons send a ForceReply prompt. The pending action is kept in a map guarded by a mutex, keyed by (chatID, promptMsgID), with a 10-minute TTL. It is lost on restart, which is accepted.
+- The ✏️ and ⏰ buttons send a ForceReply prompt. The pending action is persisted in the `prompts` table, keyed by (chatID, promptMsgID), with a 10-minute TTL (`PromptTTL`). It survives restarts and can be completed on any node. Only the user who opened the prompt can answer it (`TakePrompt` checks the user ID).
 - 🗑 asks for confirmation before deleting.
 
 **Groups:**
@@ -279,11 +279,12 @@ v0.1 ships SQLite on one host, but its code paths are already multi-node. v0.2 a
 
 | Problem | Mechanism |
 |---|---|
-| Two schedulers sending the same reminder | `ClaimReminders` / `ClaimDigests` stamp `claim_token` and `claim_until` (2m) in one statement; claimed rows are invisible to other nodes until the claim expires. `NextWakeup` skips rows other nodes have claimed until their claim expires |
+| Two schedulers sending the same reminder | `ClaimReminders` / `ClaimDigests` atomically stamp `claim_token` and `claim_until` (2m), in one statement or one transaction (MySQL). The token is unique per call. Claimed rows are invisible to other nodes until the claim expires, and `NextWakeup` counts them from `claim_until` |
+| A node whose claim expired undoing another node's work | `RescheduleClaimed` / `AdvanceDigest` write only `WHERE claim_token = <mine>` (and `state='pending'`); `ok=false` means the claim was lost, so the write is dropped |
 | A recurring todo advanced twice | `MarkReminderSent` is a conditional pending→sent update; only the winner advances the rule |
-| Two nodes calling `getUpdates` (409) | lease `"poller"`, renewed every TTL/3 (TTL 30s). It hands out an epoch; a new epoch means a fresh win. A node with no successful renewal for TTL/2 fences itself |
-| An update delivered twice (failover, webhook retry) | `MarkUpdate(update_id)` runs before handling, so each update is handled at most once. Ids are purged after 48h |
-| Prompts lost on restart or answered on another node | `prompts` table; `TakePrompt` deletes the row, so exactly one caller wins |
+| Two nodes calling `getUpdates` (409) | lease `"poller"`, renewed every TTL/3 (TTL 30s). The holder is `NodeID:random`, one per process. The epoch is bumped on every acquisition that is not a live renewal. A node with no successful renewal for TTL/2 fences itself. `ReleaseLease` sets `held_until` to 0 |
+| An update delivered twice (failover, webhook retry) | `handler.Handle` is the single gate for every transport: it calls `MarkUpdate(update_id)` before acting, so each update is handled at most once. If recording fails, `Handle` returns an error and does nothing: the webhook answers 500 so Telegram retries, and the poller logs it. Ids are purged after 48h |
+| Prompts lost on restart or answered on another node | `prompts` table; `TakePrompt(chat, msg, user)` deletes the row, so exactly one caller wins. Another user's reply leaves the prompt in place, and expired rows are left for `Purge` |
 
 - **Every node runs the scheduler.** Claims make that safe.
 - **Delivery stays at-least-once.** A reminder is sent twice only if a node dies after sending it but before marking it sent, and its claim then expires.
@@ -298,8 +299,8 @@ v0.1 ships SQLite on one host, but its code paths are already multi-node. v0.2 a
 - `reminders` gets `claim_token` and `claim_until`.
 - `chats` gets `digest_claim_token` and `digest_claim_until`.
 - New tables:
-  - `leases(name PK, holder, until, epoch)`;
-  - `prompts(chat_id, msg_id PK, user_id, kind, todo_id, expires_at)`;
+  - `leases(name PK, holder, held_until, epoch)`. The column is not called `until`, because that is reserved in MySQL 8;
+  - `prompts(chat_id, msg_id, user_id, kind, todo_id, expires_at, PRIMARY KEY (chat_id, msg_id))`;
   - `processed_updates(update_id PK, seen_at)`;
   - `schema_migrations(version PK, name, applied_at)`.
 - Postgres and MySQL use BIGINT for ids and times.

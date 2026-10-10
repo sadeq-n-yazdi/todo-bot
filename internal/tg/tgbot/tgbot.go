@@ -44,7 +44,7 @@ func (b *Bot) Poller() tg.Source { return poller{b} }
 
 type poller struct{ b *Bot }
 
-func (p poller) Run(ctx context.Context, h func(context.Context, tg.Update)) error {
+func (p poller) Run(ctx context.Context, h tg.Handler) error {
 	return errNotImplemented
 }
 

@@ -72,11 +72,13 @@ type Service interface {
 
 	// PutPrompt persists a force-reply prompt; ExpiresAt is set to now+PromptTTL.
 	PutPrompt(ctx context.Context, p model.Prompt) error
-	// TakePrompt consumes the prompt a reply answers; ErrNotFound if missing,
-	// expired or already taken (by this or another node).
-	TakePrompt(ctx context.Context, chatID int64, msgID int) (model.Prompt, error)
+	// TakePrompt consumes the prompt a reply (from userID) answers;
+	// ErrNotFound if missing, another user's, expired or already taken (by
+	// this or another node).
+	TakePrompt(ctx context.Context, chatID int64, msgID int, userID int64) (model.Prompt, error)
 	// MarkUpdate records a Telegram update id; first=false means it was
 	// already handled (re-delivery after a poller failover or webhook retry).
+	// Called only by handler.Handle, the single dedupe gate.
 	MarkUpdate(ctx context.Context, updateID int64) (first bool, err error)
 }
 
@@ -86,7 +88,8 @@ type Config struct {
 	DefaultHour   int // TODO_DEFAULT_TIME, used for snooze "tomorrow"
 	DefaultMinute int
 
-	// NodeID identifies this process in claim tokens (NodeID+":"+random).
+	// NodeID identifies this process in claim tokens: each claim call uses a
+	// fresh NodeID+":"+random token.
 	NodeID string
 	// ClaimTTL is how long a claimed reminder/digest stays reserved for this
 	// node; 0 means 2m.
