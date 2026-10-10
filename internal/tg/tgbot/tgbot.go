@@ -263,7 +263,7 @@ func (b *Bot) convert(u *models.Update) (tg.Update, bool) {
 		return tg.Update{ID: u.ID, Message: b.convertMessage(u.Message)}, true
 	case u.CallbackQuery != nil:
 		cb := u.CallbackQuery
-		out := &tg.Callback{ID: cb.ID, FromID: cb.From.ID, FromLang: cb.From.LanguageCode, Data: cb.Data}
+		out := &tg.Callback{ID: cb.ID, FromID: cb.From.ID, FromUsername: cb.From.Username, FromLang: cb.From.LanguageCode, Data: cb.Data}
 		switch {
 		case cb.Message.Message != nil:
 			out.ChatID, out.MessageID = cb.Message.Message.Chat.ID, cb.Message.Message.ID
@@ -288,6 +288,7 @@ func (b *Bot) convertMessage(m *models.Message) *tg.Message {
 		out.FromID = m.From.ID
 		out.FromLang = m.From.LanguageCode
 		out.FromName = displayName(m.From)
+		out.FromUsername = m.From.Username
 	}
 	if m.ReplyToMessage != nil {
 		out.ReplyToID = m.ReplyToMessage.ID
