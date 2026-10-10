@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Leader lease loop (#27). It decides which node polls Telegram:
+  - the leader renews its lease every ttl/3, and steps down by ttl/2 after its last successful renewal, even if a database call hangs;
+  - only one renewal call is in flight at a time, and the lease is released on shutdown.
 - Service layer (#8):
   - todos, reminders, recurrence in the user's zone and calendar (DST- and Jalali-safe), snooze, digests and preferences;
   - every write after a claim is conditional on the claim token;

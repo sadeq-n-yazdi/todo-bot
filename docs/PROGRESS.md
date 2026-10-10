@@ -14,7 +14,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 5 | 1 | Natural-language parser (en + fa, Jalali) | ✅ merged | #22 |
 | 25 | 2 | sqlstore + Dialect; port SQLite; multi-node methods | ✅ merged | #42 |
 | 26 | 2 | storetest conformance suite | ✅ merged | #42 |
-| 27 | 2 | Leader lease loop | 🔍 in review | #47 |
+| 27 | 2 | Leader lease loop | ✅ merged | #47 |
 | 6 | 2 | Telegram adapter | ✅ merged | #40 |
 | 7 | 2 | UI rendering and callback codec | ✅ merged | #20 |
 | 8 | 2 | Service layer | ✅ merged | #48 |
