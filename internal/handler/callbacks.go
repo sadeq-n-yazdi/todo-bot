@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
@@ -53,35 +52,9 @@ func (h *Handler) onCallback(ctx context.Context, cb *tg.Callback, r req) error 
 	return nil
 }
 
-func (h *Handler) tz(r req) *time.Location {
-	if r.Prefs.TZ == nil {
-		return time.UTC
-	}
-	return r.Prefs.TZ
-}
-
 // isGone reports whether err means the item is missing or not in this chat.
 func isGone(err error) bool {
 	return errors.Is(err, service.ErrNotFound) || errors.Is(err, service.ErrForeignChat)
-}
-
-// ownedTodo finds the open todo id in chatID. A todo of another chat is
-// indistinguishable from a missing one, so ids cannot be probed.
-func (h *Handler) ownedTodo(ctx context.Context, chatID, id int64) (model.Todo, error) {
-	for page := 0; ; page++ {
-		ts, pages, err := h.Svc.List(ctx, chatID, page)
-		if err != nil {
-			return model.Todo{}, err
-		}
-		for _, td := range ts {
-			if td.ID == id {
-				return td, nil
-			}
-		}
-		if page+1 >= pages {
-			return model.Todo{}, service.ErrNotFound
-		}
-	}
 }
 
 // listView renders list page `page` (clamped to the last page), optionally
@@ -97,7 +70,7 @@ func (h *Handler) listView(ctx context.Context, chatID int64, r req, page int, s
 			return tg.OutMessage{}, err
 		}
 	}
-	out := ui.TodoList(ts, r.Prefs.Locale, h.tz(r), h.Clock.Now(), page, pages)
+	out := ui.TodoList(ts, r.Prefs.Locale, tzOf(r), h.Clock.Now(), page, pages)
 	if status != "" {
 		out.Text = status + "\n\n" + out.Text
 	}
@@ -128,7 +101,7 @@ func (h *Handler) actionCallback(ctx context.Context, cb *tg.Callback, r req, ac
 		} else if err != nil {
 			return "", err
 		}
-		h.editCallbackMsg(ctx, cb, tg.OutMessage{Text: "✅ " + ui.Escape(td.Text)})
+		h.editCallbackMsg(ctx, cb, tg.OutMessage{Text: lc.T("settings.cb.ack", echo(td.Text))})
 		return "", nil
 	case ui.ActSnooze:
 		rem, err := h.Svc.Snooze(ctx, r.Actor, act.ID, act.Arg)
@@ -137,52 +110,59 @@ func (h *Handler) actionCallback(ctx context.Context, cb *tg.Callback, r req, ac
 		} else if err != nil {
 			return "", err
 		}
-		when := ui.FormatWhen(rem.FireAt, lc, h.tz(r), h.Clock.Now())
+		when := ui.FormatWhen(rem.FireAt, lc, tzOf(r), h.Clock.Now())
 		h.editCallbackMsg(ctx, cb, tg.OutMessage{Text: lc.T("settings.cb.snoozed", when)})
 		return "", nil
 	}
 
-	// The remaining actions all target a todo of this chat.
-	td, err := h.ownedTodo(ctx, cb.ChatID, act.ID)
+	// Done and confirmed deletion go straight to the service, which enforces
+	// that the item belongs to the callback's chat (Actor.ChatID).
+	switch act.Kind {
+	case ui.ActDone:
+		done, err := h.Svc.Complete(ctx, r.Actor, act.ID)
+		if isGone(err) {
+			return gone, nil
+		} else if err != nil {
+			return "", err
+		}
+		return "", h.showList(ctx, cb, r, 0, lc.T("settings.cb.done", echo(done.Text)))
+	case ui.ActDeleteConfirm:
+		err := h.Svc.Delete(ctx, r.Actor, act.ID)
+		if isGone(err) {
+			return gone, nil
+		} else if err != nil {
+			return "", err
+		}
+		return "", h.showList(ctx, cb, r, 0, lc.T("settings.cb.deleted"))
+	case ui.ActDelete, ui.ActEdit, ui.ActRemind:
+	default:
+		return "", nil
+	}
+
+	// These three echo the item, so load it (this also rejects other chats).
+	td, err := h.Svc.Todo(ctx, r.Actor, act.ID)
 	if isGone(err) {
 		return gone, nil
 	} else if err != nil {
 		return "", err
 	}
 	switch act.Kind {
-	case ui.ActDone:
-		done, err := h.Svc.Complete(ctx, r.Actor, td.ID)
-		if isGone(err) {
-			return gone, nil
-		} else if err != nil {
-			return "", err
-		}
-		return "", h.showList(ctx, cb, r, 0, lc.T("settings.cb.done", ui.Escape(done.Text)))
 	case ui.ActDelete:
 		h.editCallbackMsg(ctx, cb, tg.OutMessage{
-			Text: lc.T("settings.cb.confirm", ui.Escape(td.Text)),
+			Text: lc.T("settings.cb.confirm", echo(td.Text)),
 			Keyboard: [][]tg.Button{{
 				{Text: lc.T("settings.btn.delete"), Data: ui.Encode(ui.Action{Kind: ui.ActDeleteConfirm, ID: td.ID})},
 				{Text: lc.T("settings.btn.cancel"), Data: ui.Encode(ui.Action{Kind: ui.ActCancel})},
 			}},
 		})
 		return "", nil
-	case ui.ActDeleteConfirm:
-		err := h.Svc.Delete(ctx, r.Actor, td.ID)
-		if isGone(err) {
-			return gone, nil
-		} else if err != nil {
-			return "", err
-		}
-		return "", h.showList(ctx, cb, r, 0, lc.T("settings.cb.deleted", ui.Escape(td.Text)))
 	case ui.ActEdit:
-		text := lc.T("settings.prompt.edit", lc.Num(td.Num), ui.Escape(td.Text))
+		text := lc.T("settings.prompt.edit", lc.Num(td.Num), echo(td.Text))
 		return "", h.sendPrompt(ctx, cb, model.PromptEdit, td.ID, text)
-	case ui.ActRemind:
-		text := lc.T("settings.prompt.when", lc.Num(td.Num), ui.Escape(td.Text))
+	default: // ui.ActRemind
+		text := lc.T("settings.prompt.when", lc.Num(td.Num), echo(td.Text))
 		return "", h.sendPrompt(ctx, cb, model.PromptRemind, td.ID, text)
 	}
-	return "", nil
 }
 
 func (h *Handler) showList(ctx context.Context, cb *tg.Callback, r req, page int, status string) error {

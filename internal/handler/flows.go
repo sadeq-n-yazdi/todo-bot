@@ -28,8 +28,8 @@ func (h *Handler) onReply(ctx context.Context, m *tg.Message, r req) (handled bo
 		return false, nil
 	}
 	if err != nil {
-		h.Log.Error("take prompt", "chat", m.ChatID, "msg", m.ReplyToID, "err", err)
-		return false, nil
+		// Handled, so the reply is not mistaken for a new item.
+		return true, err
 	}
 	switch p.Kind {
 	case model.PromptEdit:
@@ -40,13 +40,19 @@ func (h *Handler) onReply(ctx context.Context, m *tg.Message, r req) (handled bo
 	return true, nil
 }
 
-// retry tells the user what was wrong and re-opens the prompt, so they can
-// answer the same message again.
+// retry tells the user what was wrong and asks again with a fresh ForceReply
+// prompt (the old one was consumed by TakePrompt).
 func (h *Handler) retry(ctx context.Context, m *tg.Message, r req, p model.Prompt, key string) error {
-	if err := h.Svc.PutPrompt(ctx, p); err != nil {
+	lc := r.Prefs.Locale
+	id, err := h.Send.Send(ctx, m.ChatID, h.threaded(m, tg.OutMessage{
+		Text:       lc.T(key) + "\n" + lc.T("settings.prompt.again"),
+		ForceReply: true,
+	}))
+	if err != nil {
 		return err
 	}
-	return h.say(ctx, m, r.Prefs.Locale.T(key))
+	p.MsgID = id
+	return h.Svc.PutPrompt(ctx, p)
 }
 
 func (h *Handler) finishEdit(ctx context.Context, m *tg.Message, r req, p model.Prompt) error {
@@ -61,12 +67,12 @@ func (h *Handler) finishEdit(ctx context.Context, m *tg.Message, r req, p model.
 	} else if err != nil {
 		return err
 	}
-	return h.say(ctx, m, lc.T("settings.prompt.done", lc.Num(td.Num), ui.Escape(td.Text)))
+	return h.say(ctx, m, lc.T("settings.prompt.done", lc.Num(td.Num), echo(td.Text)))
 }
 
 func (h *Handler) finishRemind(ctx context.Context, m *tg.Message, r req, p model.Prompt) error {
 	lc := r.Prefs.Locale
-	now := h.Clock.Now().In(h.tz(r))
+	now := h.Clock.Now().In(tzOf(r))
 	at, rule, err := h.Parser.ParseWhen(m.Text, now, lc.Cal)
 	switch {
 	case errors.Is(err, nlparse.ErrNoDate):
@@ -85,7 +91,7 @@ func (h *Handler) finishRemind(ctx context.Context, m *tg.Message, r req, p mode
 	case err != nil:
 		return err
 	}
-	when := ui.FormatWhen(rem.FireAt, lc, h.tz(r), now)
+	when := ui.FormatWhen(rem.FireAt, lc, tzOf(r), now)
 	return h.say(ctx, m, lc.T("settings.remind.set", when))
 }
 

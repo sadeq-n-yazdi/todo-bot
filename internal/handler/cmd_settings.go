@@ -9,7 +9,6 @@ import (
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
-	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/service"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/ui"
@@ -17,15 +16,6 @@ import (
 
 // Settings commands. Each replies itself for expected errors (bad input)
 // and returns an error only for unexpected failures.
-
-// say sends text to the message's chat; in groups it is a reply to m.
-func (h *Handler) say(ctx context.Context, m *tg.Message, text string) error {
-	out := tg.OutMessage{Text: text}
-	if m.ChatKind == model.ChatGroup {
-		out.ReplyTo = m.ID
-	}
-	return h.reply(ctx, m, out)
-}
 
 // cmdRemind: "/remind <n> <when>" adds a reminder to item n;
 // "/remind <text> <when>" creates an item with a due time.
@@ -35,7 +25,7 @@ func (h *Handler) cmdRemind(ctx context.Context, m *tg.Message, r req, args stri
 	if args == "" {
 		return h.say(ctx, m, lc.T("settings.remind.use"))
 	}
-	now := h.Clock.Now().In(h.tz(r))
+	now := h.Clock.Now().In(tzOf(r))
 
 	// "<n> <when>": only if the rest really is a time phrase, so that
 	// "/remind 2 pizzas tomorrow" stays an item called "2 pizzas".
@@ -54,12 +44,15 @@ func (h *Handler) cmdRemind(ctx context.Context, m *tg.Message, r req, args stri
 	if res.Due == nil || strings.TrimSpace(res.Text) == "" {
 		return h.say(ctx, m, lc.T("settings.remind.nowhen")+"\n\n"+lc.T("settings.remind.use"))
 	}
+	if res.Rule != nil {
+		return h.say(ctx, m, lc.T("settings.remind.recur"))
+	}
 	td, err := h.Svc.AddTodo(ctx, r.Actor, res)
 	if err != nil {
 		return err
 	}
-	return h.say(ctx, m, lc.T("settings.remind.added", lc.Num(td.Num), ui.Escape(td.Text),
-		ui.FormatWhen(*td.DueAt, lc, h.tz(r), now)))
+	return h.say(ctx, m, lc.T("settings.remind.added", lc.Num(td.Num), echo(td.Text),
+		ui.FormatWhen(*td.DueAt, lc, tzOf(r), now)))
 }
 
 func (h *Handler) remindItem(ctx context.Context, m *tg.Message, r req, num int, at time.Time, recurring bool) error {
@@ -82,25 +75,25 @@ func (h *Handler) remindItem(ctx context.Context, m *tg.Message, r req, num int,
 	case err != nil:
 		return err
 	}
-	when := ui.FormatWhen(rem.FireAt, lc, h.tz(r), h.Clock.Now())
-	return h.say(ctx, m, lc.T("settings.remind.set", when)+"\n"+lc.Num(td.Num)+". "+ui.Escape(td.Text))
+	when := ui.FormatWhen(rem.FireAt, lc, tzOf(r), h.Clock.Now())
+	return h.say(ctx, m, lc.T("settings.remind.set", when)+"\n"+lc.Num(td.Num)+". "+echo(td.Text))
 }
 
 func (h *Handler) cmdTZ(ctx context.Context, m *tg.Message, r req, args string) error {
 	lc := r.Prefs.Locale
 	name := strings.TrimSpace(args)
 	if name == "" {
-		return h.say(ctx, m, lc.T("settings.tz.show", ui.Escape(h.tz(r).String())))
+		return h.say(ctx, m, lc.T("settings.tz.show", ui.Escape(tzOf(r).String())))
 	}
 	// "Local" would resolve to the server's zone; only IANA names are valid.
 	if loc, err := time.LoadLocation(name); err != nil || name == "Local" {
-		return h.say(ctx, m, lc.T("settings.tz.bad", ui.Escape(name)))
+		return h.say(ctx, m, lc.T("settings.tz.bad", echo(clip(name, 64))))
 	} else {
 		name = loc.String()
 	}
 	err := h.Svc.SetTZ(ctx, r.Actor.UserID, name)
 	if errors.Is(err, service.ErrBadTZ) {
-		return h.say(ctx, m, lc.T("settings.tz.bad", ui.Escape(name)))
+		return h.say(ctx, m, lc.T("settings.tz.bad", echo(clip(name, 64))))
 	} else if err != nil {
 		return err
 	}
@@ -130,7 +123,7 @@ func (h *Handler) cmdDigest(ctx context.Context, m *tg.Message, r req, args stri
 	} else if err != nil {
 		return err
 	}
-	return h.say(ctx, m, lc.T("settings.digest.set", lc.Digits(hhmm), ui.Escape(h.tz(r).String())))
+	return h.say(ctx, m, lc.T("settings.digest.set", lc.Digits(hhmm), ui.Escape(tzOf(r).String())))
 }
 
 var langAliases = map[string]i18n.Lang{
@@ -200,4 +193,12 @@ func (h *Handler) cmdCalendar(ctx context.Context, m *tg.Message, r req, args st
 	}
 	lc.Cal = cal
 	return h.say(ctx, m, lc.T("settings.cal.set", calName(lc, cal)))
+}
+
+// clip shortens s to at most n runes.
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }

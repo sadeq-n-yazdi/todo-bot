@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -119,6 +120,10 @@ func TestEditPromptEmptyReplyKeepsPromptOpen(t *testing.T) {
 	if hh.svc.todo(td.ID).Text != "keep" || hh.last().Msg.Text == "" {
 		t.Fatalf("want an explanation and no change: %+v", hh.fs.Messages())
 	}
+	if !hh.last().Msg.ForceReply {
+		t.Fatalf("retry must be a fresh ForceReply prompt: %+v", hh.last())
+	}
+	id = hh.last().MsgID
 	hh.say(1, 1, model.ChatPrivate, "better", id)
 	if hh.svc.todo(td.ID).Text != "better" {
 		t.Fatal("prompt should still be answerable after an empty reply")
@@ -152,7 +157,11 @@ func TestRemindPromptUsesPersianDigitsAndRetries(t *testing.T) {
 	if len(hh.svc.remindAt) != 0 || hh.last().Msg.Text == "" {
 		t.Fatalf("unparsable time should be explained: %+v", hh.fs.Messages())
 	}
-	// Same prompt message can be answered again; Persian digits are accepted.
+	if !hh.last().Msg.ForceReply {
+		t.Fatalf("retry must be a fresh ForceReply prompt: %+v", hh.last())
+	}
+	// The fresh prompt can be answered; Persian digits are accepted.
+	id = hh.last().MsgID
 	hh.say(1, 1, model.ChatPrivate, "فردا ساعت ۱۸", id)
 	want := time.Date(2026, 10, 11, 18, 0, 0, 0, time.UTC)
 	if len(hh.svc.remindAt) != 1 || !hh.svc.remindAt[0].Equal(want) {
@@ -182,5 +191,34 @@ func TestDuplicateUpdateProcessedOnce(t *testing.T) {
 	}
 	if hh.svc.called("Complete") != 1 {
 		t.Fatalf("Complete called %d times", hh.svc.called("Complete"))
+	}
+}
+
+func TestTakePromptErrorDoesNotFallThroughToAdd(t *testing.T) {
+	hh := newHarness12(t)
+	hh.svc.takeErr = errors.New("db down")
+	hh.say(1, 1, model.ChatPrivate, "sneaky", 5)
+	if hh.svc.called("AddTodo") != 0 {
+		t.Fatal("a store error must not turn a reply into a new item")
+	}
+	if hh.last().Msg.Text == "" {
+		t.Fatal("user should see an error")
+	}
+}
+
+func TestLongItemTextIsTruncatedInEchoes(t *testing.T) {
+	hh := newHarness12(t)
+	td := hh.svc.addTodo(1, strings.Repeat("<", 3000))
+	for _, k := range []ui.ActionKind{ui.ActDelete, ui.ActEdit, ui.ActRemind} {
+		hh.fs.Reset()
+		hh.press(1, 1, 4, act(k, td.ID, ""))
+		if n := len([]rune(hh.last().Msg.Text)); n > 4096 {
+			t.Errorf("%s: text has %d runes", k, n)
+		}
+	}
+	hh.fs.Reset()
+	hh.press(1, 1, 4, act(ui.ActDone, td.ID, ""))
+	if n := len([]rune(hh.last().Msg.Text)); n > 4096 || !strings.Contains(hh.last().Msg.Text, "…") {
+		t.Errorf("done: text has %d runes", n)
 	}
 }

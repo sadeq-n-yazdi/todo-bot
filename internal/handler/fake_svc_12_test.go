@@ -35,6 +35,7 @@ type fakeSvc12 struct {
 	nextID    int64
 	seen      map[int64]bool
 	calls     []string
+	takeErr   error // returned by TakePrompt when set
 }
 
 var _ service.Service = (*fakeSvc12)(nil)
@@ -183,6 +184,17 @@ func (f *fakeSvc12) ByNum(_ context.Context, chatID int64, num int) (model.Todo,
 	return model.Todo{}, service.ErrNotFound
 }
 
+func (f *fakeSvc12) Todo(_ context.Context, a service.Actor, id int64) (model.Todo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rec("Todo")
+	t, err := f.own(a, id)
+	if err != nil {
+		return model.Todo{}, err
+	}
+	return *t, nil
+}
+
 // own returns the todo if it belongs to the actor's chat.
 func (f *fakeSvc12) own(a service.Actor, id int64) (*model.Todo, error) {
 	t := f.find(id)
@@ -323,6 +335,9 @@ func (f *fakeSvc12) PutPrompt(_ context.Context, p model.Prompt) error {
 func (f *fakeSvc12) TakePrompt(_ context.Context, chatID int64, msgID int, userID int64) (model.Prompt, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.takeErr != nil {
+		return model.Prompt{}, f.takeErr
+	}
 	key := [2]int64{chatID, int64(msgID)}
 	p, ok := f.prompts[key]
 	if !ok || p.UserID != userID || !f.clk.Now().Before(p.ExpiresAt) {

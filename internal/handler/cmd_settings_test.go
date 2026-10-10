@@ -225,3 +225,46 @@ func TestSettingsKeysHaveBothLanguages(t *testing.T) {
 		}
 	}
 }
+
+func TestCmdRemindNumberHeuristic(t *testing.T) {
+	hh := newHarness12(t)
+	hh.svc.addTodo(1, "first")
+	hh.svc.addTodo(1, "second")
+	hh.svc.addTodo(1, "third")
+
+	// "pay rent tomorrow" is not a time phrase, so the 3 stays in the text.
+	hh.private("/remind 3 pay rent tomorrow")
+	if got := hh.svc.todo(4); got.Text != "3 pay rent" {
+		t.Fatalf("todo = %+v", got)
+	}
+	if len(hh.svc.remindAt) != 0 {
+		t.Fatal("no reminder on item 3 expected")
+	}
+	hh.private("/remind 2 pizzas tomorrow")
+	if got := hh.svc.todo(5); got.Text != "2 pizzas" {
+		t.Fatalf("todo = %+v", got)
+	}
+	hh.private("/remind 2 tomorrow 18:00")
+	if len(hh.svc.remindAt) != 1 {
+		t.Fatal("numeric form should add a reminder to item 2")
+	}
+}
+
+func TestCmdRemindRejectsRecurringTextForm(t *testing.T) {
+	hh := newHarness12(t)
+	hh.private("/remind pay rent every month 10am")
+	if hh.svc.called("AddTodo") != 0 {
+		t.Fatal("recurring item must not be created")
+	}
+	if !strings.Contains(hh.last().Msg.Text, "/add") {
+		t.Fatalf("want the recurring explanation: %q", hh.last().Msg.Text)
+	}
+}
+
+func TestTZBadNameIsTruncated(t *testing.T) {
+	hh := newHarness12(t)
+	hh.private("/tz " + strings.Repeat("x", 3000))
+	if n := len([]rune(hh.last().Msg.Text)); n > 400 {
+		t.Fatalf("reply has %d runes", n)
+	}
+}

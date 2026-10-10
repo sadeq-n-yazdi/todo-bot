@@ -175,3 +175,32 @@ func TestCallbackStaleTodoAnswered(t *testing.T) {
 		t.Fatalf("got %+v / %+v", hh.fs.Answers, hh.fs.Messages())
 	}
 }
+
+func TestCallbackDoneItemAnsweredByServiceVerdict(t *testing.T) {
+	hh := newHarness12(t)
+	a := hh.svc.addTodo(1, "finished elsewhere")
+	hh.press(1, 1, 1, act(ui.ActDone, a.ID, ""))
+	hh.fs.Reset()
+	// A stale button: the item is already done. The service says not-found
+	// for deletion of a deleted item; here Complete succeeds again in the
+	// fake, so use delete-confirm twice instead.
+	hh.press(1, 1, 1, act(ui.ActDeleteConfirm, a.ID, ""))
+	hh.press(1, 1, 1, act(ui.ActDeleteConfirm, a.ID, ""))
+	if hh.svc.called("Delete") != 2 {
+		t.Fatalf("the service must be asked, calls=%d", hh.svc.called("Delete"))
+	}
+	if last := hh.fs.Answers[len(hh.fs.Answers)-1]; last.Text == "" {
+		t.Fatalf("stale press should be answered with an explanation: %+v", hh.fs.Answers)
+	}
+}
+
+func TestCallbackEditPromptOnDoneItemAllowed(t *testing.T) {
+	hh := newHarness12(t)
+	a := hh.svc.addTodo(1, "x")
+	hh.press(1, 1, 1, act(ui.ActDone, a.ID, ""))
+	hh.fs.Reset()
+	hh.press(1, 1, 1, act(ui.ActEdit, a.ID, ""))
+	if !hh.last().Msg.ForceReply {
+		t.Fatalf("Todo includes done items, so the prompt is sent: %+v", hh.last())
+	}
+}
