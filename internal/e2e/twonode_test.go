@@ -105,6 +105,11 @@ func TestTwoNodesOnlyLeaderPollsAndDeliversOnce(t *testing.T) {
 	if m.polled(b.token) {
 		t.Fatal("node B polls while node A holds the lease")
 	}
+	// The lease row itself still names A. A probe by a third holder cannot
+	// take a live lease; it only reads who has it.
+	if l := probeLease(t, a.st, clk); !strings.HasPrefix(l.Holder, "node-a:") {
+		t.Fatalf("lease holder %q, want node A", l.Holder)
+	}
 
 	const tasks = 8
 	for i := 1; i <= tasks; i++ {

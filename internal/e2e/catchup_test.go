@@ -104,6 +104,21 @@ func TestCatchUpDigest(t *testing.T) {
 		t.Fatalf("a digest 45m late was not sent (%d)", n)
 	}
 	assertDigestNext(t, s, alice, utc(2026, 10, 13, 8, 0))
+
+	// The limit is "more than 1h late" (scheduler: now-next > digestMaxLate),
+	// so a digest exactly 1h late is still sent ...
+	s.advanceTo(utc(2026, 10, 13, 9, 0))
+	if n := countDigests(s, alice); n != 2 {
+		t.Fatalf("a digest exactly 1h late was not sent (%d digests)", n)
+	}
+	assertDigestNext(t, s, alice, utc(2026, 10, 14, 8, 0))
+
+	// ... and one second more is skipped.
+	s.advanceTo(utc(2026, 10, 14, 9, 0).Add(time.Second))
+	if n := countDigests(s, alice); n != 2 {
+		t.Fatalf("a digest 1h and 1s late was sent (%d digests)", n)
+	}
+	assertDigestNext(t, s, alice, utc(2026, 10, 15, 8, 0))
 }
 
 func countDigests(s *stack, chat int64) int {

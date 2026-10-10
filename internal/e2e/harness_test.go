@@ -43,6 +43,17 @@ func dbURL(dir string) string {
 	return (&url.URL{Scheme: "sqlite", Path: filepath.Join(dir, "todo.db")}).String()
 }
 
+// The stacks follow runBot in cmd/todo-bot/run.go, with these deliberate
+// differences. Mirror any later change of run.go here.
+//   - scheduler.WithMaxSleep is not passed (the scheduler default is used),
+//     and service.Config.DefaultTZ is UTC instead of coming from config.
+//   - The lead function does not call setCommands (it only deletes the
+//     webhook and polls).
+//   - Single-node tests deliver updates to Handle and drive the scheduler
+//     with Tick, so they bypass the lease loop and the tgbot adapter and use
+//     tgtest.FakeSender. Only the two-node tests (twonode_test.go) go
+//     through lease.Run and tgbot against a mock Bot API.
+
 // stack is one full bot node: store, service, scheduler and handler, wired
 // like cmd/todo-bot/run.go does.
 type stack struct {
