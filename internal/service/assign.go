@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 )
 
 // Assignment (#58, ARCHITECTURE §11). AddTodoFor lives in todos.go next to
@@ -19,7 +21,13 @@ func normUsername(name string) string {
 // a cache, so any node can serve any update. SetUsername runs on the pool,
 // not inside WithTx, so concurrent nodes cannot make it fail (§11).
 func (s *Svc) NoteUsername(ctx context.Context, userID int64, username string) error {
-	u, err := s.ensureUser(ctx, s.st, userID, "")
+	u, err := s.st.GetUser(ctx, userID)
+	if errors.Is(err, store.ErrNotFound) {
+		// Do not create the user here: that would pin a first-time user
+		// to the default language before Prefs applies their Telegram
+		// language. The next update records the name.
+		return nil
+	}
 	if err != nil {
 		return err
 	}

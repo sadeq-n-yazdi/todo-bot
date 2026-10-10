@@ -18,7 +18,9 @@ import (
 const completeAheadWindow = 12 * time.Hour
 
 // ownedTodo loads a todo and checks that the actor may act on it: it lives in
-// the actor's chat, or the actor is its assignee (ARCHITECTURE §11). Deleted
+// the actor's chat, or the actor is its assignee acting from their own
+// private chat (ARCHITECTURE §11). The private-chat condition stops a
+// modified client from acting on the item from an unrelated group. Deleted
 // todos count as missing.
 func ownedTodo(ctx context.Context, st store.Store, a Actor, todoID int64) (model.Todo, error) {
 	t, err := st.GetTodo(ctx, todoID)
@@ -28,7 +30,7 @@ func ownedTodo(ctx context.Context, st store.Store, a Actor, todoID int64) (mode
 	if t.Status == model.TodoDeleted {
 		return model.Todo{}, ErrNotFound
 	}
-	if t.ChatID != a.ChatID && (t.AssigneeID == 0 || t.AssigneeID != a.UserID) {
+	if t.ChatID != a.ChatID && (t.AssigneeID == 0 || t.AssigneeID != a.UserID || a.ChatID != a.UserID) {
 		return model.Todo{}, ErrForeignChat
 	}
 	return t, nil

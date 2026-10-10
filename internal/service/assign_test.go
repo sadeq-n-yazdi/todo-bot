@@ -6,9 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/nlparse"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/ui"
 )
 
 var (
@@ -27,6 +29,16 @@ func (e *env) username(id int64) string {
 	return u.Username
 }
 
+// note makes the user exist (as Prefs does on a first update) and then
+// records the username, as the handler does.
+func (e *env) note(id int64, name string) error {
+	e.t.Helper()
+	if _, err := e.svc.Prefs(ctx, id, ""); err != nil {
+		return err
+	}
+	return e.svc.NoteUsername(ctx, id, name)
+}
+
 func (e *env) addFor(a Actor, assignee int64, text string, due *time.Time, rule string) model.Todo {
 	e.t.Helper()
 	r := nlparse.Result{Text: text, Due: due, HasTime: due != nil}
@@ -41,7 +53,7 @@ func (e *env) addFor(a Actor, assignee int64, text string, due *time.Time, rule 
 // assigned returns a todo created by alice in the group for bob.
 func (e *env) assigned(due *time.Time, rule string) model.Todo {
 	e.t.Helper()
-	e.must(e.svc.NoteUsername(ctx, 8, "Bob_X"))
+	e.must(e.note(8, "Bob_X"))
 	return e.addFor(aliceG, 8, "pick up kid", due, rule)
 }
 
@@ -54,7 +66,7 @@ func wantErr(t *testing.T, what string, got, want error) {
 
 func TestNoteUsernameStoresLowercaseAndCreatesUser(t *testing.T) {
 	e := newEnv(t)
-	e.must(e.svc.NoteUsername(ctx, 8, "@Bob_X"))
+	e.must(e.note(8, "@Bob_X"))
 	if got := e.username(8); got != "bob_x" {
 		t.Fatalf("username = %q", got)
 	}
@@ -71,20 +83,20 @@ func TestNoteUsernameStoresLowercaseAndCreatesUser(t *testing.T) {
 
 func TestNoteUsernameWritesOnlyOnChange(t *testing.T) {
 	e := newEnv(t)
-	e.must(e.svc.NoteUsername(ctx, 8, "bob_x"))
+	e.must(e.note(8, "bob_x"))
 	// Another account takes the name over behind NoteUsername's back (as
 	// another node would). If NoteUsername used a cache or wrote
 	// unconditionally for user 8 it would steal the name back.
-	e.must(e.svc.NoteUsername(ctx, 9, "bob_x"))
-	e.must(e.svc.NoteUsername(ctx, 8, "bob_x")) // 8 stored "" -> differs -> reclaims
+	e.must(e.note(9, "bob_x"))
+	e.must(e.note(8, "bob_x")) // 8 stored "" -> differs -> reclaims
 	if e.username(8) != "bob_x" || e.username(9) != "" {
 		t.Fatalf("after reclaim: 8=%q 9=%q", e.username(8), e.username(9))
 	}
 	// Unchanged name: no write. Prove it by checking that the row is not
 	// touched: give the name to 9, then note 9's current name again; it
 	// must stay with 9 and 8 must stay empty.
-	e.must(e.svc.NoteUsername(ctx, 9, "bob_x"))
-	e.must(e.svc.NoteUsername(ctx, 9, "Bob_X"))
+	e.must(e.note(9, "bob_x"))
+	e.must(e.note(9, "Bob_X"))
 	if e.username(9) != "bob_x" || e.username(8) != "" {
 		t.Fatalf("no-op changed state: 8=%q 9=%q", e.username(8), e.username(9))
 	}
@@ -92,8 +104,8 @@ func TestNoteUsernameWritesOnlyOnChange(t *testing.T) {
 
 func TestNoteUsernameEmptyClears(t *testing.T) {
 	e := newEnv(t)
-	e.must(e.svc.NoteUsername(ctx, 8, "bob_x"))
-	e.must(e.svc.NoteUsername(ctx, 8, ""))
+	e.must(e.note(8, "bob_x"))
+	e.must(e.note(8, ""))
 	if got := e.username(8); got != "" {
 		t.Fatalf("username = %q", got)
 	}
@@ -103,8 +115,8 @@ func TestNoteUsernameEmptyClears(t *testing.T) {
 
 func TestNoteUsernameMovesToNewAccount(t *testing.T) {
 	e := newEnv(t)
-	e.must(e.svc.NoteUsername(ctx, 8, "bob_x"))
-	e.must(e.svc.NoteUsername(ctx, 9, "bob_x"))
+	e.must(e.note(8, "bob_x"))
+	e.must(e.note(9, "bob_x"))
 	if e.username(8) != "" || e.username(9) != "bob_x" {
 		t.Fatalf("8=%q 9=%q", e.username(8), e.username(9))
 	}
@@ -115,12 +127,39 @@ func TestNoteUsernameMovesToNewAccount(t *testing.T) {
 	}
 }
 
-func TestNoteUsernameNeedsNoPriorUser(t *testing.T) {
+func TestNoteUsernameDoesNotCreateUser(t *testing.T) {
 	e := newEnv(t)
-	// The user row does not exist yet: NoteUsername creates it.
-	e.must(e.svc.NoteUsername(ctx, 42, ""))
-	if _, err := e.st.GetUser(ctx, 42); err != nil {
-		t.Fatal(err)
+	// No user row yet: NoteUsername must not create one with default
+	// language and calendar before Prefs applies the Telegram language.
+	e.must(e.svc.NoteUsername(ctx, 42, "newbie"))
+	if _, err := e.st.GetUser(ctx, 42); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetUser = %v, want ErrNotFound", err)
+	}
+	p, err := e.svc.Prefs(ctx, 42, "fa")
+	e.must(err)
+	if p.Locale.Lang != i18n.Fa {
+		t.Fatalf("lang = %v", p.Locale.Lang)
+	}
+	// The next update records the name.
+	e.must(e.svc.NoteUsername(ctx, 42, "newbie"))
+	if e.username(42) != "newbie" {
+		t.Fatalf("username = %q", e.username(42))
+	}
+}
+
+func TestSnoozeTomorrowByAssigneeUsesAssigneeZone(t *testing.T) {
+	e := newEnv(t)
+	e.must(e.svc.SetTZ(ctx, 8, "Asia/Tehran")) // bob; alice stays UTC
+	td := e.assigned(at(15, 0), "")
+	e.clk.Set(at(15, 1).UTC())
+	rs := e.claim(e.svc, e.clk.Now())
+	r, err := e.svc.Snooze(ctx, bob, rs[0].ID, ui.SnoozeTomorrow)
+	e.must(err)
+	// 15:01 UTC is 18:31 in Tehran (UTC+3:30, no DST since 2022), still
+	// Oct 10, so tomorrow 09:00 Tehran = 05:30 UTC on Oct 11.
+	want := time.Date(2026, 10, 11, 5, 30, 0, 0, time.UTC)
+	if !r.FireAt.Equal(want) || r.TodoID != td.ID {
+		t.Fatalf("snooze at %v, want %v", r.FireAt, want)
 	}
 }
 
@@ -155,7 +194,7 @@ func TestAddTodoForAssigneeWithoutUsername(t *testing.T) {
 
 func TestAddTodoForOwnPrivateChatStoresNoAssignee(t *testing.T) {
 	e := newEnv(t)
-	e.must(e.svc.NoteUsername(ctx, 8, "bob_x"))
+	e.must(e.note(8, "bob_x"))
 	td := e.addFor(bob, 8, "mine", nil, "")
 	if td.AssigneeID != 0 || td.AssigneeName != "" {
 		t.Fatalf("todo = %+v", td)
@@ -169,7 +208,7 @@ func TestAddTodoForOwnPrivateChatStoresNoAssignee(t *testing.T) {
 
 func TestAddTodoForSelfFromGroupIsStored(t *testing.T) {
 	e := newEnv(t)
-	e.must(e.svc.NoteUsername(ctx, 7, "alice_a"))
+	e.must(e.note(7, "alice_a"))
 	td := e.addFor(aliceG, 7, "remind me privately", nil, "")
 	if td.AssigneeID != 7 || td.AssigneeName != "alice_a" {
 		t.Fatalf("todo = %+v", td)
@@ -196,7 +235,7 @@ func TestAddTodoForUnknownAssignee(t *testing.T) {
 
 func TestAddTodoForKeepsAddTodoValidation(t *testing.T) {
 	e := newEnv(t)
-	e.must(e.svc.NoteUsername(ctx, 8, "bob_x"))
+	e.must(e.note(8, "bob_x"))
 	_, err := e.svc.AddTodoFor(ctx, aliceG, 8, nlparse.Result{Text: "  "})
 	wantErr(t, "empty", err, ErrEmptyText)
 }
@@ -206,8 +245,7 @@ func TestListAssigned(t *testing.T) {
 	d := e.assigned(at(15, 0), "")
 	later := e.addFor(aliceG, 8, "later", at(20, 0), "")
 	undated := e.addFor(aliceG, 8, "undated", nil, "")
-	own := e.addFor(bob, 8, "own chat", at(13, 0), "") // no assignee stored
-	_ = own
+	e.addFor(bob, 8, "own chat", at(13, 0), "") // no assignee stored
 	e.addFor(aliceG, 0, "not bob's", nil, "")
 	done := e.addFor(aliceG, 8, "done one", at(14, 0), "")
 	_, err := e.svc.Complete(ctx, aliceG, done.ID)
@@ -230,8 +268,8 @@ func TestListAssigned(t *testing.T) {
 
 func TestListAssignedExcludesOwnPrivateChat(t *testing.T) {
 	e := newEnv(t)
-	e.must(e.svc.NoteUsername(ctx, 8, "bob_x"))
-	e.must(e.svc.NoteUsername(ctx, 9, "carol_c"))
+	e.must(e.note(8, "bob_x"))
+	e.must(e.note(9, "carol_c"))
 	// carol assigns to bob from carol's private chat: lives in chat 9.
 	inCarol := e.addFor(carol, 8, "from carol", nil, "")
 	// A row assigned to bob that lives in bob's own chat (created by hand,
@@ -290,6 +328,8 @@ func TestAuthorisationEitherOr(t *testing.T) {
 	}{
 		{"creator in group", aliceG, true},
 		{"assignee in own DM", bob, true},
+		{"assignee in unrelated group", Actor{UserID: 8, ChatID: -555, ChatKind: model.ChatGroup}, false},
+		{"assignee on 403 fallback in creating chat", Actor{UserID: 8, ChatID: groupChat, ChatKind: model.ChatGroup}, true},
 		{"bystander", carol, false},
 		{"creator in her DM", alice, false}, // wrong chat, not the assignee
 	}
@@ -446,6 +486,8 @@ func TestNoteUsernameCallsSetUsernameOnlyOnChange(t *testing.T) {
 	svc := New(spy, e.clk, Config{NodeID: "S", DefaultHour: 9})
 	svc.SetLogger(quiet())
 
+	_, err := svc.Prefs(ctx, 8, "")
+	e.must(err)
 	e.must(svc.NoteUsername(ctx, 8, "Bob_X"))
 	if spy.setUsername != 1 {
 		t.Fatalf("first note: %d writes", spy.setUsername)
