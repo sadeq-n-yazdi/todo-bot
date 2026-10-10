@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `todo-bot` binary wiring (#13):
+  - subcommands: `run`, `migrate`, `backup` and `version`;
+  - leader-gated polling, with the bot commands set in English and Farsi;
+  - the scheduler runs on every node, and startup retries reaching Telegram with backoff;
+  - shutdown is bounded, and secrets are kept out of logs.
 - Leader lease loop (#27). It decides which node polls Telegram:
   - the leader renews its lease every ttl/3, and steps down by ttl/2 after its last successful renewal, even if a database call hangs;
   - only one renewal call is in flight at a time, and the lease is released on shutdown.
