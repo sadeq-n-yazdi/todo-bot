@@ -69,24 +69,28 @@ cmd_bootstrap() {
 	local arch bin
 	arch="$(detect_arch)"
 	bin="$(build "$arch")"
+	# Private root-owned (0700) staging dir: never install from fixed /tmp names.
+	stage="$(remote "mktemp -d")"
+	case "$stage" in /tmp/tmp.*) ;; *) die "unexpected staging dir: $stage" ;; esac
 	scp "${scp_opts[@]}" \
 		"$ROOT/deploy/todo-bot.service" "$ROOT/deploy/todo-bot.sysusers" \
-		"$ROOT/deploy/env.example" "$bin" "$HOST:/tmp/"
-	remote "bash -s" "todo-bot-linux-$arch" <<'REMOTE'
+		"$ROOT/deploy/env.example" "$bin" "$HOST:$stage/"
+	remote "bash -s" "todo-bot-linux-$arch" "$stage" <<'REMOTE'
 set -euo pipefail
 src=$1
-install -D -m 0644 /tmp/todo-bot.sysusers /etc/sysusers.d/todo-bot.conf
+d=$2
+trap 'rm -rf "$d"' EXIT
+install -D -m 0644 "$d/todo-bot.sysusers" /etc/sysusers.d/todo-bot.conf
 systemd-sysusers /etc/sysusers.d/todo-bot.conf
-install -D -m 0644 /tmp/todo-bot.service /etc/systemd/system/todo-bot.service
+install -D -m 0644 "$d/todo-bot.service" /etc/systemd/system/todo-bot.service
 install -d -m 0755 /opt/todo-bot /etc/todo-bot
-install -m 0755 "/tmp/$src" /opt/todo-bot/todo-bot
+install -m 0755 "$d/$src" /opt/todo-bot/todo-bot
 created=
 if [ ! -e /etc/todo-bot/env ]; then
-	install -m 0600 -o root -g root /tmp/env.example /etc/todo-bot/env
+	install -m 0600 -o root -g root "$d/env.example" /etc/todo-bot/env
 	created=1
 fi
 chmod 0600 /etc/todo-bot/env
-rm -f /tmp/todo-bot.service /tmp/todo-bot.sysusers /tmp/env.example "/tmp/$src"
 systemctl daemon-reload
 if [ -n "$created" ]; then
 	echo "created /etc/todo-bot/env from the template: edit it, then run: systemctl enable --now todo-bot"
@@ -107,13 +111,22 @@ cmd_update() {
 set -euo pipefail
 chmod 0755 $BIN.new
 if [ -x $BIN ]; then
-	install -d -m 0750 -o $APP -g $APP $BACKUP_DIR
-	stamp=\$(date -u +%Y%m%dT%H%M%SZ)
-	set -a
-	. /etc/todo-bot/env
-	set +a
-	runuser -u $APP -- env STATE_DIRECTORY=$STATE_DIR TODO_DB_PATH="\${TODO_DB_PATH:-$STATE_DIR/todo.db}" \\
-		$BIN backup "$BACKUP_DIR/todo-\$stamp.db"
+	# Root never chown/chmods anything under $STATE_DIR (the service user owns
+	# it and could plant symlinks): state operations run as $APP.
+	if [ ! -e $STATE_DIR ] && [ ! -L $STATE_DIR ]; then
+		install -d -o $APP -g $APP -m 0750 $STATE_DIR
+	fi
+	if [ -d $STATE_DIR ] && [ ! -L $STATE_DIR ]; then
+		# The env file is sourced as root: it must be root-owned and 0600.
+		[ "\$(stat -c %U:%a /etc/todo-bot/env)" = root:600 ] || { echo "/etc/todo-bot/env must be root:root 0600" >&2; exit 1; }
+		stamp=\$(date -u +%Y%m%dT%H%M%SZ)
+		set -a
+		. /etc/todo-bot/env
+		set +a
+		runuser -u $APP -- mkdir -p -m 0750 $BACKUP_DIR
+		runuser -u $APP -- env STATE_DIRECTORY=$STATE_DIR TODO_DB_PATH="\${TODO_DB_PATH:-$STATE_DIR/todo.db}" \\
+			$BIN backup "$BACKUP_DIR/todo-\$stamp.db"
+	fi
 	cp -p $BIN $BIN.prev
 fi
 mv -f $BIN.new $BIN
