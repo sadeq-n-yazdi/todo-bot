@@ -7,9 +7,9 @@
 // cal decides how numeric dates ("15/7", "1405/07/15") and "every month on
 // the Nth" are read; Jalali month names ("۱۵ مهر", "15 Mehr") are always Jalali
 // and Gregorian month names always Gregorian. Dates are only recognised at
-// the END of the input, ignoring @mentions and #tags, which stay in the text
-// (optionally after "at"/"on"/"in"/"ساعت"), so
-// "fix 2 bugs" stays plain text. Farsi "روزهای کاری" (workdays) means
+// the END of the input or, failing that, at its START ("tomorrow 9am call
+// mom"; a trailing phrase wins when both exist), ignoring @mentions and
+// #tags, which stay in the text, so "fix 2 bugs" and "2 eggs" stay plain text. Farsi "روزهای کاری" (workdays) means
 // Saturday..Wednesday; English "weekdays" means Monday..Friday.
 //
 // # Implementation
@@ -117,7 +117,45 @@ func (p Parser) Parse(input string, now time.Time, cal calendar.Kind) (Result, e
 		res.Text = cleanText(text)
 		return res, nil
 	}
+	// No trailing phrase: try the longest phrase that starts the text (after
+	// any leading @mentions/#tags); the rest of the text becomes the item text.
+	if res, ok := p.leading(toks, all, runes, now, cal); ok {
+		return res, nil
+	}
 	return Result{Text: strings.TrimSpace(input)}, nil
+}
+
+// leading matches the longest date phrase that begins at toks[0], leaving at
+// least one token of item text. Mentions inside the phrase are kept, in order,
+// between the text before the phrase and the text after it.
+func (p Parser) leading(toks, all []token, runes []rune, now time.Time, cal calendar.Kind) (Result, bool) {
+	for e := min(len(toks)-1, maxStartTokens); e >= 1; e-- {
+		ph, ok := parseFrom(toks[:e], 0, validCal(cal), false)
+		if !ok || bareWeekday(ph, e) || (ph.tm != nil && ph.tm.bareHour) {
+			continue
+		}
+		res, ok := p.resolve(ph, now, validCal(cal))
+		if !ok {
+			continue
+		}
+		ps, pe := toks[0].start, toks[e-1].end
+		parts := []string{strings.TrimSpace(string(runes[:ps]))}
+		for _, t := range all {
+			if t.start >= ps && t.end <= pe && isMention(t.key) {
+				parts = append(parts, string(runes[t.start:t.end]))
+			}
+		}
+		parts = append(parts, strings.TrimSpace(string(runes[pe:])))
+		kept := parts[:0]
+		for _, s := range parts {
+			if s != "" {
+				kept = append(kept, s)
+			}
+		}
+		res.Text = cleanText(strings.Join(kept, " "))
+		return res, true
+	}
+	return Result{}, false
 }
 
 // ParseWhen parses input that should consist only of a time phrase (reply to
@@ -130,6 +168,20 @@ func (p Parser) ParseWhen(input string, now time.Time, cal calendar.Kind) (time.
 		}
 	}
 	return time.Time{}, nil, ErrNoDate
+}
+
+func validCal(cal calendar.Kind) calendar.Kind {
+	if !cal.Valid() {
+		return calendar.Gregorian
+	}
+	return cal
+}
+
+// bareWeekday reports whether a one-token phrase is just a weekday name; at
+// the start of the text that is too likely to be a title ("monday meeting
+// notes"), so it needs a time, "next"/"on", etc. to count.
+func bareWeekday(ph phrase, n int) bool {
+	return n == 1 && ph.date != nil && ph.date.kind == dateWeekday && ph.tm == nil && ph.rel == nil && ph.rec == nil
 }
 
 func (p Parser) match(toks []token, start int, now time.Time, cal calendar.Kind, lenient bool) (Result, bool) {
