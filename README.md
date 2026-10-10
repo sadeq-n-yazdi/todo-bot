@@ -23,7 +23,7 @@ You write an item the way you would say it, for example `buy milk tomorrow 18:00
 - **Gregorian and Jalali (هجری شمسی).** Per-user calendar for showing and parsing dates.
 - **Private by default.** Only the Telegram user IDs in `TODO_ALLOWED_USERS` can use the bot.
 - **Multi-node-ready.** Reminders, the update poller and pending prompts are coordinated through the database, not through memory. See [Architecture](docs/ARCHITECTURE.md) section 9. Version 0.1 runs on one host with SQLite.
-- **Small.** One static Go binary. It runs as a hardened systemd service in less than 40 MB of RAM.
+- **Small.** One static Go binary, run as a hardened systemd service with a soft Go memory limit of 40 MiB (`GOMEMLIMIT`) and a hard cap of 96M (`MemoryMax`).
 
 > Under construction. Progress: [docs/PROGRESS.md](docs/PROGRESS.md).
 
@@ -32,18 +32,29 @@ You write an item the way you would say it, for example `buy milk tomorrow 18:00
 You need a Linux host with systemd (a small VPS is enough), Go to build the binary, and a Telegram account.
 
 1. **Create the bot.** Open [@BotFather](https://t.me/BotFather), send `/newbot` and follow the questions. BotFather gives you a token that looks like `123456:ABC-...`. Keep it secret. Then finish the [BotFather setup](#botfather-setup) below.
-2. **Find your user ID.** Send `/whoami` to your new bot. It replies with your numeric Telegram ID. This is the only command it answers for people who are not on the allowlist. (The bot @userinfobot gives the same number.) Ask each family member to do the same.
-3. **Configure.** Copy [`deploy/env.example`](deploy/env.example) to `/etc/todo-bot/env` (owner `root`, mode `0600`). Set at least:
+2. **Get your user ID.** The bot will not start without `TODO_ALLOWED_USERS`, so you need your numeric Telegram ID first. Either:
+   - message a third-party ID bot such as @userinfobot, which replies with your ID; or
+   - install with a placeholder (`TODO_ALLOWED_USERS=1`), message your new bot, and send `/whoami`. It answers people who are not on the allowlist, and only this command. Then replace the placeholder with the ID it gives you and restart the service.
+
+   Once the bot is running, ask each family member to send it `/whoami` and add their IDs the same way.
+3. **Build.** `make build-linux` writes `dist/todo-bot-linux-amd64`. Use `make build-linux ARCH=arm64` for an ARM host.
+4. **Install.** `scripts/deploy.sh` runs on **your own machine** and installs over ssh/scp. Its defaults (`HOST`, `PORT`) point at the maintainer's server, so always set your own:
+
+   ```
+   HOST=root@your.server PORT=22 scripts/deploy.sh bootstrap
+   ```
+
+   This builds the binary, copies it and the systemd unit, creates the `todo-bot` user, and installs the template [`deploy/env.example`](deploy/env.example) as `/etc/todo-bot/env` (owner `root`, mode `0600`) if that file is missing. Until the placeholder token is replaced it does not start the service.
+5. **Configure.** On the server, edit `/etc/todo-bot/env` and set at least:
 
    ```
    TELEGRAM_TOKEN=<token from BotFather>
    TODO_ALLOWED_USERS=11111,22222
    ```
 
-   `TODO_ALLOWED_USERS` is a comma-separated list of the IDs from step 2. The full list of settings is in [Configuration](#configuration).
-4. **Build.** `make build-linux` writes `dist/todo-bot-linux-amd64`. Use `make build-linux ARCH=arm64` for an ARM host.
-5. **Deploy.** `scripts/deploy.sh bootstrap` installs the binary, the systemd unit and the env template. Follow [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the first install, updates, rollback and the smoke test.
-6. **Say hello.** Send `/start` to the bot. Then read [docs/USAGE.md](docs/USAGE.md).
+   `TODO_ALLOWED_USERS` is a comma-separated list of the IDs from step 2. The other settings are in [Configuration](#configuration).
+6. **Start.** Run the same `bootstrap` command again (or `systemctl enable --now todo-bot` on the server), then `scripts/deploy.sh status` and `logs`. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) covers updates, rollback and the first-start smoke test.
+7. **Say hello.** Send `/start` to the bot. Then read [docs/USAGE.md](docs/USAGE.md).
 
 > **Warning: one token, one process.** Telegram allows only one process to poll for updates per bot token. If you run the bot on your laptop with the production token, both processes fail with `409 Conflict` and the production bot stops receiving messages. Create a **second bot** with `/newbot` for local development and use its token there.
 
@@ -90,7 +101,7 @@ The bot reads environment variables, normally from `/etc/todo-bot/env` (lines of
 | `TODO_DEFAULT_TZ` | no | `UTC` | Default time zone for new users, as an IANA name such as `Europe/Berlin` or `Asia/Tehran`. Each user can change theirs with `/tz`. |
 | `TODO_DEFAULT_TIME` | no | `09:00` | Time (`HH:MM`) used for a date with no time, and for the snooze button "Tomorrow". |
 | `TODO_LOG_LEVEL` | no | `info` | `debug`, `info`, `warn` or `error`. Logs are text on stderr (the systemd journal). |
-| `TODO_DB_URL` | no | see below | Database URL. Version 0.1 supports SQLite, for example `sqlite:///var/lib/todo-bot/todo.db`. |
+| `TODO_DB_URL` | no | `TODO_DB_PATH` if set, else `sqlite://$STATE_DIRECTORY/todo.db`, else `todo.db` in the working directory | Database URL. Version 0.1 supports SQLite, for example `sqlite:///var/lib/todo-bot/todo.db`. |
 | `TODO_DB_PATH` | no | | Deprecated. A plain SQLite file path, used only if `TODO_DB_URL` is unset. |
 | `STATE_DIRECTORY` | no | | Set by systemd (`StateDirectory=todo-bot`). If neither `TODO_DB_URL` nor `TODO_DB_PATH` is set, the database is `$STATE_DIRECTORY/todo.db`, otherwise `todo.db` in the working directory. |
 | `TODO_NODE_ID` | no | the hostname | Unique name of this process in leases and claims. Keep one stable name per host. |

@@ -43,12 +43,12 @@ Add a recurrence phrase to `/add`. The item stays open. When you mark it done, i
 
 | English | Farsi | Repeats |
 | --- | --- | --- |
-| `pills every day 9am`, `pills daily 9am` | `قرص هر روز ساعت ۷` | Every day. |
-| `report weekdays 9:30` | `گزارش روزهای کاری ساعت ۸:۳۰` | English `weekdays` is Monday to Friday. Farsi `روزهای کاری` is Saturday to Wednesday. |
-| `run every monday and wednesday 8:00` | `ورزش هر دوشنبه و چهارشنبه` | Those weekdays. |
-| `run every week on tue`, `run every friday` | `ورزش هر هفته دوشنبه` | Weekly. |
-| `rent every month on the 1st at 10:00` | `اجاره هر ماه ۱ام ساعت ۱۰` | Monthly. The day follows **your calendar**: the 1st of each Jalali month for a Jalali user. A day the month does not have (31st in a 30-day month) falls on the last day. |
-| `water plants every 3 days` | `آب دادن هر ۳ روز` | Every N days. |
+| `pills every day 9am` | `قرص هر روز ساعت ۹` | Every day at 9:00. `daily` also works. |
+| `report weekdays 9:30` | `گزارش روزهای کاری ساعت ۹:۳۰` | English `weekdays` is Monday to Friday. Farsi `روزهای کاری` is Saturday to Wednesday. |
+| `run every monday and wednesday 8:00` | `ورزش هر دوشنبه و چهارشنبه ساعت ۸` | Those weekdays at 8:00. |
+| `run every week on tue 8:00` | `ورزش هر هفته سه‌شنبه ساعت ۸` | Weekly on that day. `run every friday` also works. |
+| `rent every month on the 1st at 10:00` | `اجاره هر ماه ۱ام ساعت ۱۰` | Monthly at 10:00. The day follows **your calendar**: the 1st of each Jalali month for a Jalali user. A day the month does not have (31st in a 30-day month) falls on the last day. |
+| `water plants every 3 days` | `آب دادن هر ۳ روز` | Every 3 days at 9:00 (`TODO_DEFAULT_TIME`). |
 
 A recurring item shows 🔁 in lists.
 
@@ -66,7 +66,7 @@ Replies with your numeric Telegram user ID, for example `123456789`. It works in
 
 ### `/add <text> [when]`
 
-Adds an item. If there is a time, the item gets a reminder. A message with no command in a private chat does the same.
+Adds an item. An item with a future date or time gets a reminder, and an item with no date gets none. A date without a time (`buy milk tomorrow`) is reminded at `TODO_DEFAULT_TIME`. A date-only item for today whose default time has already passed is stored as overdue, without a reminder. A message with no command in a private chat does the same.
 
 ```
 /add buy milk tomorrow 18:00
@@ -77,7 +77,7 @@ Adds an item. If there is a time, the item gets a reminder. A message with no co
 ```
 /add خرید نان فردا ساعت ۱۸
 /add اجاره هر ماه ۱ام ساعت ۱۰
-/add جلسه ۱۵ مهر ساعت ۹
+/add جلسه ۲۵ مهر ساعت ۹
 ```
 
 Replies:
@@ -92,7 +92,7 @@ Replies:
 ✅ اضافه شد: ۵. اجاره — جمعه ۱ آبان ۱۰:۰۰ 🔁
 ```
 
-An item with no time is added without a reminder. With no text, the bot answers `Usage: /add buy milk tomorrow 18:00`. The limit is 1000 characters per item.
+With no text, the bot answers `Usage: /add buy milk tomorrow 18:00`. The limit is 1000 characters per item.
 
 ### `/list [page]`
 
@@ -212,7 +212,6 @@ Farsi: `⏰ یادآور برای فردا ۱۸:۰۰ تنظیم شد.` and `✅ 
 
 Notes:
 - `/remind 2 pizzas tomorrow` makes an item called "2 pizzas", because `pizzas` is not a time. A number is taken as an item number only when what follows it is a time.
-- A time in the past is refused: "That time is in the past."
 - Recurring phrases are refused: "Recurring reminders aren't supported here. Use /add for repeating items."
 - With no time, the bot says "I couldn't find a time. Try “tomorrow 18:00” or “in 2h”."
 - Without any text, it shows the usage.
