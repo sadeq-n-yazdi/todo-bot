@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +19,31 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store/sqlite"
 	"github.com/sadeq-n-yazdi/todo-bot/migrations"
 )
+
+// shipped returns the versions of the embedded SQLite migrations, in order.
+func shipped(t *testing.T) []int {
+	t.Helper()
+	mfs, err := migrations.For("sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := fs.ReadDir(mfs, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []int
+	for _, e := range entries {
+		v, err := strconv.Atoi(e.Name()[:4])
+		if err != nil {
+			t.Fatalf("%s: %v", e.Name(), err)
+		}
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		t.Fatal("no migrations embedded")
+	}
+	return out
+}
 
 func open(t *testing.T) *sqlite.DB {
 	t.Helper()
@@ -161,7 +188,7 @@ func TestMigrateFreshRecordsVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = d.Close()
-	if got := versions(t, path); len(got) != 2 || got[0] != 1 || got[1] != 2 {
+	if got := versions(t, path); !slices.Equal(got, shipped(t)) {
 		t.Fatalf("versions = %v", got)
 	}
 }
@@ -203,7 +230,7 @@ func TestMigrateSeedsFromUserVersion(t *testing.T) {
 		t.Fatalf("data lost: %+v, %v", c, err)
 	}
 	_ = d.Close()
-	if got := versions(t, path); len(got) != 2 || got[0] != 1 || got[1] != 2 {
+	if got := versions(t, path); !slices.Equal(got, shipped(t)) {
 		t.Fatalf("versions = %v", got)
 	}
 }
@@ -225,7 +252,7 @@ func TestMigrateConcurrentOpen(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if got := versions(t, path); len(got) != 2 {
+	if got := versions(t, path); !slices.Equal(got, shipped(t)) {
 		t.Fatalf("versions = %v", got)
 	}
 }
@@ -298,7 +325,7 @@ func TestUserVersionFollowsMigrations(t *testing.T) {
 	if err := raw.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	if v != 2 {
-		t.Fatalf("user_version = %d, want 2", v)
+	if want := shipped(t); v != want[len(want)-1] {
+		t.Fatalf("user_version = %d, want %d", v, want[len(want)-1])
 	}
 }

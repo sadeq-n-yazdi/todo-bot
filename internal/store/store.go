@@ -19,7 +19,21 @@ var ErrNotFound = errors.New("not found")
 // Store is the persistence API.
 type Store interface {
 	GetUser(ctx context.Context, id int64) (model.User, error)
+	// UpsertUser inserts the user or updates tz, lang and calendar. It never
+	// writes Username; use SetUsername.
 	UpsertUser(ctx context.Context, u model.User) error
+	// SetUsername stores name (lowercased, a leading "@" ignored) as the
+	// user's Telegram @username, and in the same transaction clears it from
+	// any other user who had it: usernames move between accounts. "" clears
+	// the user's name. ErrNotFound if the user does not exist. Concurrent
+	// calls (several nodes) giving one name to different users end with
+	// exactly one owner and no error; a provider whose isolation level
+	// lets them collide on the unique index must retry.
+	SetUsername(ctx context.Context, userID int64, name string) error
+	// UserByUsername returns the user whose username is name (matched
+	// case-insensitively, a leading "@" ignored). ErrNotFound if none, or
+	// if name is "".
+	UserByUsername(ctx context.Context, name string) (model.User, error)
 
 	// EnsureChat inserts the chat if missing, or updates its title.
 	EnsureChat(ctx context.Context, c model.Chat) error
@@ -31,16 +45,22 @@ type Store interface {
 	// MigrateChat moves a chat and all its todos and reminders to newID in one transaction.
 	MigrateChat(ctx context.Context, oldID, newID int64) error
 
-	// InsertTodo assigns t.ID and the next per-chat t.Num atomically.
+	// InsertTodo assigns t.ID and the next per-chat t.Num atomically. A
+	// non-zero t.AssigneeID must be an existing user.
 	InsertTodo(ctx context.Context, t *model.Todo) error
 	GetTodo(ctx context.Context, id int64) (model.Todo, error)
 	GetTodoByNum(ctx context.Context, chatID int64, num int) (model.Todo, error)
 	// ListTodos orders by (due_at IS NULL, due_at, num).
 	ListTodos(ctx context.Context, q model.TodoQuery) ([]model.Todo, error)
 	CountTodos(ctx context.Context, q model.TodoQuery) (int, error)
+	// UpdateTodo rewrites every mutable column of t.ID, AssigneeID included
+	// (AssigneeName is ignored).
 	UpdateTodo(ctx context.Context, t model.Todo) error
 	// ListRecurringByCreator returns open recurring todos created by userID.
 	ListRecurringByCreator(ctx context.Context, userID int64) ([]model.Todo, error)
+	// ListAssigned returns the open todos assigned to userID, in every chat,
+	// ordered by (due_at IS NULL, due_at, chat_id, num).
+	ListAssigned(ctx context.Context, userID int64) ([]model.Todo, error)
 
 	// InsertReminder assigns r.ID.
 	InsertReminder(ctx context.Context, r *model.Reminder) error
