@@ -19,9 +19,6 @@ import (
 // (bad args, not found) and returns nil; it returns an error only for
 // unexpected failures.
 
-// errNotImplemented is still used by the stubs owned by #12.
-var errNotImplemented = errors.New("handler: not implemented")
-
 // maxTodoChars caps the text of an item. tgbot.Send rejects messages over
 // 4096 UTF-16 units and does not split them, so one item must stay small.
 const maxTodoChars = 1000
@@ -201,6 +198,8 @@ func (h *Handler) todoErr(ctx context.Context, m *tg.Message, lc i18n.Locale, er
 		key = "todo.err.foreign"
 	case errors.Is(err, service.ErrInPast):
 		key = "todo.err.past"
+	case errors.Is(err, service.ErrEmptyText):
+		key = "todo.usage.add"
 	default:
 		return err
 	}

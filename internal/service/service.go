@@ -54,6 +54,10 @@ type Service interface {
 	// List returns open todos for page (0-based) and the total page count (>= 1).
 	List(ctx context.Context, chatID int64, page int) ([]model.Todo, int, error)
 	ByNum(ctx context.Context, chatID int64, num int) (model.Todo, error)
+	// Todo returns the item with the global id, including done items. It
+	// returns ErrNotFound if it is missing or deleted and ErrForeignChat if its ChatID
+	// differs from a.ChatID.
+	Todo(ctx context.Context, a Actor, id int64) (model.Todo, error)
 	Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, error)
 	Delete(ctx context.Context, a Actor, todoID int64) error
 	Edit(ctx context.Context, a Actor, todoID int64, text string) (model.Todo, error)
