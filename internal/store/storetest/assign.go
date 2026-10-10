@@ -287,3 +287,30 @@ func testListAssigned(t *testing.T, open func() store.Store) {
 		t.Fatalf("nobody's = %+v, %v", l, err)
 	}
 }
+
+// MigrateChat into an existing chat (the merge path, which renumbers
+// clashing todos) keeps every todo's assignee.
+func testAssigneeMigrateMerge(t *testing.T, open func() store.Store) {
+	ctx := context.Background()
+	d := open()
+	chat(t, d, 1)
+	chat(t, d, -100)
+	user(t, d, 5)
+	setName(t, d, 5, "wife")
+	todo(t, d, -100, "already there", nil) // num 1 in the target: forces a clash
+	moved := model.Todo{ChatID: 1, Text: "assigned", TZ: "UTC", CreatedBy: 7, AssigneeID: 5, CreatedAt: base}
+	if err := d.InsertTodo(ctx, &moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.MigrateChat(ctx, 1, -100); err != nil {
+		t.Fatal(err)
+	}
+	g, err := d.GetTodo(ctx, moved.ID)
+	if err != nil || g.ChatID != -100 || g.Num == 1 || g.AssigneeID != 5 || g.AssigneeName != "wife" {
+		t.Fatalf("after merge = %+v, %v", g, err)
+	}
+	l, err := d.ListAssigned(ctx, 5)
+	if err != nil || len(l) != 1 || l[0].ID != moved.ID {
+		t.Fatalf("ListAssigned after merge = %+v, %v", l, err)
+	}
+}

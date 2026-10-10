@@ -56,6 +56,7 @@ func Run(t *testing.T, f Factory) {
 		{"UsernameMoves", testUsernameMoves},
 		{"UsernameConcurrent", testUsernameConcurrent},
 		{"Assignee", testAssignee},
+		{"AssigneeMigrateMerge", testAssigneeMigrateMerge},
 		{"ListAssigned", testListAssigned},
 	}
 	for _, c := range cases {

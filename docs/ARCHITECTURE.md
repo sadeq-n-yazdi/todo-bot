@@ -84,7 +84,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
 - **ui**:
   - `Action{Kind, ID, Arg}` with `Encode` (at most 64 bytes) and `Decode`.
   - `TodoList`, `ReminderMsg`, `Digest` and `FormatWhen`.
-  - `Mention(username)` renders `@name` for HTML, or "" (§11).
+  - `Mention(userID, username, locale)` renders a `tg://user?id=` link labelled `@name`, or a translated label when the username is unknown (§11).
 - **service**: the `Service` interface, `Actor{UserID, ChatID, ChatKind, ChatTitle}`, and `Waker{Wake()}`. Assignment (§11) adds `NoteUsername`, `UserByUsername`, `AddTodoFor` and `ListAssigned`.
 - **scheduler**:
   - `Backend` is implemented by the service.
@@ -308,7 +308,17 @@ v0.1 ships SQLite on one host, but its code paths are already multi-node. v0.2 a
   - `schema_migrations(version PK, name, applied_at)`.
 - Postgres and MySQL use BIGINT for ids and times.
 - MySQL has no partial indexes, so it emulates the partial unique index ("one pending `due` reminder per todo") with a unique stored generated column.
-- The v0.2 providers must also ship `0003_assign.sql` (§11). A plain unique index on `users.username` is enough on Postgres and MySQL, because both allow several NULLs in a unique index. The index on `todos (assignee_id, status)` is a plain index there.
+- The v0.2 providers must also ship `0003_assign.sql` (§11). The column types differ from SQLite:
+  - **MySQL:**
+    - `users.username` is `VARCHAR(32) NULL`, because a `TEXT` column cannot have a UNIQUE index without a prefix length. Telegram usernames are at most 32 characters.
+    - A plain `UNIQUE (username)` is enough, because MySQL allows several NULLs in a unique index.
+    - `todos.assignee_id` is `BIGINT NULL` with the same signedness as `users.id`, so that the foreign key is accepted.
+    - The index on `(assignee_id, status)` is a plain, non-partial index.
+  - **Postgres:**
+    - `users.username` is `TEXT` (or `VARCHAR(32)`).
+    - The partial unique index works as in SQLite. A plain `UNIQUE` also works, because NULLs never clash.
+    - `todos.assignee_id` is `BIGINT REFERENCES users (id)`.
+    - The index on `(assignee_id, status)` may stay partial.
 - The SQLite DSN adds `_txlock=immediate`, so that two handles on one file wait for each other instead of failing with `SQLITE_BUSY`.
 
 ## 10. CI
@@ -362,10 +372,11 @@ ListAssigned(ctx, userID int64) ([]model.Todo, error)        // open, every chat
 - The "added" confirmation in the creating chat names the assignee (`→ @wife`).
 
 ### Visibility and authorisation
-- The item stays on the creating chat's list. List rows of assigned items show `→ @name` (`ui.Mention(t.AssigneeName)`).
+- The item stays on the creating chat's list. List rows of assigned items show `→ @name` (`ui.Mention(t.AssigneeID, t.AssigneeName, locale)`).
+- **Mentions link by user ID.** `ui.Mention` renders `<a href="tg://user?id=ID">@name</a>`, so a ping reaches the assignee even if the @username has since moved to an account that never talked to the bot (which the bot could not have noticed). With no known username the link text is a translated label (`ui.mention.noname`).
 - `/list` in a **private chat** also shows a section headed "Assigned to me", built from `Service.ListAssigned(userID)`.
   - That list excludes items in the user's own private chat.
-  - The section is not paged and has per-item buttons.
+  - The section is not paged and has per-item buttons. It is **capped** (PR 3 picks the limit, about 20 items), followed by a translated "and N more" line, because a message is limited to 4096 characters and the inline keyboard has a size limit too.
   - It is not shown in group chats.
   - Assigned items cannot be addressed by number from the private chat (`/done 3` uses that chat's numbers). They are reached through their buttons, whose callback data carries global IDs.
 - **Authorisation rule:** an item action is allowed when `t.ChatID == a.ChatID` (the actor is in the item's chat, as today) **or** `t.AssigneeID == a.UserID`. Otherwise it fails with `ErrForeignChat`.
@@ -377,12 +388,14 @@ ListAssigned(ctx, userID int64) ([]model.Todo, error)        // open, every chat
   - The name comes from `t.AssigneeName`, falling back to the sender's display name.
   - The handler decides this from the returned todo and the actor. No new service API is needed.
 - Digests are unchanged. They show each chat's own items, and assigned items do not appear in the assignee's digest.
+- **Accepted limitation:** removing an assignee from `TODO_ALLOWED_USERS` does not unassign their items. They keep getting DMs for items already assigned to them, and cannot act on them, because the handler ignores non-allowlisted users. The creator can delete the item, or reassign it once reassignment exists.
 
 ### Scheduler routing and the 403 fallback
+- **Every reminder of an assigned item goes to the assignee** (owner's decision). This covers the `due` reminder, `/remind` custom reminders, and snoozes, even a snooze pressed in the creating chat on a fallback message. Routing depends only on `dr.Todo.AssigneeID`, never on the reminder's kind or on who created it.
 - `scheduler.Backend` is **unchanged**. For each claimed `DueReminder`:
   1. If `dr.Todo.AssigneeID == 0`, the reminder is delivered as today.
   2. Otherwise the scheduler renders `ui.ReminderMsg` in the **assignee's** prefs (`Prefs(AssigneeID)`) and sends it to chat `AssigneeID`, the assignee's private chat. Recurrence is still computed in `todo.TZ`.
-  3. If that send fails **permanently** (`tg.IsPermanent`: 403 blocked or never started, chat not found), the scheduler falls back **once**. It renders the reminder in the creator's prefs, prefixes it with `ui.Mention(dr.Todo.AssigneeName)`, and sends it to `dr.ChatID`, the creating chat, through the usual `sendWithRetry` (migration and 429 handling).
+  3. If that send fails **permanently** (`tg.IsPermanent`: 403 blocked or never started, chat not found), the scheduler falls back **once**. It renders the reminder in the creator's prefs, prefixes it with `ui.Mention(dr.Todo.AssigneeID, dr.Todo.AssigneeName, creatorLocale)`, and sends it to `dr.ChatID`, the creating chat, through the usual `sendWithRetry` (migration and 429 handling).
      - If the fallback succeeds, the scheduler calls `ReminderSent(id, fallbackMsgID)`.
      - If the fallback fails, it calls `ReminderFailed` with that error's permanence.
   4. A **transient** error on the DM goes through the normal backoff (`ReminderFailed(permanent=false)`) and does not fall back.
@@ -391,9 +404,11 @@ ListAssigned(ctx, userID int64) ([]model.Todo, error)        // open, every chat
 ### Multi-node
 - Usernames, assignees and the authorisation inputs live only in the database. Any node handles any update. The rule from §9 stays: coordinate only through claims, the lease, `MarkUpdate` and `TakePrompt`.
 - `SetUsername` is one transaction, and the unique index guarantees one owner per name.
-  - Concurrent calls that give one name to different users must end with exactly one owner and **no error**. The conformance case `UsernameConcurrent` checks this.
+  - Called **on the pool** (outside `WithTx`), concurrent calls that give one name to different users must end with exactly one owner and **no error**. The conformance case `UsernameConcurrent` checks this, and `NoteUsername` always calls it this way.
   - SQLite serialises them (`_txlock=immediate`).
-  - The Postgres and MySQL providers (v0.2) must retry on a unique violation.
+  - The Postgres and MySQL providers (v0.2) must retry their own transaction on a unique violation.
+  - Called **inside** `WithTx`, it joins the outer transaction, which cannot be retried. A conflict may then surface as an error, and on Postgres it aborts the whole transaction. Do not call it inside a larger transaction.
+- **Stale names under parallel delivery:** with webhooks, two updates from one user can be handled at once on different nodes, so a name change can be recorded in either order. Whatever is stored corrects itself on that user's next update, because `NoteUsername` compares with the database row each time.
 - The DM attempt and the fallback both happen under the reminder's claim. The rest of delivery stays at-least-once (§5). A crash after the fallback but before `ReminderSent` repeats the whole sequence (DM, then fallback) after the claim expires.
 - The "did" notice is sent by whichever node handled the button press. It is sent at most once per update, because `MarkUpdate` drops a redelivered update.
 
@@ -408,7 +423,7 @@ Each PR owns only the files listed. They are numbered in merge order, but PRs 2�
    - `internal/store/storetest/assign.go`, the conformance suite;
    - `internal/store/sqlite/sqlite_test.go` (version checks);
    - `internal/service/service.go` (interface) and the stubs in `internal/service/assign.go`;
-   - `internal/ui/mention.go`;
+   - `internal/ui/mention.go` and `internal/ui/messages_mention.go`;
    - stub methods in `internal/handler/fake_svc_12_test.go`;
    - this section.
 2. **service: assignment.** Owns:

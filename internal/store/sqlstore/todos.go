@@ -13,6 +13,9 @@ import (
 
 // todoCols ends with the assignee's username, read live from users with a
 // correlated subquery (a join would make the unqualified columns ambiguous).
+// The subquery names the outer table as "todos", so todoCols works only in
+// "SELECT todoCols FROM todos ..." with no alias; with "FROM todos t" it
+// fails (or, worse, binds to another table). Use todoColsT with alias t.
 const todoCols = "id, chat_id, num, text, status, due_at, recur, tz, created_by, created_at, updated_at, done_at, " +
 	"assignee_id, (SELECT u.username FROM users u WHERE u.id = todos.assignee_id)"
 

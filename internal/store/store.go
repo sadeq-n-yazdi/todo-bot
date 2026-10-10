@@ -25,10 +25,13 @@ type Store interface {
 	// SetUsername stores name (lowercased, a leading "@" ignored) as the
 	// user's Telegram @username, and in the same transaction clears it from
 	// any other user who had it: usernames move between accounts. "" clears
-	// the user's name. ErrNotFound if the user does not exist. Concurrent
-	// calls (several nodes) giving one name to different users end with
-	// exactly one owner and no error; a provider whose isolation level
-	// lets them collide on the unique index must retry.
+	// the user's name. ErrNotFound if the user does not exist. Called on
+	// the pool (not inside WithTx), concurrent calls (several nodes) giving
+	// one name to different users end with exactly one owner and no error;
+	// a provider whose isolation level lets them collide on the unique
+	// index must retry its own transaction. Called inside WithTx it joins
+	// the outer transaction, which cannot be retried, so a conflict may
+	// surface as an error (and, on Postgres, abort that transaction).
 	SetUsername(ctx context.Context, userID int64, name string) error
 	// UserByUsername returns the user whose username is name (matched
 	// case-insensitively, a leading "@" ignored). ErrNotFound if none, or

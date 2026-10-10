@@ -100,8 +100,10 @@ type Service interface {
 	// = none) as userID's, creating the user with defaults if needed. It
 	// writes only when the stored name differs (compared with the database
 	// row, never an in-memory cache); a name taken over from another
-	// account is cleared from that account. The handler calls it for every
-	// update from an allowlisted user.
+	// account is cleared from that account. It calls store.SetUsername on
+	// the pool, never inside WithTx, so concurrent nodes cannot make it
+	// fail. The handler calls it for every update from an allowlisted
+	// user, and only logs an error.
 	NoteUsername(ctx context.Context, userID int64, username string) error
 	// UserByUsername resolves a @username (case-insensitive, leading "@"
 	// optional) to a user who has talked to the bot; ErrNotFound if none.
@@ -109,7 +111,11 @@ type Service interface {
 	UserByUsername(ctx context.Context, username string) (model.User, error)
 	// AddTodoFor is AddTodo with an assignee. assigneeID 0, or the
 	// assignee's own private chat (assigneeID == a.ChatID), stores no
-	// assignee. ErrNotFound if the assignee does not exist.
+	// assignee. ErrNotFound if the assignee does not exist. The returned
+	// todo has AssigneeID and AssigneeName (the assignee's current
+	// username) filled, as a store read would, so the handler can name the
+	// assignee in its confirmation without another lookup. Every reminder
+	// of the item (due, custom, snooze) is delivered to the assignee.
 	AddTodoFor(ctx context.Context, a Actor, assigneeID int64, r nlparse.Result) (model.Todo, error)
 	// ListAssigned returns the open items assigned to userID that live in
 	// other chats than userID's private chat, ordered by due time (undated

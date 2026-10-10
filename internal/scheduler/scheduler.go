@@ -40,8 +40,10 @@ type Backend interface {
 	DigestDone(ctx context.Context, c model.Chat, now time.Time) error
 	DigestView(ctx context.Context, chatID int64, now time.Time) (model.DigestView, error)
 	MigrateChat(ctx context.Context, oldID, newID int64) error
-	// Prefs gives the TZ and locale a reminder is rendered in (the todo's
-	// creator); tgLang is "" here.
+	// Prefs gives the TZ and locale a reminder is rendered in: the todo's
+	// creator for an unassigned item; for an assigned item (#58) the
+	// assignee for the DM and the creator for the fallback to the creating
+	// chat. tgLang is "" here.
 	Prefs(ctx context.Context, userID int64, tgLang string) (model.Prefs, error)
 	// Housekeep purges expired prompts and old update ids. Run calls it at
 	// most once an hour.

@@ -33,7 +33,11 @@ func shipped(t *testing.T) []int {
 	}
 	var out []int
 	for _, e := range entries {
-		v, err := strconv.Atoi(e.Name()[:4])
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		num, _, _ := strings.Cut(e.Name(), "_")
+		v, err := strconv.Atoi(num)
 		if err != nil {
 			t.Fatalf("%s: %v", e.Name(), err)
 		}
