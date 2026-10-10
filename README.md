@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.svg" width="128" height="128" alt="todo-bot icon: a checklist with an amber bell">
+</p>
+
 # todo-bot
 
 A self-hosted Telegram todo bot with reminders, for you and your family.
