@@ -89,9 +89,12 @@ type Service interface {
 
 	// ---- Assignment (#58, ARCHITECTURE §11) ----
 	//
-	// Item actions (Todo, Complete, Delete, Edit, Remind, Snooze,
-	// AckReminder) are allowed when the item belongs to a.ChatID OR
-	// a.UserID is its AssigneeID; otherwise ErrForeignChat.
+	// The methods below are stubs until #58 part 2 implements them. That
+	// PR also widens the rule for item actions (Todo, Complete, Delete,
+	// Edit, Remind, Snooze, AckReminder): they will be allowed when the
+	// item belongs to a.ChatID OR a.UserID is its AssigneeID, and
+	// otherwise fail with ErrForeignChat. Until then only the chat check
+	// applies.
 
 	// NoteUsername records username (Telegram @username without "@"; ""
 	// = none) as userID's, creating the user with defaults if needed. It

@@ -425,9 +425,10 @@ Each PR owns only the files listed. They are numbered in merge order, but PRs 2â
 3. **handler + ui: `/add @user`, "Assigned to me", "did" notice.** Owns:
    - `internal/handler/cmd_todo.go` and `messages_todo.go` (mention split, resolution, the "hasn't started the bot" reply, the `/list` section, `/done` notice);
    - `callbacks.go` (Done-button notices);
-   - in `router.go`, only `newReq` and its two callers, to call `NoteUsername` (exported handler API unchanged);
+   - in `router.go`, only `newReq` and its two callers, to call `NoteUsername`. The exported handler API is unchanged, but `router.go` is a frozen file, so this PR needs a `CONTRACT CHANGE` line for it;
    - `internal/ui/render.go` and a new `internal/ui/messages_assign.go` (`â†’ @name` on rows, the assigned section);
-   - new handler test files with their own fake service.
+   - new handler test files with their own fake service;
+   - the existing fakes that embed `service.Service`, in `internal/handler/fake_svc_11_test.go` and `router_test.go` (`prefsOnly`, `prefsPanics`). They need `NoteUsername` (and, where used, `UserByUsername`) methods. Without them the call panics on the nil embedded interface, and `Handle` recovers the panic, so the tests fail confusingly instead of crashing.
 
    It registers every string in en and fa, with prefixes `todo.assign.*` and `ui.assign.*`.
 4. **scheduler + e2e + docs: deliver to the assignee, 403 fallback.** Owns:
