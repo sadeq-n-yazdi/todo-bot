@@ -62,6 +62,9 @@ func (h *Handler) finishEdit(ctx context.Context, m *tg.Message, r req, p model.
 		return h.retry(ctx, m, r, p, "settings.prompt.none")
 	}
 	td, err := h.Svc.Edit(ctx, r.Actor, p.TodoID, text)
+	if errors.Is(err, service.ErrEmptyText) {
+		return h.retry(ctx, m, r, p, "settings.prompt.none")
+	}
 	if isGone(err) {
 		return h.say(ctx, m, lc.T("settings.cb.gone"))
 	} else if err != nil {

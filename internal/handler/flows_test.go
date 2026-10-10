@@ -222,3 +222,15 @@ func TestLongItemTextIsTruncatedInEchoes(t *testing.T) {
 		t.Errorf("done: text has %d runes", n)
 	}
 }
+
+func TestEditPromptServiceEmptyTextRetries(t *testing.T) {
+	hh := newHarness12(t)
+	hh.svc.emptyText = "blank"
+	td := hh.svc.addTodo(1, "keep")
+	id := openPrompt(t, hh, 1, 1, ui.ActEdit, td.ID)
+	hh.fs.Reset()
+	hh.say(1, 1, model.ChatPrivate, "blank", id)
+	if hh.svc.todo(td.ID).Text != "keep" || !hh.last().Msg.ForceReply {
+		t.Fatalf("want an unchanged item and a fresh prompt: %+v", hh.last())
+	}
+}

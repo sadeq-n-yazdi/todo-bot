@@ -35,7 +35,8 @@ type fakeSvc12 struct {
 	nextID    int64
 	seen      map[int64]bool
 	calls     []string
-	takeErr   error // returned by TakePrompt when set
+	emptyText string // Edit/AddTodo return ErrEmptyText for this text
+	takeErr   error  // returned by TakePrompt when set
 }
 
 var _ service.Service = (*fakeSvc12)(nil)
@@ -144,6 +145,9 @@ func (f *fakeSvc12) SetCalendar(_ context.Context, userID int64, cal calendar.Ki
 }
 
 func (f *fakeSvc12) AddTodo(_ context.Context, a service.Actor, r nlparse.Result) (model.Todo, error) {
+	if f.emptyText != "" && r.Text == f.emptyText {
+		return model.Todo{}, service.ErrEmptyText
+	}
 	td := f.addTodo(a.ChatID, r.Text)
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -235,6 +239,9 @@ func (f *fakeSvc12) Edit(_ context.Context, a service.Actor, id int64, text stri
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rec("Edit")
+	if f.emptyText != "" && text == f.emptyText {
+		return model.Todo{}, service.ErrEmptyText
+	}
 	t, err := f.own(a, id)
 	if err != nil {
 		return model.Todo{}, err

@@ -268,3 +268,15 @@ func TestTZBadNameIsTruncated(t *testing.T) {
 		t.Fatalf("reply has %d runes", n)
 	}
 }
+
+func TestCmdRemindServiceEmptyText(t *testing.T) {
+	hh := newHarness12(t)
+	hh.svc.emptyText = "ghost"
+	hh.private("/remind ghost tomorrow 18:00")
+	if !strings.Contains(hh.last().Msg.Text, "empty") {
+		t.Fatalf("want a localised explanation: %+v", hh.last())
+	}
+	if len(hh.svc.todos) != 0 {
+		t.Fatal("no item expected")
+	}
+}

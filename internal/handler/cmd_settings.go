@@ -48,6 +48,9 @@ func (h *Handler) cmdRemind(ctx context.Context, m *tg.Message, r req, args stri
 		return h.say(ctx, m, lc.T("settings.remind.recur"))
 	}
 	td, err := h.Svc.AddTodo(ctx, r.Actor, res)
+	if errors.Is(err, service.ErrEmptyText) {
+		return h.say(ctx, m, lc.T("settings.remind.empty"))
+	}
 	if err != nil {
 		return err
 	}

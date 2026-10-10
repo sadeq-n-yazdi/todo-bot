@@ -24,6 +24,7 @@ func init() {
 
 		"settings.remind.use":    "Usage:\n/remind 3 tomorrow 18:00 adds a reminder to item 3.\n/remind pay rent tomorrow 18:00 creates an item with a reminder.",
 		"settings.remind.nowhen": "I couldn't find a time. Try “tomorrow 18:00” or “in 2h”.",
+		"settings.remind.empty":  "The item text is empty. Write what to remind you about, then the time.",
 		"settings.remind.past":   "That time is in the past.",
 		"settings.remind.recur":  "Recurring reminders aren't supported here. Use /add for repeating items.",
 		"settings.remind.set":    "⏰ Reminder set for %s.",
@@ -65,6 +66,7 @@ func init() {
 
 		"settings.remind.use":    "راهنما:\n/remind 3 فردا ۱۸:۰۰ برای مورد ۳ یادآور اضافه می\u200cکند.\n/remind پرداخت اجاره فردا ۱۸:۰۰ مورد تازه با یادآور می\u200cسازد.",
 		"settings.remind.nowhen": "زمانی پیدا نکردم. مثلاً «فردا ۱۸:۰۰» یا «۲ ساعت دیگر» بنویسید.",
+		"settings.remind.empty":  "متن مورد خالی است. بنویسید چه چیزی را یادآوری کنم، سپس زمان.",
 		"settings.remind.past":   "این زمان گذشته است.",
 		"settings.remind.recur":  "یادآور تکرارشونده اینجا پشتیبانی نمی\u200cشود. برای موارد تکراری از /add استفاده کنید.",
 		"settings.remind.set":    "⏰ یادآور برای %s تنظیم شد.",
