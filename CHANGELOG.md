@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Config loading from the environment (#2):
+  - every problem is reported at once;
+  - secrets are never echoed in errors;
+  - SQLite URLs are built safely;
+  - webhook-mode settings are validated.
 - Multi-node contracts (#24):
   - a store provider registry, opened by URL scheme;
   - claim-based scheduling with conditional writes;

@@ -7,7 +7,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | # | Wave | Issue | Status | PR |
 |---|---|---|---|---|
 | 1 | 0 | Bootstrap and contracts (+ calendar, i18n core) | ✅ merged | #18 |
-| 2 | 1 | Config and logging | 🔨 in progress | |
+| 2 | 1 | Config and logging | ✅ merged | #39 |
 | 3 | 1 | Recurrence engine (DST, Jalali monthly) | ✅ merged | #19 |
 | 24 | 1.5 | Contracts v2: registry, multi-node store methods | ✅ merged | #38 |
 | 4 | 1 | SQLite store and migrations | ✅ merged | #21 |
@@ -15,7 +15,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 25 | 2 | sqlstore + Dialect; port SQLite; multi-node methods | 🔨 in progress (with #26) | |
 | 26 | 2 | storetest conformance suite | 🔨 in progress (with #25) | |
 | 27 | 2 | Leader lease loop | ⏳ todo | |
-| 6 | 2 | Telegram adapter | 🔨 in progress | |
+| 6 | 2 | Telegram adapter | 🔍 review fixes | #40 |
 | 7 | 2 | UI rendering and callback codec | ✅ merged | #20 |
 | 8 | 2 | Service layer | ⏳ todo | |
 | 9 | 2 | Deployment tooling | ✅ merged | #37 |
