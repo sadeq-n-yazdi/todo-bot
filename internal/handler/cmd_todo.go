@@ -95,7 +95,7 @@ func (h *Handler) cmdDone(ctx context.Context, m *tg.Message, r req, args string
 	if err != nil {
 		return h.todoErr(ctx, m, lc, err)
 	}
-	text := lc.T("todo.done", lc.Num(done.Num), ui.Escape(done.Text))
+	text := lc.T("todo.done", lc.Num(done.Num), echo(done.Text))
 	// A recurring item stays open with its next due time.
 	if done.Status == model.TodoOpen && done.DueAt != nil {
 		text += "\n" + lc.T("todo.done.next", ui.FormatWhen(*done.DueAt, lc, tzOf(r), h.Clock.Now()))
@@ -112,13 +112,17 @@ func (h *Handler) cmdDel(ctx context.Context, m *tg.Message, r req, args string)
 	if err := h.Svc.Delete(ctx, r.Actor, td.ID); err != nil {
 		return h.todoErr(ctx, m, lc, err)
 	}
-	return h.say(ctx, m, lc.T("todo.deleted", lc.Num(td.Num), ui.Escape(td.Text)))
+	return h.say(ctx, m, lc.T("todo.deleted", lc.Num(td.Num), echo(td.Text)))
 }
 
 func (h *Handler) cmdEdit(ctx context.Context, m *tg.Message, r req, args string) error {
 	lc := r.Prefs.Locale
-	numStr, text, _ := strings.Cut(strings.TrimSpace(args), " ")
-	text = strings.TrimSpace(text)
+	args = strings.TrimSpace(args)
+	numStr := ""
+	if f := strings.Fields(args); len(f) > 0 {
+		numStr = f[0]
+	}
+	text := strings.TrimSpace(strings.TrimPrefix(args, numStr))
 	if text == "" {
 		return h.say(ctx, m, lc.T("todo.usage.edit"))
 	}
@@ -133,7 +137,7 @@ func (h *Handler) cmdEdit(ctx context.Context, m *tg.Message, r req, args string
 	if err != nil {
 		return h.todoErr(ctx, m, lc, err)
 	}
-	return h.say(ctx, m, lc.T("todo.edited", lc.Num(edited.Num), ui.Escape(edited.Text)))
+	return h.say(ctx, m, lc.T("todo.edited", lc.Num(edited.Num), echo(edited.Text)))
 }
 
 func (h *Handler) cmdToday(ctx context.Context, m *tg.Message, r req, args string) error {
@@ -142,8 +146,10 @@ func (h *Handler) cmdToday(ctx context.Context, m *tg.Message, r req, args strin
 	if err != nil {
 		return err
 	}
-	// On demand, the digest is shown in the asker's locale and time zone.
-	v.Locale, v.Loc = r.Prefs.Locale, tzOf(r)
+	// Show the digest in the asker's language and calendar, but keep the
+	// service's Loc: "today" and "overdue" are defined in the digest owner's
+	// time zone, so the section split and the shown times must agree.
+	v.Locale = r.Prefs.Locale
 	return h.reply(ctx, m, h.threaded(m, ui.Digest(v, now)))
 }
 
@@ -203,7 +209,7 @@ func (h *Handler) todoErr(ctx context.Context, m *tg.Message, lc i18n.Locale, er
 
 // itemSummary renders "text — when 🔁" for a freshly stored item.
 func (h *Handler) itemSummary(td model.Todo, r req) string {
-	s := ui.Escape(td.Text)
+	s := echo(td.Text)
 	if td.DueAt != nil {
 		s += " — " + ui.FormatWhen(*td.DueAt, r.Prefs.Locale, tzOf(r), h.Clock.Now())
 	}
@@ -211,6 +217,19 @@ func (h *Handler) itemSummary(td model.Todo, r req) string {
 		s += " 🔁"
 	}
 	return s
+}
+
+// echoRunes is how much of an item's text confirmation replies repeat.
+const echoRunes = 200
+
+// echo returns text shortened to echoRunes runes (plus an ellipsis) and
+// HTML-escaped. It truncates before escaping, because escaping can expand
+// the text up to five times and a reply must stay under Telegram's limit.
+func echo(text string) string {
+	if r := []rune(text); len(r) > echoRunes {
+		text = string(r[:echoRunes]) + "…"
+	}
+	return ui.Escape(text)
 }
 
 func tooLong(s string) bool { return utf8.RuneCountInString(s) > maxTodoChars }

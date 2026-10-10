@@ -19,6 +19,7 @@ type fakeSvc11 struct {
 	mu     sync.Mutex
 	prefs  map[int64]model.Prefs
 	todos  []*model.Todo
+	added  []nlparse.Result // every Result passed to AddTodo
 	nextID int64
 	clock  func() time.Time
 	// failWith, if set, is returned by Complete, Delete and Edit.
@@ -38,6 +39,7 @@ func (f *fakeSvc11) Prefs(_ context.Context, userID int64, _ string) (model.Pref
 func (f *fakeSvc11) AddTodo(_ context.Context, a service.Actor, r nlparse.Result) (model.Todo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.added = append(f.added, r)
 	f.nextID++
 	num := 1
 	for _, t := range f.todos {

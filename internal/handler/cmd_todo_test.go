@@ -20,6 +20,7 @@ import (
 const (
 	userEn  int64 = 1
 	userFa  int64 = 2
+	userTeh int64 = 3 // Farsi, Jalali, Asia/Tehran (UTC+3:30)
 	userBad int64 = 99
 	group   int64 = -500
 )
@@ -36,11 +37,16 @@ func newTodoEnv(t *testing.T) *todoEnv {
 	svc := newFakeSvc11(clk.Now)
 	svc.prefs[userEn] = model.Prefs{TZ: time.UTC, Locale: i18n.Locale{Lang: i18n.En, Cal: calendar.Gregorian}}
 	svc.prefs[userFa] = model.Prefs{TZ: time.UTC, Locale: i18n.Locale{Lang: i18n.Fa, Cal: calendar.Jalali}}
+	tehranLoc, err := time.LoadLocation("Asia/Tehran")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.prefs[userTeh] = model.Prefs{TZ: tehranLoc, Locale: i18n.Locale{Lang: i18n.Fa, Cal: calendar.Jalali}}
 	fs := &tgtest.FakeSender{}
 	h := New(Deps{
 		Svc: svc, Send: fs, Clock: clk,
 		Parser:  nlparse.Parser{DefaultHour: 9},
-		Allowed: map[int64]bool{userEn: true, userFa: true}, BotUsername: "TodoBot",
+		Allowed: map[int64]bool{userEn: true, userFa: true, userTeh: true}, BotUsername: "TodoBot",
 	})
 	return &todoEnv{h: h, fs: fs, svc: svc}
 }
