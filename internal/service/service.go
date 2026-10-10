@@ -12,6 +12,7 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/nlparse"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/scheduler"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 )
 
@@ -93,4 +94,7 @@ func New(st store.Store, clk clock.Clock, cfg Config) *Svc {
 // SetWaker sets who is notified about schedule changes.
 func (s *Svc) SetWaker(w Waker) { s.waker = w }
 
-var _ Service = (*Svc)(nil)
+var (
+	_ Service           = (*Svc)(nil)
+	_ scheduler.Backend = (*Svc)(nil)
+)
