@@ -15,7 +15,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 25 | 2 | sqlstore + Dialect; port SQLite; multi-node methods | 🔨 in progress (with #26) | |
 | 26 | 2 | storetest conformance suite | 🔨 in progress (with #25) | |
 | 27 | 2 | Leader lease loop | ⏳ todo | |
-| 6 | 2 | Telegram adapter | 🔍 review fixes | #40 |
+| 6 | 2 | Telegram adapter | ✅ merged | #40 |
 | 7 | 2 | UI rendering and callback codec | ✅ merged | #20 |
 | 8 | 2 | Service layer | ⏳ todo | |
 | 9 | 2 | Deployment tooling | ✅ merged | #37 |

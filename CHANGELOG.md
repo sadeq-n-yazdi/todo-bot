@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Telegram adapter (#6):
+  - long polling that loses no updates on a lease handover;
+  - HTML messages with inline keyboards;
+  - error mapping (429 retry-after, chat migration, permanent failures);
+  - token redaction in errors;
+  - size limits checked before any request is sent.
 - Config loading from the environment (#2):
   - every problem is reported at once;
   - secrets are never echoed in errors;
