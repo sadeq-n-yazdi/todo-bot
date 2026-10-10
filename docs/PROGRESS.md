@@ -12,12 +12,12 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 24 | 1.5 | Contracts v2: registry, multi-node store methods | ✅ merged | #38 |
 | 4 | 1 | SQLite store and migrations | ✅ merged | #21 |
 | 5 | 1 | Natural-language parser (en + fa, Jalali) | ✅ merged | #22 |
-| 25 | 2 | sqlstore + Dialect; port SQLite; multi-node methods | 🔍 in review | #42 |
-| 26 | 2 | storetest conformance suite | 🔍 in review | #42 |
+| 25 | 2 | sqlstore + Dialect; port SQLite; multi-node methods | ✅ merged | #42 |
+| 26 | 2 | storetest conformance suite | ✅ merged | #42 |
 | 27 | 2 | Leader lease loop | ⏳ todo | |
 | 6 | 2 | Telegram adapter | ✅ merged | #40 |
 | 7 | 2 | UI rendering and callback codec | ✅ merged | #20 |
-| 8 | 2 | Service layer | ⏳ todo | |
+| 8 | 2 | Service layer | 🔨 in progress | |
 | 9 | 2 | Deployment tooling | ✅ merged | #37 |
 | 17 | 2 | App and bot icon | ✅ merged | #23 |
 | 10 | 3 | Scheduler | ✅ merged | #41 |

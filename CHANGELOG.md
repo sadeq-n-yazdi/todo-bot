@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- A storage layer that is ready for several nodes (#25, #26):
+  - `sqlstore` with per-database dialects, and SQLite ported onto it;
+  - atomic claims for reminders and digests, a leader lease, update dedupe and persisted prompts;
+  - versioned migrations, kept in step with SQLite's `user_version`;
+  - a conformance suite that every database provider must pass.
 - Reminder and digest scheduler (#10). It is safe to run on several nodes:
   - it claims due reminders before sending them;
   - it waits out Telegram rate limits only while its claim is still valid;
