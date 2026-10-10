@@ -1,4 +1,4 @@
-package sqlite
+package sqlstore
 
 import (
 	"context"
@@ -44,19 +44,19 @@ func scanTodo(s scanner) (model.Todo, error) {
 func (d *DB) queryTodos(ctx context.Context, query string, args ...any) ([]model.Todo, error) {
 	rows, err := d.q.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("sqlite: query todos: %w", err)
+		return nil, fmt.Errorf("sqlstore: query todos: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	var out []model.Todo
 	for rows.Next() {
 		t, err := scanTodo(rows)
 		if err != nil {
-			return nil, fmt.Errorf("sqlite: scan todo: %w", err)
+			return nil, fmt.Errorf("sqlstore: scan todo: %w", err)
 		}
 		out = append(out, t)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("sqlite: iterate todos: %w", err)
+		return nil, fmt.Errorf("sqlstore: iterate todos: %w", err)
 	}
 	return out, nil
 }
@@ -70,14 +70,12 @@ func (d *DB) InsertTodo(ctx context.Context, t *model.Todo) error {
 }
 
 func (d *DB) insertTodo(ctx context.Context, t *model.Todo) error {
-	var num int
-	err := d.q.QueryRowContext(ctx,
-		"UPDATE chats SET next_num = next_num + 1 WHERE id = ? RETURNING next_num - 1", t.ChatID).Scan(&num)
+	num, err := d.d.AllocTodoNum(ctx, d.q, t.ChatID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("chat", t.ChatID)
 	}
 	if err != nil {
-		return fmt.Errorf("sqlite: allocate todo number in chat %d: %w", t.ChatID, err)
+		return fmt.Errorf("sqlstore: allocate todo number in chat %d: %w", t.ChatID, err)
 	}
 	status := t.Status
 	if status == "" {
@@ -88,17 +86,13 @@ func (d *DB) insertTodo(ctx context.Context, t *model.Todo) error {
 	if !t.UpdatedAt.IsZero() {
 		updated = t.UpdatedAt.Unix()
 	}
-	res, err := d.q.ExecContext(ctx, `
+	id, err := d.d.InsertID(ctx, d.q, `
 INSERT INTO todos (chat_id, num, text, status, due_at, recur, tz, created_by, created_at, updated_at, done_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ChatID, num, t.Text, string(status), nullTime(t.DueAt), nullString(t.Recur), t.TZ,
 		t.CreatedBy, created, updated, nullTime(t.DoneAt))
 	if err != nil {
-		return fmt.Errorf("sqlite: insert todo: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("sqlite: insert todo: %w", err)
+		return fmt.Errorf("sqlstore: insert todo: %w", err)
 	}
 	t.ID, t.Num, t.Status = id, num, status
 	t.CreatedAt, t.UpdatedAt = fromUnix(created), fromUnix(updated)
@@ -112,7 +106,7 @@ func (d *DB) GetTodo(ctx context.Context, id int64) (model.Todo, error) {
 		return model.Todo{}, notFound("todo", id)
 	}
 	if err != nil {
-		return model.Todo{}, fmt.Errorf("sqlite: get todo %d: %w", id, err)
+		return model.Todo{}, fmt.Errorf("sqlstore: get todo %d: %w", id, err)
 	}
 	return t, nil
 }
@@ -125,7 +119,7 @@ func (d *DB) GetTodoByNum(ctx context.Context, chatID int64, num int) (model.Tod
 		return model.Todo{}, notFound("todo", fmt.Sprintf("%d#%d", chatID, num))
 	}
 	if err != nil {
-		return model.Todo{}, fmt.Errorf("sqlite: get todo %d#%d: %w", chatID, num, err)
+		return model.Todo{}, fmt.Errorf("sqlstore: get todo %d#%d: %w", chatID, num, err)
 	}
 	return t, nil
 }
@@ -174,7 +168,7 @@ func (d *DB) CountTodos(ctx context.Context, q model.TodoQuery) (int, error) {
 	w, args := where(q)
 	var n int
 	if err := d.q.QueryRowContext(ctx, "SELECT COUNT(*) FROM todos"+w, args...).Scan(&n); err != nil {
-		return 0, fmt.Errorf("sqlite: count todos: %w", err)
+		return 0, fmt.Errorf("sqlstore: count todos: %w", err)
 	}
 	return n, nil
 }
