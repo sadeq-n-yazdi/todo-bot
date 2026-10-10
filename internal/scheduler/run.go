@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"runtime/debug"
 	"time"
 
@@ -124,23 +125,8 @@ func (s *Scheduler) deliverReminder(ctx context.Context, dr model.DueReminder, e
 		}
 		return
 	}
-	prefs, err := s.b.Prefs(ctx, dr.Todo.CreatedBy, "")
-	if err != nil {
-		log.Error("scheduler: prefs", "err", err)
-		s.fail(ctx, dr.Reminder, false)
-		return
-	}
-	now := s.clk.Now()
-	late := now.Sub(dr.FireAt) > LateAfter
-	msg := ui.ReminderMsg(dr, prefs.Locale, prefs.TZ, now, late)
-
-	msgID, _, err := s.sendWithRetry(ctx, dr.ChatID, msg, end)
-	if err != nil {
-		if ctx.Err() != nil {
-			return // shutting down: let the claim expire
-		}
-		log.Warn("scheduler: send reminder", "err", err)
-		s.fail(ctx, dr.Reminder, tg.IsPermanent(err))
+	msgID, ok := s.sendReminder(ctx, log, dr, end)
+	if !ok {
 		return
 	}
 	wctx, cancel := detached(ctx)
@@ -149,6 +135,67 @@ func (s *Scheduler) deliverReminder(ctx context.Context, dr model.DueReminder, e
 		// The claim will expire and the reminder is sent again (at-least-once).
 		log.Error("scheduler: mark reminder sent", "err", err)
 	}
+}
+
+// sendReminder sends the reminder and returns the id of the message that
+// reached a chat. ok=false means the outcome was already recorded
+// (ReminderFailed) or the node is shutting down, so the caller must not call
+// ReminderSent.
+//
+// An assigned item (dr.Todo.AssigneeID != 0, ARCHITECTURE §11) goes to the
+// assignee's private chat in the assignee's prefs. Only a permanent error
+// there (403, chat not found) falls back to the creating chat, in the
+// creator's prefs with a mention of the assignee. The fallback is a
+// straight-line step after the DM attempt, not a loop, so one claim makes one
+// DM attempt (plus its 429 and migration retries) and at most one fallback.
+func (s *Scheduler) sendReminder(ctx context.Context, log *slog.Logger, dr model.DueReminder, end time.Time) (msgID int, ok bool) {
+	creator, err := s.b.Prefs(ctx, dr.Todo.CreatedBy, "")
+	if err != nil {
+		log.Error("scheduler: prefs", "err", err)
+		s.fail(ctx, dr.Reminder, false)
+		return 0, false
+	}
+	now := s.clk.Now()
+	late := now.Sub(dr.FireAt) > LateAfter
+	assignee := dr.Todo.AssigneeID
+	if assignee == 0 || assignee == dr.ChatID {
+		id, _, err := s.sendWithRetry(ctx, dr.ChatID, ui.ReminderMsg(dr, creator.Locale, creator.TZ, now, late), end)
+		return id, s.sendOutcome(ctx, log, dr, err)
+	}
+
+	ap, err := s.b.Prefs(ctx, assignee, "")
+	if err != nil {
+		log.Error("scheduler: assignee prefs", "assignee", assignee, "err", err)
+		s.fail(ctx, dr.Reminder, false)
+		return 0, false
+	}
+	id, _, err := s.sendWithRetry(ctx, assignee, ui.ReminderMsg(dr, ap.Locale, ap.TZ, now, late), end)
+	if err == nil {
+		return id, true
+	}
+	if ctx.Err() != nil || !tg.IsPermanent(err) {
+		// Shutting down, or transient: normal backoff, no fallback.
+		return 0, s.sendOutcome(ctx, log, dr, err)
+	}
+	log.Warn("scheduler: assignee unreachable, falling back to creating chat", "assignee", assignee, "err", err)
+	fb := ui.ReminderMsg(dr, creator.Locale, creator.TZ, now, late)
+	fb.Text = ui.Mention(assignee, dr.Todo.AssigneeName, creator.Locale) + "\n" + fb.Text
+	id, _, err = s.sendWithRetry(ctx, dr.ChatID, fb, end)
+	return id, s.sendOutcome(ctx, log, dr, err)
+}
+
+// sendOutcome reports whether err is nil. Otherwise it records the failure,
+// unless the node is shutting down and the claim should simply expire.
+func (s *Scheduler) sendOutcome(ctx context.Context, log *slog.Logger, dr model.DueReminder, err error) bool {
+	if err == nil {
+		return true
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	log.Warn("scheduler: send reminder", "err", err)
+	s.fail(ctx, dr.Reminder, tg.IsPermanent(err))
+	return false
 }
 
 // sendWithRetry sends msg, waiting out a 429 only while the wait ends before

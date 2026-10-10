@@ -94,6 +94,31 @@ Replies:
 
 With no text, the bot answers `Usage: /add buy milk tomorrow 18:00`. The limit is 1000 characters per item.
 
+### Assigning an item to someone: `/add @username <text> [when]`
+
+Start the text with `@username` to give the item to another member. The item stays in the list of the chat where you typed it, and **every reminder for it goes to that person's private chat** with the bot, with the usual [Done and snooze buttons](#reminder-buttons). The reminder is written in the assignee's own language, calendar and time zone.
+
+```
+/add @wife pick up our son today 15:00
+```
+
+```
+/add @wife امروز ساعت ۱۵ بچه را از مدرسه بردار
+```
+
+The bot confirms in the chat where you typed it, and the confirmation names the assignee (`→ @wife`).
+
+- **The assignee must be known to the bot.** They must have opened the bot and pressed **Start** once, and they must be in `TODO_ALLOWED_USERS`. Otherwise nothing is created, and the bot answers "@wife hasn't started the bot yet. Ask them to open @<bot> and press Start."
+- **People who used the bot before this release** are known by username only after the next message they send to the bot. Ask them to send any message, for example `/help`.
+- **Only a leading `@name` counts.** An `@word` anywhere else stays part of the item's text. A leading mention of the bot itself is ignored. Assigning an item to yourself in your own private chat does nothing special.
+- **"Assigned to me" in `/list`.** In a private chat, `/list` also shows a heading **Assigned to me** with the open items other people (or you, from a group) assigned to you. The list is capped, and the end says how many more there are. Rows show `→ @name`.
+- **Either person can act.** The person who created the item and the assignee can both complete, snooze, edit and delete it. Items under "Assigned to me" are used through their buttons, not through `/done 3`, because item numbers belong to the chat where the item was added.
+- **Did notice.** When the assignee completes the item, the chat where it was added gets "✅ @wife did: …".
+- **If the assignee cannot be reached.** Telegram refuses a private message to someone who blocked the bot or never started it. The reminder then goes **once** to the chat where the item was added, in your language, starting with a mention of the assignee, and is counted as sent. Other errors (for example Telegram being down) are retried a few times as for any reminder, and do not go to the group.
+- **Delivery can repeat.** As for every reminder, delivery is at-least-once: if the bot stops right after sending, the same reminder may arrive a second time.
+- **Time tip in Farsi.** `ساعت ۳` means 03:00 in the night. For the afternoon write `ساعت ۱۵` or `۳ بعدازظهر`.
+- Removing someone from `TODO_ALLOWED_USERS` does not take back items already assigned to them. Delete the item to stop its reminders.
+
 ### `/list [page]`
 
 Shows your open items, ten per page. With a page number, shows that page. A page past the end shows the last page.
@@ -318,7 +343,7 @@ After a snooze the message becomes `💤 Snoozed until today 09:25` (`💤 تا 
 - The bot answers a command by replying to it.
 - With several bots in a group, write `/add@your_bot_name buy milk`. A command addressed to another bot is ignored. `/add` alone also works.
 - `/lang`, `/calendar` and `/tz` are personal. They change how the bot shows things to **you**, not to the group. `/digest` is per chat.
-- Reminders and digests are sent to the group, in the language and zone of the person who made the item or set the digest.
+- Reminders and digests are sent to the group, in the language and zone of the person who made the item or set the digest. The exception is an item [assigned to someone](#assigning-an-item-to-someone-add-username-text-when): its reminders go to the assignee's private chat.
 - If Telegram upgrades the group to a supergroup, the list moves with it.
 - Keep the bot's privacy mode **on**. Commands and replies to the bot still arrive.
 - `/whoami` is answered only in private chats.

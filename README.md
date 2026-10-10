@@ -17,6 +17,7 @@ You write an item the way you would say it, for example `buy milk tomorrow 18:00
 - **Natural-language dates.** `tomorrow 18:00`, `in 2h`, `Fri 14:30`, `15 Oct`, `25 Mehr`. English and Farsi phrases are both understood, whatever language you chose for the bot.
 - **Reminders.** A due time becomes a reminder. When it fires you get buttons to mark the item done or to snooze it.
 - **Recurring items.** Daily, weekdays, weekly on chosen days, monthly, and every N days.
+- **Assign to someone.** `/add @wife pick up our son today 15:00` keeps the item in the chat where you typed it, but sends its reminders to the assignee's private chat. The assignee must press Start once and be in `TODO_ALLOWED_USERS`. People who used the bot before this release become known by username after their next message. Assigned items show in the assignee's `/list` under "Assigned to me", either of you can complete them (the other chat gets a "did" notice), and if the assignee cannot be messaged, the reminder falls back once to the chat where the item was added. See [Usage](docs/USAGE.md#assigning-an-item-to-someone-add-username-text-when).
 - **Snooze.** 10 minutes, 1 hour, or tomorrow, from the reminder message.
 - **Daily digest.** Overdue and today's items at a time you choose, per chat. `/today` shows it on demand.
 - **English and Farsi (فارسی).** Per-user language. Farsi replies use Persian digits, and Persian digits are accepted as input.
