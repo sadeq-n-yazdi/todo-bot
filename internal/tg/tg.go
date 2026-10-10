@@ -1,0 +1,96 @@
+// Package tg defines library-independent Telegram types. Only
+// internal/tg/tgbot imports a Telegram library.
+package tg
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
+)
+
+// Message is an incoming text message (or a service message).
+type Message struct {
+	ID              int
+	ChatID          int64
+	ChatKind        model.ChatKind // supergroups map to ChatGroup
+	ChatTitle       string
+	FromID          int64
+	FromName        string
+	FromLang        string // Telegram language_code of the sender, e.g. "fa", "en-GB"
+	Text            string // "/cmd@BotName args" is normalised to "/cmd args"
+	ReplyToID       int    // ID of the message this replies to, 0 if none
+	MigrateToChatID int64  // non-zero on a group -> supergroup migration message
+}
+
+// Callback is an inline-keyboard button press.
+type Callback struct {
+	ID        string
+	FromID    int64
+	FromLang  string
+	ChatID    int64
+	MessageID int
+	Data      string
+}
+
+// Update carries exactly one of Message or Callback.
+type Update struct {
+	Message  *Message
+	Callback *Callback
+}
+
+// Button is an inline keyboard button carrying callback data (<= 64 bytes).
+type Button struct {
+	Text string
+	Data string
+}
+
+// OutMessage is an outgoing message. Text is HTML (parse_mode=HTML).
+type OutMessage struct {
+	Text       string
+	Keyboard   [][]Button
+	ForceReply bool
+	ReplyTo    int
+}
+
+// Sender sends and edits messages.
+type Sender interface {
+	Send(ctx context.Context, chatID int64, m OutMessage) (msgID int, err error)
+	Edit(ctx context.Context, chatID int64, msgID int, m OutMessage) error
+	AnswerCallback(ctx context.Context, callbackID, text string) error
+}
+
+// APIError is a Telegram Bot API error.
+type APIError struct {
+	Code       int
+	Desc       string
+	RetryAfter time.Duration // set on 429
+	MigrateTo  int64         // set on 400 "group chat was upgraded to a supergroup"
+}
+
+func (e *APIError) Error() string { return fmt.Sprintf("telegram: %d %s", e.Code, e.Desc) }
+
+// IsPermanent reports whether retrying err can never succeed (bot blocked,
+// kicked, chat not found). Migration and rate-limit errors are not permanent.
+func IsPermanent(err error) bool {
+	var ae *APIError
+	if !errors.As(err, &ae) {
+		return false
+	}
+	if ae.MigrateTo != 0 || ae.Code == 429 {
+		return false
+	}
+	return ae.Code == 403 || (ae.Code == 400 && containsAny(ae.Desc, "chat not found", "bot was kicked", "user is deactivated"))
+}
+
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
