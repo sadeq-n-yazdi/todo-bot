@@ -2,7 +2,7 @@
 
 This page is updated on `main` after every merged PR.
 
-Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
+Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
 
 | # | Wave | Issue | Status | PR |
 |---|---|---|---|---|
@@ -27,6 +27,13 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 14 | 4 | End-to-end tests | ✅ merged | #56 |
 | 15 | 4 | User documentation (en + fa) | ✅ merged | #55 |
 | 16 | 5 | Release v0.1.0 and deploy to vps00 | ✅ released and deployed | #59 |
+
+### v0.1.1
+
+| # | Issue | Status | PR |
+|---|---|---|---|
+| 57 | nlparse: a trailing @mention breaks date parsing | ✅ merged | #60 |
+| 58 | Assign a task to another member (reminder by DM) | 🚧 part 1 (contracts) in progress | |
 
 ## Log
 - **2026-10-10**
@@ -55,3 +62,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - #24 merged (#38) after an architecture review. The review found that a node whose claim had expired could resurrect a sent reminder; that is fixed with token-conditional writes.
   - Wave 2 started: #25+#26 (one PR), #6 and #2.
   - #8 (service) and #27 (lease) start after #25.
+- **2026-10-10**
+  - v0.1.0 released and deployed to vps00. Rollback was exercised (update, rollback, update).
+  - v0.1.1 started: #57 merged (#60) after review. The review caught `@3pm` being hidden as a mention, so a mention now has to start with a letter or underscore.
+  - #58 part 1 (contracts) is in progress.

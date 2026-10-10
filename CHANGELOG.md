@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- A date is now found when the text also has an `@mention` or `#tag` after it or inside it, for example `pick up our son today 15:00 @wife` (#57). The mention is kept in the item's text.
+
 ## [0.1.0] - 2026-10-10
 
 ### Added
