@@ -217,7 +217,7 @@ func TestGoldenDigest(t *testing.T) {
 		full, empty string
 	}{
 		{locEnG, "<b>⚠️ Overdue</b>\n4. call mom — Mon 12 Oct 09:00 ⚠️\n\n<b>📅 Today</b>\n3. buy &lt;milk&gt; &amp; eggs — today 18:00 🔁\n\n+12 without date", "Nothing due today 🎉"},
-		{locFaJ, "<b>⚠️ عقب\u200cافتاده</b>\n۴. call mom — دوشنبه ۲۰ مهر ۰۹:۰۰ ⚠️\n\n<b>📅 امروز</b>\n۳. buy &lt;milk&gt; &amp; eggs — امروز ۱۸:۰۰ 🔁\n\n+۱۲ بدون تاریخ", "امروز کاری نداری 🎉"},
+		{locFaJ, "<b>⚠️ عقب\u200cافتاده</b>\n۴. call mom — دوشنبه ۲۰ مهر ۰۹:۰۰ ⚠️\n\n<b>📅 امروز</b>\n۳. buy &lt;milk&gt; &amp; eggs — امروز ۱۸:۰۰ 🔁\n\n+۱۲ بدون تاریخ", "امروز کاری ندارید 🎉"},
 		{locEnJ, "<b>⚠️ Overdue</b>\n4. call mom — Mon 20 Mehr 09:00 ⚠️\n\n<b>📅 Today</b>\n3. buy &lt;milk&gt; &amp; eggs — today 18:00 🔁\n\n+12 without date", "Nothing due today 🎉"},
 	}
 	for _, c := range cases {
