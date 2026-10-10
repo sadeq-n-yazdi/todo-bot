@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Deployment tooling (#9):
+  - a hardened systemd unit (exposure score 1.1), with sysusers and an env template;
+  - `scripts/deploy.sh` with bootstrap, update, rollback, status and logs.
+- On update, `deploy.sh` backs up the database, keeps the last healthy binary, health-checks the bot against restart loops, and prunes backups.
+- App and bot icon, social preview and export script (#17).
+- Natural-language dates in English and Farsi (#5):
+  - relative times, weekdays and ordinals;
+  - Jalali month names;
+  - recurrence phrases;
+  - Persian digits.
+- SQLite store with embedded migrations, WAL mode and online backup (#4).
 - Localized UI rendering in English and Farsi, for Gregorian and Jalali dates:
   - todo lists with buttons and paging;
   - reminders with snooze buttons;
