@@ -19,6 +19,9 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Once the first signal arrived, restore the default handling so that a
+	// second SIGTERM or Ctrl-C kills the process during a slow shutdown.
+	go func() { <-ctx.Done(); stop() }()
 	code := run(ctx, os.Args[1:], os.Getenv, os.Stdout, os.Stderr)
 	stop()
 	os.Exit(code)

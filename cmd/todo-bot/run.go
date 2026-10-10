@@ -20,6 +20,7 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/service"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 	_ "github.com/sadeq-n-yazdi/todo-bot/internal/store/sqlite" // registers the "sqlite" scheme
+	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg/tgbot"
 )
 
@@ -34,13 +35,24 @@ var (
 // shutdownTimeout bounds the whole shutdown (leader, scheduler, database).
 var shutdownTimeout = 10 * time.Second
 
+// Backoff for the first connection to Telegram; tests shorten it.
+var (
+	startBackoffMin = time.Second
+	startBackoffMax = 30 * time.Second
+)
+
+// openStore opens the database; tests wrap it.
+var openStore = store.Open
+
 // tgServerURL points the Telegram client at another server; tests set it.
 var tgServerURL string
 
 // menu lists the bot commands shown in Telegram's menu, in order.
 var menu = []string{"help", "add", "list", "done", "del", "edit", "today", "remind", "tz", "digest", "lang", "calendar"}
 
-const usage = "usage: todo-bot [run|version|migrate|backup PATH]\n"
+const usage = "usage: todo-bot [run|version|migrate|backup PATH]\n" +
+	"  backup opens the database like run does: it creates a missing file and applies\n" +
+	"  pending migrations before it copies.\n"
 
 // run is the whole program: it returns the process exit code. args excludes
 // the program name.
@@ -121,7 +133,7 @@ func openAdmin(ctx context.Context, env func(string) string) (store.Store, error
 	if err != nil {
 		return nil, err
 	}
-	st, err := store.Open(ctx, cfg.DBURL)
+	st, err := openStore(ctx, cfg.DBURL)
 	if err != nil {
 		return nil, fmt.Errorf("open database %s: %w", redactURL(cfg.DBURL), err)
 	}
@@ -145,6 +157,9 @@ func migrate(ctx context.Context, env func(string) string, stdout io.Writer) err
 	return nil
 }
 
+// backup writes a consistent copy of the database to dest. It opens the
+// database through store.Open, so it may create a missing file and apply
+// pending migrations first (a read-only open is a follow-up).
 func backup(ctx context.Context, env func(string) string, dest string, stdout io.Writer) error {
 	st, err := openAdmin(ctx, env)
 	if err != nil {
@@ -184,20 +199,29 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 	slog.SetDefault(log)
 	log.Info("starting", "version", version, "node", cfg.NodeID, "db", redactURL(cfg.DBURL))
 
-	st, err := store.Open(ctx, cfg.DBURL)
+	st, err := openStore(ctx, cfg.DBURL)
 	if err != nil {
 		return fmt.Errorf("open database %s: %w", redactURL(cfg.DBURL), err)
 	}
-	// The database is closed last, after the leader and the scheduler stopped.
+	// The database is closed last, and only after the leader and the scheduler
+	// have stopped. If they did not stop in time, Close could hang on a query
+	// that is still running, so it is skipped: the process exits right after.
+	closeDB := true
 	defer func() {
+		if !closeDB {
+			return
+		}
 		if err := st.Close(); err != nil {
 			log.Error("close database", "err", err)
 		}
 	}()
 
-	bot, err := tgbot.New(ctx, cfg.Token, tgbot.Options{ServerURL: tgServerURL})
+	bot, err := connectTelegram(ctx, cfg.Token, log)
 	if err != nil {
-		return fmt.Errorf("telegram: %w", err)
+		return err
+	}
+	if bot == nil { // interrupted while waiting for Telegram
+		return nil
 	}
 
 	clk := clock.Real{}
@@ -227,11 +251,13 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 	lead := func(lctx context.Context, epoch int64) {
 		log.Info("leading: polling telegram", "epoch", epoch)
 		if err := bot.DeleteWebhook(lctx); err != nil {
-			log.Error("delete webhook", "err", err)
+			if lctx.Err() == nil { // a cancelled lead is expected, not an error
+				log.Error("delete webhook", "err", err)
+			}
 			return
 		}
 		setCommands(lctx, bot, log)
-		if err := bot.Poller().Run(lctx, h.Handle); err != nil {
+		if err := bot.Poller().Run(lctx, h.Handle); err != nil && lctx.Err() == nil {
 			log.Error("poller stopped", "err", err)
 		}
 	}
@@ -256,18 +282,48 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 	}()
 
 	<-ctx.Done()
-	log.Info("shutting down")
+	log.Info("shutting down", "budget", shutdownTimeout) // one budget for the whole shutdown
 	timeout := time.NewTimer(shutdownTimeout)
 	defer timeout.Stop()
 	stopLease() // the lease loop stops polling, then releases the lease
 	if !waitFor(leaseDone, timeout.C) {
+		closeDB = false
 		return errors.New("shutdown timed out stopping the poller")
 	}
 	stopSched()
 	if !waitFor(schedDone, timeout.C) {
+		closeDB = false
 		return errors.New("shutdown timed out stopping the scheduler")
 	}
 	return nil
+}
+
+// connectTelegram calls getMe, retrying with a capped backoff on network and
+// server errors, so that a short outage at boot does not fail the service.
+// A rejected token (4xx other than 429) is fatal. It returns (nil, nil) if ctx
+// ended while waiting.
+func connectTelegram(ctx context.Context, token string, log *slog.Logger) (*tgbot.Bot, error) {
+	delay := startBackoffMin
+	for {
+		b, err := tgbot.New(ctx, token, tgbot.Options{ServerURL: tgServerURL})
+		if err == nil {
+			return b, nil
+		}
+		if ctx.Err() != nil {
+			return nil, nil
+		}
+		var ae *tg.APIError
+		if errors.As(err, &ae) && ae.Code >= 400 && ae.Code < 500 && ae.Code != 429 {
+			return nil, fmt.Errorf("telegram: %w", err)
+		}
+		log.Warn("telegram unavailable, retrying", "in", delay, "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, nil
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, startBackoffMax)
+	}
 }
 
 func waitFor(done <-chan struct{}, timeout <-chan time.Time) bool {
