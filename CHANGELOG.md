@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Localized UI rendering in English and Farsi, for Gregorian and Jalali dates:
+  - todo lists with buttons and paging;
+  - reminders with snooze buttons;
+  - the daily digest.
+
+  Callback data is limited to 64 bytes and fuzz-tested (#7).
 - Project skeleton with frozen contracts, CI and an MIT license (#1).
 - Jalali↔Gregorian calendar conversion (`internal/calendar`) (#1).
 - i18n core for English and Farsi: catalog, Persian digits, month and weekday names (#1).

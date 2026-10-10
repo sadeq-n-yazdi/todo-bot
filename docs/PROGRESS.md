@@ -12,10 +12,10 @@ Milestone: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1)
 | 4 | 1 | SQLite store and migrations | ⏸ PR #21 waiting for data-layer redesign | #21 |
 | 5 | 1 | Natural-language parser (en + fa, Jalali) | 🔍 in review | #22 |
 | 6 | 2 | Telegram adapter | ⏳ todo | |
-| 7 | 2 | UI rendering and callback codec | 🔍 in review | #20 |
+| 7 | 2 | UI rendering and callback codec | ✅ merged | #20 |
 | 8 | 2 | Service layer | ⏳ todo | |
 | 9 | 2 | Deployment tooling | ⏳ todo | |
-| 17 | 2 | App and bot icon | ⏳ todo | |
+| 17 | 2 | App and bot icon | 🔨 in progress | |
 | 10 | 3 | Scheduler | ⏳ todo | |
 | 11 | 3 | Handlers: todo commands | ⏳ todo | |
 | 12 | 3 | Handlers: callbacks, prompts, settings | ⏳ todo | |
@@ -36,3 +36,4 @@ Milestone: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1)
     - pluggable databases (SQLite, PostgreSQL, MySQL);
     - multiple VPSs, active-active with failover.
   - The seams ship in v0.1; the HA work ships in v0.2. The design is being reworked.
+- **2026-10-10** #7 merged (#20). #17 (icon) started.
