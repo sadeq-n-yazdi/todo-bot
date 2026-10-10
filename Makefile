@@ -5,7 +5,7 @@ ARCH             ?= amd64
 VERSION          ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS          := -s -w -X main.version=$(VERSION)
 
-.PHONY: all ci vet lint test build build-linux deploy clean
+.PHONY: all ci vet lint test build build-linux deploy check-deploy clean
 
 all: ci
 
@@ -31,9 +31,12 @@ build:
 build-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o dist/todo-bot-linux-$(ARCH) ./cmd/todo-bot
 
-# deploy is completed in #9 (scripts/deploy.sh).
+# CMD is one of bootstrap|update|rollback|status|logs.
 deploy:
 	./scripts/deploy.sh $(or $(CMD),update)
+
+check-deploy:
+	./scripts/check-deploy.sh
 
 clean:
 	rm -rf dist

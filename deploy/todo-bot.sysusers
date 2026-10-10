@@ -1,0 +1,2 @@
+# Dedicated, unprivileged account for the todo bot.
+u todo-bot - "Todo Telegram bot" /var/lib/todo-bot /usr/sbin/nologin
