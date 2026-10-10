@@ -1,0 +1,29 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git describe needs the tag
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make test
+      - run: make build-linux ARCH=amd64 VERSION=${{ github.ref_name }}
+      - run: make build-linux ARCH=arm64 VERSION=${{ github.ref_name }}
+      - name: Checksums
+        run: cd dist && sha256sum todo-bot-linux-* > SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '$0 ~ "^## \\[?"v"\\]?" {p=1; next} p && /^## / {exit} p' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md \
+            dist/todo-bot-linux-amd64 dist/todo-bot-linux-arm64 dist/SHA256SUMS
