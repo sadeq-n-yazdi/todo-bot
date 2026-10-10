@@ -18,6 +18,8 @@ StateDirectoryMode=0750
 UMask=0077
 Restart=on-failure
 RestartSec=5s
+# Shutdown: lease release (≤5s) + scheduler write (≤5s) within a 10s app budget.
+TimeoutStopSec=20s
 
 # Resources (vps00 has about 860MB of RAM)
 MemoryMax=96M
