@@ -177,7 +177,7 @@ func (s *Scheduler) sendReminder(ctx context.Context, log *slog.Logger, dr model
 		// Shutting down, or transient: normal backoff, no fallback.
 		return 0, s.sendOutcome(ctx, log, dr, err)
 	}
-	log.Warn("scheduler: assignee unreachable, falling back to creating chat", "assignee", assignee, "err", err)
+	log.Warn("scheduler: assignee unreachable, falling back to creating chat", "assignee", assignee, "fallback", true, "err", err)
 	fb := ui.ReminderMsg(dr, creator.Locale, creator.TZ, now, late)
 	fb.Text = ui.Mention(assignee, dr.Todo.AssigneeName, creator.Locale) + "\n" + fb.Text
 	id, _, err = s.sendWithRetry(ctx, dr.ChatID, fb, end)

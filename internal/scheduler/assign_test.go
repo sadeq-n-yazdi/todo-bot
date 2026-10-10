@@ -2,6 +2,7 @@ package scheduler_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -188,7 +189,7 @@ func TestFallbackFailureIsRecordedWithItsPermanence(t *testing.T) {
 
 func TestAssigneePrefsErrorFailsTransientlyWithoutSending(t *testing.T) {
 	e := assignedEnv(t)
-	e.b.prefsErr = errBoom
+	e.b.prefsErrFor[assigneeID] = errBoom // the creator's prefs succeed
 	e.s.Tick(context.Background())
 	if f := e.b.failed[1]; len(f) != 1 || f[0] {
 		t.Errorf("failed = %v", f)
@@ -196,14 +197,111 @@ func TestAssigneePrefsErrorFailsTransientlyWithoutSending(t *testing.T) {
 	if len(e.snd.Messages()) != 0 {
 		t.Error("nothing should be sent")
 	}
+	if !slices.Contains(e.b.prefsCalls, int64(assigneeID)) {
+		t.Error("assignee prefs were never requested")
+	}
 }
 
 func TestAssigneeEqualToCreatingChatSendsOnce(t *testing.T) {
 	e := assignedEnv(t)
 	e.b.rows[0].dr.Todo.AssigneeID = groupChat // defensive: the service stores no such assignee
+	e.b.prefs[groupChat] = model.Prefs{TZ: tehran, Locale: faLoc}
 	e.s.Tick(context.Background())
-	if m := e.snd.Messages(); len(m) != 1 || m[0].ChatID != groupChat {
-		t.Errorf("messages = %+v", m)
+	m := e.snd.Messages()
+	if len(m) != 1 || m[0].ChatID != groupChat {
+		t.Fatalf("messages = %+v", m)
+	}
+	want := ui.ReminderMsg(e.b.rows[0].dr, enLoc, time.UTC, t0, false)
+	if m[0].Msg.Text != want.Text || m[0].Msg.Keyboard[0][0].Text != enLoc.T("ui.btn.done") {
+		t.Errorf("must render with the creator's prefs: %+v", m[0].Msg)
+	}
+}
+
+func TestDMAndFallbackRecordTheirMessageIDs(t *testing.T) {
+	e := assignedEnv(t)
+	e.s.Tick(context.Background())
+	dm := e.snd.Messages()
+	if len(dm) != 1 || e.b.sentMsgID[1] != dm[0].MsgID {
+		t.Errorf("DM: recorded %d, sent %+v", e.b.sentMsgID[1], dm)
+	}
+
+	e = assignedEnv(t)
+	e.snd.ErrFn = forbidden(assigneeID)
+	e.s.Tick(context.Background())
+	fb := e.snd.Messages()
+	if len(fb) != 1 || e.b.sentMsgID[1] != fb[0].MsgID || fb[0].MsgID == 0 {
+		t.Errorf("fallback: recorded %d, sent %+v", e.b.sentMsgID[1], fb)
+	}
+}
+
+func TestDMRateLimitWithinBudgetThenForbiddenFallsBackOnce(t *testing.T) {
+	e := assignedEnv(t)
+	dmCalls := 0
+	e.snd.ErrFn = func(c int64, m tg.OutMessage) error {
+		if c != assigneeID {
+			return nil
+		}
+		dmCalls++
+		if dmCalls == 1 {
+			return &tg.APIError{Code: 429, Desc: "Too Many Requests", RetryAfter: 10 * time.Second}
+		}
+		return forbidden(assigneeID)(c, m)
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); e.s.Tick(context.Background()) }()
+	eventually(t, "tick to wait on the clock", func() bool { return e.clk.Waiters() == 1 })
+	e.clk.Advance(10 * time.Second)
+	<-done
+
+	msgs := e.snd.Messages()
+	if len(msgs) != 1 || msgs[0].ChatID != groupChat || dmCalls != 2 {
+		t.Fatalf("messages = %+v, dm attempts = %d", msgs, dmCalls)
+	}
+	if e.b.sentCount(1) != 1 || len(e.b.failed[1]) != 0 {
+		t.Errorf("sent=%d failed=%v", e.b.sentCount(1), e.b.failed[1])
+	}
+}
+
+func TestDMRateLimitBeyondBudgetFailsTransientlyWithoutFallback(t *testing.T) {
+	e := assignedEnv(t)
+	e.snd.ErrFn = func(c int64, _ tg.OutMessage) error {
+		if c == assigneeID {
+			return &tg.APIError{Code: 429, Desc: "Too Many Requests", RetryAfter: 60 * time.Second} // == ttl/2
+		}
+		return nil
+	}
+	e.s.Tick(context.Background())
+	if len(e.snd.Messages()) != 0 {
+		t.Errorf("no fallback on a 429: %+v", e.snd.Messages())
+	}
+	if f := e.b.failed[1]; len(f) != 1 || f[0] {
+		t.Errorf("failed = %v, want one transient failure", f)
+	}
+}
+
+func TestFallbackChatMigrationLandsInNewChatOnce(t *testing.T) {
+	e := assignedEnv(t)
+	calls := map[int64]int{}
+	e.snd.ErrFn = func(c int64, m tg.OutMessage) error {
+		calls[c]++
+		switch c {
+		case assigneeID:
+			return forbidden(assigneeID)(c, m)
+		case groupChat:
+			return &tg.APIError{Code: 400, Desc: "group chat was upgraded to a supergroup chat", MigrateTo: -1009}
+		}
+		return nil
+	}
+	e.s.Tick(context.Background())
+	msgs := e.snd.Messages()
+	if len(msgs) != 1 || msgs[0].ChatID != -1009 {
+		t.Fatalf("messages = %+v", msgs)
+	}
+	if calls[assigneeID] != 1 || len(e.b.migrated) != 1 || e.b.migrated[0] != [2]int64{groupChat, -1009} {
+		t.Errorf("dm attempts=%d migrated=%v", calls[assigneeID], e.b.migrated)
+	}
+	if e.b.sentCount(1) != 1 {
+		t.Error("should be marked sent")
 	}
 }
 

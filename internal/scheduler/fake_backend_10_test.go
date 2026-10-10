@@ -50,8 +50,12 @@ type fakeBackend struct {
 	housekeeps  int
 	claimCalls  int
 
-	claimErr   error
-	prefsErr   error
+	claimErr error
+	prefsErr error
+	// prefsErrFor fails Prefs for one user only.
+	prefsErrFor map[int64]error
+	// sentMsgID records the msgID ReminderSent was called with.
+	sentMsgID  map[int64]int
 	viewErr    error
 	sentErrFor map[int64]error
 }
@@ -67,6 +71,9 @@ func newFakeBackend(clk clock.Clock) *fakeBackend {
 		sent:        map[int64]int{},
 		failed:      map[int64][]bool{},
 		sentErrFor:  map[int64]error{},
+
+		prefsErrFor: map[int64]error{},
+		sentMsgID:   map[int64]int{},
 	}
 }
 
@@ -151,7 +158,7 @@ func (f *fakeBackend) held(r model.Reminder) *fakeRow {
 	return row
 }
 
-func (f *fakeBackend) ReminderSent(ctx context.Context, id int64, _ int, _ time.Time) error {
+func (f *fakeBackend) ReminderSent(ctx context.Context, id int64, msgID int, _ time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -161,6 +168,7 @@ func (f *fakeBackend) ReminderSent(ctx context.Context, id int64, _ int, _ time.
 		return err
 	}
 	f.sent[id]++
+	f.sentMsgID[id] = msgID
 	f.row(id).done = true
 	return nil
 }
@@ -253,6 +261,9 @@ func (f *fakeBackend) Prefs(_ context.Context, userID int64, _ string) (model.Pr
 	f.prefsCalls = append(f.prefsCalls, userID)
 	if f.prefsErr != nil {
 		return model.Prefs{}, f.prefsErr
+	}
+	if err := f.prefsErrFor[userID]; err != nil {
+		return model.Prefs{}, err
 	}
 	if p, ok := f.prefs[userID]; ok {
 		return p, nil
