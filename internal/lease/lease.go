@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/clock"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 )
 
@@ -20,15 +21,25 @@ const releaseTimeout = 5 * time.Second
 //
 // The holder identity is node+":"+random, generated once per Run, so two
 // processes that share a node name never both win. The lease is taken or
-// renewed every ttl/3. When a win carries an epoch different from the one last
-// seen, lead is started in its own goroutine with a context that is cancelled
-// when the lease is lost, when the node fences itself (no successful renewal
-// for ttl/2, for example because the store is failing) or on shutdown. Run
-// waits for lead to return before it reacquires or releases the lease. If lead
-// returns by itself, it is started again at the next renewal.
+// renewed every ttl/3, measured from the start of each attempt.
+//
+// When a win carries an epoch different from the one last seen, lead is
+// started in its own goroutine with a context that is cancelled when the
+// lease is lost, when the node fences itself and on shutdown. The fence is
+// driven by clk: lead's context is cancelled at lastRenewalStart+ttl/2 even
+// while a store call is still in flight or ignores its context, and a renewal
+// that only returns after that point counts as failed.
+//
+// lead must return promptly once its context is cancelled; Run waits for it
+// before it reacquires or releases the lease. lead may be called again with
+// the same epoch, after a fence that was followed by a recovery, or when a
+// previous call returned by itself (it is then restarted at the next renewal).
+// Per-epoch setup in lead must therefore be idempotent. Invocations never
+// overlap.
 //
 // On shutdown the lease is released with a context that is not the cancelled
-// one, so another node can take over at once. Run then returns nil.
+// one, so another node can take over at once. Run returns the error of that
+// release, or nil.
 func Run(ctx context.Context, st store.Store, clk clock.Clock, name, node string, ttl time.Duration,
 	lead func(ctx context.Context, epoch int64)) error {
 	l := &loop{st: st, clk: clk, name: name, holder: node + ":" + randomSuffix(), ttl: ttl, lead: lead}
@@ -45,65 +56,126 @@ type loop struct {
 
 	leading bool
 	epoch   int64
-	lastOK  time.Time // time of the last successful renewal
+	lastOK  time.Time // start time of the last successful renewal
+	fence   <-chan time.Time
 	cancel  context.CancelFunc
 	done    chan struct{}
 }
 
+type acquireResult struct {
+	lease model.Lease
+	err   error
+}
+
 func (l *loop) run(ctx context.Context) error {
 	for {
-		l.step(ctx)
-		select {
-		case <-ctx.Done():
+		start := l.clk.Now()
+		l.attempt(ctx, start)
+		if ctx.Err() != nil || !l.wait(ctx, start.Add(l.ttl/3)) {
 			l.stopLead()
 			return l.release(ctx)
-		case <-l.clk.After(l.ttl / 3):
 		}
 	}
 }
 
-func (l *loop) step(ctx context.Context) {
-	if l.leading {
+// wait blocks until the next attempt is due, fencing if the fence fires first.
+// It reports false when ctx is done.
+func (l *loop) wait(ctx context.Context, until time.Time) bool {
+	tick := l.clk.After(until.Sub(l.clk.Now()))
+	for {
 		select {
-		case <-l.done: // lead returned by itself
-			l.leading = false
-		default:
-		}
-	}
-	now := l.clk.Now()
-	got, err := l.st.AcquireLease(ctx, l.name, l.holder, now, l.ttl)
-	switch {
-	case ctx.Err() != nil:
-		return
-	case err != nil:
-		slog.Warn("lease: acquire failed", "lease", l.name, "err", err)
-		if l.leading && now.Sub(l.lastOK) >= l.ttl/2 {
+		case <-tick:
+			return true
+		case <-l.fence:
 			slog.Warn("lease: fencing, no renewal for ttl/2", "lease", l.name)
 			l.stopLead()
+		case <-ctx.Done():
+			return false
 		}
-	case got.Holder != l.holder:
+	}
+}
+
+// attempt takes or renews the lease once. The store call runs in its own
+// goroutine so that a call that ignores its context cannot delay the fence.
+func (l *loop) attempt(ctx context.Context, start time.Time) {
+	l.reapEarlyReturn()
+	actx, acancel := context.WithCancel(ctx)
+	defer acancel()
+	resCh := make(chan acquireResult, 1)
+	go func() {
+		got, err := l.st.AcquireLease(actx, l.name, l.holder, start, l.ttl)
+		resCh <- acquireResult{got, err}
+	}()
+	var bound <-chan time.Time // while not leading, a call may not stall the loop for long
+	if !l.leading {
+		bound = l.clk.After(l.ttl / 3)
+	}
+	var res acquireResult
+	got, fenceFired := false, false
+	select {
+	case res = <-resCh:
+		got = true
+	case <-l.fence:
+		fenceFired = true
+	case <-bound:
+	case <-ctx.Done():
+		return
+	}
+	acancel()
+	if ctx.Err() != nil {
+		return
+	}
+
+	// A renewal that returns at or after the fence point has failed.
+	if l.leading && (fenceFired || !l.clk.Now().Before(l.lastOK.Add(l.ttl/2))) {
+		slog.Warn("lease: fencing, no renewal for ttl/2", "lease", l.name)
+		l.stopLead()
+		return
+	}
+	switch {
+	case !got:
+		slog.Warn("lease: acquire timed out", "lease", l.name)
+	case res.err != nil:
+		slog.Warn("lease: acquire failed", "lease", l.name, "err", res.err)
+	case res.lease.Holder != l.holder:
 		if l.leading {
-			slog.Info("lease: lost", "lease", l.name, "holder", got.Holder)
+			slog.Info("lease: lost", "lease", l.name, "holder", res.lease.Holder)
 			l.stopLead()
 		}
 	default:
-		if l.leading && now.Sub(l.lastOK) >= l.ttl/2 {
-			// The renewal worked, but we were past the fence point first.
-			l.stopLead()
-		}
-		l.lastOK = now
-		if l.leading && got.Epoch == l.epoch {
+		l.lastOK = start
+		if l.leading && res.lease.Epoch == l.epoch {
+			l.armFence()
 			return
 		}
 		l.stopLead() // a new epoch: the previous lead is stale
-		l.startLead(ctx, got.Epoch)
+		l.startLead(ctx, res.lease.Epoch)
 	}
+}
+
+// reapEarlyReturn notices a lead that returned by itself.
+func (l *loop) reapEarlyReturn() {
+	if !l.leading {
+		return
+	}
+	select {
+	case <-l.done:
+		slog.Warn("lease: lead returned while leading; restarting", "lease", l.name, "epoch", l.epoch)
+		l.cancel()
+		l.leading, l.fence = false, nil
+	default:
+	}
+}
+
+func (l *loop) armFence() {
+	l.fence = l.clk.After(l.lastOK.Add(l.ttl / 2).Sub(l.clk.Now()))
 }
 
 func (l *loop) startLead(ctx context.Context, epoch int64) {
 	lctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	l.leading, l.epoch, l.cancel, l.done = true, epoch, cancel, done
+	l.armFence()
 	go func() {
 		defer close(done)
 		l.lead(lctx, epoch)
@@ -117,7 +189,7 @@ func (l *loop) stopLead() {
 	}
 	l.cancel()
 	<-l.done
-	l.leading = false
+	l.leading, l.fence = false, nil
 }
 
 func (l *loop) release(ctx context.Context) error {
