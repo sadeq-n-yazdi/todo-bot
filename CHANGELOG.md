@@ -6,7 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-10
+
 ### Added
+- Release workflow (#16): a `v*` tag builds static linux amd64 and arm64 binaries and publishes them, with `SHA256SUMS`, as a GitHub release.
 - End-to-end tests (#14), run on the real stack with a fake clock. They cover:
   - snooze and Done, the DST change, Farsi/Jalali monthly items, and catch-up after downtime;
   - digests, group chats and restart;
@@ -86,3 +89,6 @@ All notable changes to this project are documented here. The format follows
 - Recurrence engine with daily, weekly, monthly (Gregorian or Jalali) and every-N-days rules (#3).
   - Times follow wall-clock time across DST changes.
   - A time that falls in the spring-forward gap fires at the shifted time, never earlier.
+
+[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/sadeq-n-yazdi/todo-bot/releases/tag/v0.1.0

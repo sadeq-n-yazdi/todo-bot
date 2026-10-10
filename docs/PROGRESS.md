@@ -26,7 +26,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 13 | 4 | Main wiring | ✅ merged | #52 |
 | 14 | 4 | End-to-end tests | ✅ merged | #56 |
 | 15 | 4 | User documentation (en + fa) | ✅ merged | #55 |
-| 16 | 5 | Release v0.1.0 and deploy to vps00 | ⏳ todo | |
+| 16 | 5 | Release v0.1.0 and deploy to vps00 | 🚧 tagged and deployed; rollback check pending | #59 |
 
 ## Log
 - **2026-10-10**
