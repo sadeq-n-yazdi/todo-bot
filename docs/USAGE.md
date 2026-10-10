@@ -99,21 +99,23 @@ With no text, the bot answers `Usage: /add buy milk tomorrow 18:00`. The limit i
 Start the text with `@username` to give the item to another member. The item stays in the list of the chat where you typed it, and **every reminder for it goes to that person's private chat** with the bot, with the usual [Done and snooze buttons](#reminder-buttons). The reminder is written in the assignee's own language, calendar and time zone.
 
 ```
-/add @wife pick up our son today 15:00
+/add @sara_home pick up our son today 15:00
 ```
 
 ```
-/add @wife بچه را از مدرسه بردار امروز ساعت ۱۵
+/add @sara_home بچه را از مدرسه بردار امروز ساعت ۱۵
 ```
 
-The bot confirms in the chat where you typed it, and the confirmation names the assignee (`→ @wife`).
+The name after `@` is the person's Telegram username, which is 5 to 32 characters long, starts with a letter and uses only letters, digits and `_`. A shorter or differently shaped `@word` is plain text, and the item is not assigned.
 
-- **The assignee must be known to the bot.** They need a Telegram @username, must have opened the bot and pressed **Start** (شروع) once, and they must be in `TODO_ALLOWED_USERS`. Otherwise nothing is created, and the bot answers "@wife hasn't started the bot yet. Ask them to open @<bot> and press Start."
+The bot confirms in the chat where you typed it, and the confirmation names the assignee (`→ @sara_home`).
+
+- **The assignee must be known to the bot.** They need a Telegram @username, must have opened the bot and pressed **Start** (شروع) once, and they must be in `TODO_ALLOWED_USERS`. Otherwise nothing is created, and the bot answers "@sara_home hasn't started the bot yet. Ask them to open @<bot> and press Start."
 - **People who used the bot before this release** are known by username only after the next message they send to the bot. Ask them to send any message, for example `/help`.
 - **Only a leading `@name` counts.** An `@word` anywhere else stays part of the item's text. A leading mention of the bot itself is ignored. Assigning an item to yourself in your own private chat does nothing special.
 - **"Assigned to me" in `/list`.** In a private chat, `/list` also shows a heading **Assigned to me** («سپرده‌شده به من» in Farsi) with the open items other people (or you, from a group) assigned to you. The list is capped, and the end says how many more there are. Rows show `→ @name`.
 - **Either person can act.** The person who created the item and the assignee can both complete, snooze, edit and delete it. Items under "Assigned to me" are used through their buttons, not through `/done 3`, because item numbers belong to the chat where the item was added.
-- **Did notice.** When the assignee completes the item, the chat where it was added gets "✅ @wife did: …".
+- **Did notice.** When the assignee completes the item, the chat where it was added gets "✅ @sara_home did: …".
 - **If the assignee cannot be reached.** Telegram refuses a private message to someone who blocked the bot or never started it. The reminder then goes **once** to the chat where the item was added, in your language, starting with a mention of the assignee, and is counted as sent. Other errors (for example Telegram being down) are retried a few times as for any reminder, and do not go to the group.
 - **Delivery can repeat.** As for every reminder, delivery is at-least-once: if the bot stops right after sending, the same reminder may arrive a second time.
 - **Time tip in Farsi.** `ساعت ۳` means 03:00 in the night. For the afternoon write `ساعت ۱۵` or `۳ بعدازظهر`.
