@@ -112,7 +112,7 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tg.Callback) {
 	if cb.ChatID < 0 {
 		kind = model.ChatGroup
 	}
-	r, err := h.newReq(ctx, cb.FromID, cb.FromLang, cb.ChatID, kind, "")
+	r, err := h.newReq(ctx, cb.FromID, cb.FromLang, cb.FromUsername, cb.ChatID, kind, "")
 	if err != nil {
 		h.Log.Error("prefs", "user", cb.FromID, "err", err)
 		_ = h.Send.AnswerCallback(ctx, cb.ID, "")
@@ -141,7 +141,7 @@ func (h *Handler) handleMessage(ctx context.Context, m *tg.Message) {
 	if !h.Allowed[m.FromID] {
 		return
 	}
-	r, err := h.newReq(ctx, m.FromID, m.FromLang, m.ChatID, m.ChatKind, m.ChatTitle)
+	r, err := h.newReq(ctx, m.FromID, m.FromLang, m.FromUsername, m.ChatID, m.ChatKind, m.ChatTitle)
 	if err != nil {
 		h.Log.Error("prefs", "user", m.FromID, "err", err)
 		return
@@ -168,10 +168,15 @@ func (h *Handler) handleMessage(ctx context.Context, m *tg.Message) {
 	}
 }
 
-func (h *Handler) newReq(ctx context.Context, userID int64, tgLang string, chatID int64, kind model.ChatKind, title string) (req, error) {
+func (h *Handler) newReq(ctx context.Context, userID int64, tgLang, username string, chatID int64, kind model.ChatKind, title string) (req, error) {
 	p, err := h.Svc.Prefs(ctx, userID, tgLang)
 	if err != nil {
 		return req{}, err
+	}
+	// Learn the user's @username so others can assign items to them (#58).
+	// Not being able to record it must not fail the request.
+	if err := h.Svc.NoteUsername(ctx, userID, username); err != nil {
+		h.Log.Warn("note username", "user", userID, "err", err)
 	}
 	return req{
 		Actor: service.Actor{UserID: userID, ChatID: chatID, ChatKind: kind, ChatTitle: title},
