@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 )
@@ -85,8 +87,9 @@ func Load(getenv func(string) string) (Config, error) {
 	} else {
 		for _, part := range strings.Split(raw, ",") {
 			id, err := strconv.ParseInt(strings.TrimSpace(i18n.NormalizeDigits(part)), 10, 64)
-			if err != nil {
-				bad("TODO_ALLOWED_USERS: entry %q is not an integer user id", part)
+			// Telegram user ids are positive; 0 and negatives (chat ids) are not users.
+			if err != nil || id <= 0 {
+				bad("TODO_ALLOWED_USERS: entry %q is not a positive integer user id", part)
 				continue
 			}
 			c.AllowedUsers[id] = true
@@ -115,15 +118,23 @@ func Load(getenv func(string) string) (Config, error) {
 
 	c.LogLevel = slog.LevelInfo
 	if l := get("TODO_LOG_LEVEL"); l != "" {
-		if err := c.LogLevel.UnmarshalText([]byte(l)); err != nil {
+		switch strings.ToLower(l) {
+		case "debug", "info", "warn", "error":
+			_ = c.LogLevel.UnmarshalText([]byte(l))
+		default:
 			bad("TODO_LOG_LEVEL: %q is not one of debug, info, warn, error", l)
 		}
 	}
 
-	c.DBURL = dbURL(get)
-	if u, err := url.Parse(c.DBURL); err != nil || u.Scheme == "" {
+	var dberr error
+	c.DBURL, dberr = dbURL(get)
+	if dberr != nil {
+		errs = append(errs, dberr)
+	} else if u, err := url.Parse(c.DBURL); err != nil || u.Scheme == "" {
 		// Never include the raw value: it may carry a password.
 		bad("TODO_DB_URL: not a valid URL with a scheme (e.g. sqlite:///var/lib/todo-bot/todo.db)")
+	} else if u.Scheme == "sqlite" && u.Host != "" {
+		bad("TODO_DB_URL: sqlite URLs take no host; use sqlite:///abs/path or sqlite:rel/path")
 	}
 
 	c.NodeID = get("TODO_NODE_ID")
@@ -153,8 +164,8 @@ func Load(getenv func(string) string) (Config, error) {
 		if !webhookSecretRE.MatchString(c.WebhookSecret) {
 			bad("TODO_WEBHOOK_SECRET: 16-256 characters from [A-Za-z0-9_-] required in webhook mode")
 		}
-		if c.HTTPAddr == "" {
-			bad("TODO_HTTP_ADDR is required in webhook mode")
+		if _, port, err := net.SplitHostPort(c.HTTPAddr); err != nil || port == "" {
+			bad("TODO_HTTP_ADDR: a host:port listen address (e.g. 127.0.0.1:8081) is required in webhook mode")
 		}
 	}
 
@@ -169,14 +180,15 @@ func Load(getenv func(string) string) (Config, error) {
 }
 
 // dbURL applies the TODO_DB_URL fallback chain.
-func dbURL(get func(string) string) string {
+func dbURL(get func(string) string) (string, error) {
 	if v := get("TODO_DB_URL"); v != "" {
-		return v
+		return v, nil
 	}
 	p := get("TODO_DB_PATH")
 	if p == "" {
-		if sd := get("STATE_DIRECTORY"); sd != "" {
-			first, _, _ := strings.Cut(sd, ":")
+		// The first entry of the list; an empty one falls through.
+		first, _, _ := strings.Cut(get("STATE_DIRECTORY"), ":")
+		if first != "" {
 			p = path.Join(first, "todo.db")
 		}
 	}
@@ -187,18 +199,32 @@ func dbURL(get func(string) string) string {
 }
 
 // sqliteURL builds a sqlite URL from a file path: sqlite:///abs or sqlite:rel.
-func sqliteURL(p string) string {
+// A relative path goes into Opaque unescaped, so characters that would change
+// the URL's meaning are rejected.
+func sqliteURL(p string) (string, error) {
 	if strings.HasPrefix(p, "/") {
 		u := url.URL{Scheme: "sqlite", Path: p}
-		return u.String()
+		return u.String(), nil
+	}
+	if strings.ContainsAny(p, "?#%") || strings.IndexFunc(p, unicode.IsSpace) >= 0 {
+		return "", errors.New("use an absolute path for TODO_DB_PATH/STATE_DIRECTORY with special characters")
 	}
 	u := url.URL{Scheme: "sqlite", Opaque: p}
-	return u.String()
+	return u.String(), nil
+}
+
+func isDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func parseHHMM(s string) (h, m int, ok bool) {
 	hs, ms, found := strings.Cut(s, ":")
-	if !found || len(hs) == 0 || len(hs) > 2 || len(ms) != 2 {
+	if !found || len(hs) == 0 || len(hs) > 2 || len(ms) != 2 || !isDigits(hs) || !isDigits(ms) {
 		return 0, 0, false
 	}
 	h, err1 := strconv.Atoi(hs)

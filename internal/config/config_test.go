@@ -48,7 +48,7 @@ func TestLoadDefaults(t *testing.T) {
 	if c.LogLevel != slog.LevelInfo || c.Mode != ModePolling || c.NodeID != "vps00" {
 		t.Errorf("level/mode/node: %v %q %q", c.LogLevel, c.Mode, c.NodeID)
 	}
-	if c.DBURL != "sqlite:todo.db" && c.DBURL != "sqlite://todo.db" {
+	if c.DBURL != "sqlite:todo.db" {
 		t.Errorf("DBURL = %q", c.DBURL)
 	}
 	if c.LeaseTTL != 30*time.Second || c.ClaimTTL != 2*time.Minute || c.SchedMaxSleep != 5*time.Minute {
@@ -61,12 +61,12 @@ func TestLoadValues(t *testing.T) {
 	c, err := Load(env(base(map[string]string{
 		"TODO_DEFAULT_TZ":      "Europe/Berlin",
 		"TODO_DEFAULT_TIME":    "۰۷:۳۰",
-		"TODO_LOG_LEVEL":       "debug",
+		"TODO_LOG_LEVEL":       "DEBUG",
 		"TODO_NODE_ID":         "n1",
 		"TODO_LEASE_TTL":       "10s",
 		"TODO_CLAIM_TTL":       "1m",
 		"TODO_SCHED_MAX_SLEEP": "30s",
-		"TODO_ALLOWED_USERS":   "5,-6,7",
+		"TODO_ALLOWED_USERS":   "5,6,7",
 	})))
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestLoadValues(t *testing.T) {
 		t.Errorf("tz/time: %v %d:%d", c.DefaultTZ, c.DefaultHour, c.DefaultMinute)
 	}
 	if c.LogLevel != slog.LevelDebug || c.NodeID != "n1" || c.LeaseTTL != 10*time.Second ||
-		c.ClaimTTL != time.Minute || c.SchedMaxSleep != 30*time.Second || !c.AllowedUsers[-6] {
+		c.ClaimTTL != time.Minute || c.SchedMaxSleep != 30*time.Second || !c.AllowedUsers[6] {
 		t.Errorf("%+v", c)
 	}
 }
@@ -91,6 +91,9 @@ func TestDBURL(t *testing.T) {
 		{"path alias abs", map[string]string{"TODO_DB_PATH": "/data/todo.db", "STATE_DIRECTORY": "/s"}, "sqlite:///data/todo.db"},
 		{"state dir", map[string]string{"STATE_DIRECTORY": "/var/lib/todo-bot"}, "sqlite:///var/lib/todo-bot/todo.db"},
 		{"state dir list", map[string]string{"STATE_DIRECTORY": "/a:/b"}, "sqlite:///a/todo.db"},
+		{"state dir relative", map[string]string{"STATE_DIRECTORY": "state"}, "sqlite:state/todo.db"},
+		{"state dir empty first", map[string]string{"STATE_DIRECTORY": ":/b"}, "sqlite:todo.db"},
+		{"abs path special", map[string]string{"TODO_DB_PATH": "/a b/c?d.db"}, "sqlite:///a%20b/c%3Fd.db"},
 		{"default", nil, "sqlite:todo.db"},
 		{"path alias rel", map[string]string{"TODO_DB_PATH": "data/x.db"}, "sqlite:data/x.db"},
 	}
@@ -162,6 +165,19 @@ func TestLoadErrors(t *testing.T) {
 		{"bad duration", map[string]string{"TODO_LEASE_TTL": "soon"}, []string{"TODO_LEASE_TTL"}},
 		{"zero duration", map[string]string{"TODO_CLAIM_TTL": "0s"}, []string{"TODO_CLAIM_TTL"}},
 		{"negative duration", map[string]string{"TODO_SCHED_MAX_SLEEP": "-1m"}, []string{"TODO_SCHED_MAX_SLEEP"}},
+		{"zero user", map[string]string{"TODO_ALLOWED_USERS": "0"}, []string{"TODO_ALLOWED_USERS"}},
+		{"negative user", map[string]string{"TODO_ALLOWED_USERS": "-5"}, []string{"TODO_ALLOWED_USERS"}},
+		{"signed time", map[string]string{"TODO_DEFAULT_TIME": "+9:00"}, []string{"TODO_DEFAULT_TIME"}},
+		{"signed minute", map[string]string{"TODO_DEFAULT_TIME": "9:+5"}, []string{"TODO_DEFAULT_TIME"}},
+		{"level offset", map[string]string{"TODO_LOG_LEVEL": "info+9"}, []string{"TODO_LOG_LEVEL"}},
+		{"rel path question", map[string]string{"TODO_DB_PATH": "x?y.db"}, []string{"special characters"}},
+		{"rel path hash", map[string]string{"TODO_DB_PATH": "x#y.db"}, []string{"special characters"}},
+		{"rel path percent", map[string]string{"TODO_DB_PATH": "x%y.db"}, []string{"special characters"}},
+		{"rel path space", map[string]string{"TODO_DB_PATH": "x y.db"}, []string{"special characters"}},
+		{"rel state dir space", map[string]string{"STATE_DIRECTORY": "a b"}, []string{"special characters"}},
+		{"sqlite host", map[string]string{"TODO_DB_URL": "sqlite://host/x.db"}, []string{"TODO_DB_URL"}},
+		{"webhook addr no port", wh("TODO_HTTP_ADDR", "zz"), []string{"TODO_HTTP_ADDR"}},
+		{"webhook addr empty port", wh("TODO_HTTP_ADDR", "host:"), []string{"TODO_HTTP_ADDR"}},
 		{"bad db url", map[string]string{"TODO_DB_URL": "://nope"}, []string{"TODO_DB_URL"}},
 		{"db url no scheme", map[string]string{"TODO_DB_URL": "todo.db"}, []string{"TODO_DB_URL"}},
 		{"webhook http url", wh("TODO_WEBHOOK_URL", "http://bot.example.com/hook"), []string{"TODO_WEBHOOK_URL"}},
