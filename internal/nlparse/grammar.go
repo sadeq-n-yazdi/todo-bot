@@ -32,6 +32,7 @@ type dateSpec struct {
 type timeSpec struct {
 	h, m     int
 	explicit bool // am/pm or a Farsi day-period word was given
+	bareHour bool // an hour 1..12 with no am/pm, minutes or day-period word
 }
 
 type relSpec struct {
@@ -76,7 +77,7 @@ func parseFrom(toks []token, start int, cal calendar.Kind, lenient bool) (phrase
 	for p.i < len(toks) {
 		switch {
 		case p.i == start && p.matchRecurrence():
-		case p.matchRel(), p.matchTime(), p.matchDate():
+		case p.matchRel(), p.matchTime(), p.matchPartOfDay(), p.matchDate():
 		case isConnector(p.key(p.i)) && (p.i == start || !isConnector(p.key(p.i-1))) && p.i+1 < len(toks):
 			p.i++
 		default:
@@ -165,8 +166,31 @@ func (p *parser) matchTime() bool {
 			return false
 		}
 	}
-	p.ph.tm = &timeSpec{h: h, m: mi, explicit: suffix != "" || period != 0}
+	bare := suffix == "" && period == 0 && m[2] == "" && h >= 1 && h <= 12
+	p.ph.tm = &timeSpec{h: h, m: mi, explicit: suffix != "" || period != 0, bareHour: bare}
 	p.i = j
+	return true
+}
+
+// partOfDayHours maps a part-of-day word that follows a day ("tomorrow
+// morning", "فردا صبح") to its default hour.
+var partOfDayHours = map[string]int{
+	"morning": 9, "noon": 12, "afternoon": 15, "evening": 18, "night": 20,
+	"صبح": 9, "ظهر": 12, "بعدازظهر": 15, "عصر": 17, "شب": 20,
+}
+
+// matchPartOfDay accepts a part-of-day word, but only after a date, so a
+// lone "noon" or "صبح" at the start of a text is never a date.
+func (p *parser) matchPartOfDay() bool {
+	if p.ph.date == nil || p.ph.tm != nil {
+		return false
+	}
+	h, ok := partOfDayHours[p.key(p.i)]
+	if !ok {
+		return false
+	}
+	p.ph.tm = &timeSpec{h: h, explicit: true}
+	p.i++
 	return true
 }
 

@@ -131,7 +131,7 @@ func (p Parser) Parse(input string, now time.Time, cal calendar.Kind) (Result, e
 func (p Parser) leading(toks, all []token, runes []rune, now time.Time, cal calendar.Kind) (Result, bool) {
 	for e := min(len(toks)-1, maxStartTokens); e >= 1; e-- {
 		ph, ok := parseFrom(toks[:e], 0, validCal(cal), false)
-		if !ok || bareWeekday(ph, e) {
+		if !ok || bareWeekday(ph, e) || (ph.tm != nil && ph.tm.bareHour) {
 			continue
 		}
 		res, ok := p.resolve(ph, now, validCal(cal))
