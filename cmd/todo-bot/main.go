@@ -9,28 +9,20 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"os"
+	"os/signal"
+	"syscall"
 
 	_ "time/tzdata" // embed the time zone database; the host may lack it
 )
 
-// version is set with -ldflags "-X main.version=...".
-var version = "dev"
-
 func main() {
-	cmd := "run"
-	if len(os.Args) > 1 {
-		cmd = os.Args[1]
-	}
-	switch cmd {
-	case "version":
-		fmt.Println(version)
-	case "run", "migrate", "backup":
-		fmt.Fprintf(os.Stderr, "todo-bot %s: %q is not implemented yet (#13)\n", version, cmd)
-		os.Exit(1)
-	default:
-		fmt.Fprintf(os.Stderr, "usage: todo-bot [run|version|migrate|backup PATH]\n")
-		os.Exit(2)
-	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Once the first signal arrived, restore the default handling so that a
+	// second SIGTERM or Ctrl-C kills the process during a slow shutdown.
+	go func() { <-ctx.Done(); stop() }()
+	code := run(ctx, os.Args[1:], os.Getenv, os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
