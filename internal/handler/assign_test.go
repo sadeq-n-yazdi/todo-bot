@@ -97,6 +97,17 @@ func (f *fakeAssign) allowed(a service.Actor, id int64) (*model.Todo, error) {
 	}
 	return nil, service.ErrNotFound
 }
+
+// ByNum matches on the number alone, so a test can hand-build an item that
+// lives in another chat and still reach it with /done.
+func (f *fakeAssign) ByNum(_ context.Context, _ int64, num int) (model.Todo, error) {
+	for _, t := range f.todos {
+		if t.Num == num && t.Status == model.TodoOpen {
+			return *t, nil
+		}
+	}
+	return model.Todo{}, service.ErrNotFound
+}
 func (f *fakeAssign) Complete(_ context.Context, a service.Actor, id int64) (model.Todo, error) {
 	t, err := f.allowed(a, id)
 	if err != nil {
@@ -129,9 +140,9 @@ func newAssignEnv() *assignEnv {
 	svc := &fakeAssign{
 		prefs: map[int64]model.Prefs{creator: en, assignee: fa, other: en},
 		users: map[string]model.User{
-			"wife":  {ID: assignee, Username: "wife"},
-			"ghost": {ID: other, Username: "ghost"},
-			"engl":  {ID: creator, Username: "engl"},
+			"wifey":  {ID: assignee, Username: "wifey"},
+			"ghost":  {ID: other, Username: "ghost"},
+			"englsh": {ID: creator, Username: "englsh"},
 		},
 		noted: map[int64]string{}, rems: map[int64]int64{},
 	}
@@ -157,12 +168,15 @@ func (e *assignEnv) press(user, chat int64, data string) {
 
 func TestSplitMention(t *testing.T) {
 	cases := []struct{ in, name, rest string }{
-		{"@wife buy milk", "wife", "buy milk"},
-		{"@wife: buy milk", "wife", "buy milk"},
-		{"@WiFe  buy milk", "WiFe", "buy milk"},
-		{"@wife", "", "@wife"},
+		{"@wifey buy milk", "wifey", "buy milk"},
+		{"@wifey: buy milk", "wifey", "buy milk"},
+		{"@WiFey  buy milk", "WiFey", "buy milk"},
+		{"@wifey", "", "@wifey"},
 		{"@abc buy milk", "", "@abc buy milk"},
-		{"buy milk @wife", "", "buy milk @wife"},
+		{"@1abc buy", "", "@1abc buy"},
+		{"@abcd buy", "", "@abcd buy"},
+		{"@_abcd buy", "", "@_abcd buy"},
+		{"buy milk @wifey", "", "buy milk @wifey"},
 		{"@todobot buy milk", "", "buy milk"},
 		{"@TodoBot", "", "@TodoBot"},
 	}
@@ -179,7 +193,7 @@ func TestSplitMention(t *testing.T) {
 
 func TestAddAssignsAndConfirms(t *testing.T) {
 	e := newAssignEnv()
-	e.msg(creator, grp, "/add @wife pick up son today 15:00")
+	e.msg(creator, grp, "/add @wifey pick up son today 15:00")
 	if len(e.svc.assigns) != 1 || e.svc.assigns[0] != assignee || e.svc.added != 0 {
 		t.Fatalf("assigns=%v added=%d", e.svc.assigns, e.svc.added)
 	}
@@ -187,14 +201,14 @@ func TestAddAssignsAndConfirms(t *testing.T) {
 		t.Errorf("mention leaked into text: %q", got)
 	}
 	last, _ := e.fs.Last()
-	if !strings.Contains(last.Msg.Text, `<a href="tg://user?id=2">@wife</a>`) || !strings.Contains(last.Msg.Text, "→") {
+	if !strings.Contains(last.Msg.Text, `<a href="tg://user?id=2">@wifey</a>`) || !strings.Contains(last.Msg.Text, "→") {
 		t.Errorf("confirmation = %q", last.Msg.Text)
 	}
 }
 
 func TestPlainPrivateTextAssigns(t *testing.T) {
 	e := newAssignEnv()
-	e.msg(creator, creator, "@wife call mum")
+	e.msg(creator, creator, "@wifey call mum")
 	if len(e.svc.assigns) != 1 {
 		t.Fatalf("plain private text with mention did not assign: %+v", e.svc.todos)
 	}
@@ -227,11 +241,11 @@ func TestAddUnknownFarsi(t *testing.T) {
 func TestAddBotMentionAndMidTextAreNotAssignments(t *testing.T) {
 	e := newAssignEnv()
 	e.msg(creator, grp, "/add @TodoBot buy milk")
-	e.msg(creator, grp, "/add tell @wife later")
+	e.msg(creator, grp, "/add tell @wifey later")
 	if len(e.svc.assigns) != 0 || e.svc.added != 2 {
 		t.Fatalf("assigns=%v added=%d", e.svc.assigns, e.svc.added)
 	}
-	if e.svc.todos[0].Text != "buy milk" || e.svc.todos[1].Text != "tell @wife later" {
+	if e.svc.todos[0].Text != "buy milk" || e.svc.todos[1].Text != "tell @wifey later" {
 		t.Errorf("texts: %q, %q", e.svc.todos[0].Text, e.svc.todos[1].Text)
 	}
 }
@@ -250,10 +264,10 @@ func TestNoteUsernameOnEveryUpdate(t *testing.T) {
 
 func TestListShowsArrowAndAssignedSection(t *testing.T) {
 	e := newAssignEnv()
-	e.msg(creator, grp, "/add @wife pick up son")
+	e.msg(creator, grp, "/add @wifey pick up son")
 	e.msg(creator, grp, "/list")
 	last, _ := e.fs.Last()
-	if !strings.Contains(last.Msg.Text, "→ <a href=\"tg://user?id=2\">@wife</a>") {
+	if !strings.Contains(last.Msg.Text, "→ <a href=\"tg://user?id=2\">@wifey</a>") {
 		t.Errorf("group list lacks arrow: %q", last.Msg.Text)
 	}
 	if strings.Contains(last.Msg.Text, "Assigned to me") {
@@ -268,7 +282,7 @@ func TestListShowsArrowAndAssignedSection(t *testing.T) {
 
 func TestAssigneeDoneButtonPostsDidNotice(t *testing.T) {
 	e := newAssignEnv()
-	e.msg(creator, grp, "/add @wife pick up son")
+	e.msg(creator, grp, "/add @wifey pick up son")
 	e.fs.Sent = nil
 	e.press(assignee, assignee, "td:1")
 	if e.svc.todos[0].Status != model.TodoDone {
@@ -280,7 +294,7 @@ func TestAssigneeDoneButtonPostsDidNotice(t *testing.T) {
 			notice = &s
 		}
 	}
-	want := `✅ <a href="tg://user?id=2">@wife</a> did: pick up son`
+	want := `✅ <a href="tg://user?id=2">@wifey</a> did: pick up son`
 	if notice == nil || notice.Msg.Text != want {
 		t.Fatalf("notice = %+v", notice)
 	}
@@ -290,7 +304,7 @@ func TestDidNoticeUsesCreatorLanguage(t *testing.T) {
 	e := newAssignEnv()
 	// A Farsi user assigns to an English one; the English user completes it
 	// in their DM, and the notice to the group is in Farsi.
-	e.msg(assignee, grp, "/add @engl ping")
+	e.msg(assignee, grp, "/add @englsh ping")
 	e.fs.Sent = nil
 	e.press(creator, creator, "td:1")
 	var notice *tgtest.Sent
@@ -306,8 +320,8 @@ func TestDidNoticeUsesCreatorLanguage(t *testing.T) {
 
 func TestNoNoticeWhenCreatorOrSameChat(t *testing.T) {
 	e := newAssignEnv()
-	e.msg(creator, grp, "/add @wife a")
-	e.msg(creator, grp, "/add @wife b")
+	e.msg(creator, grp, "/add @wifey a")
+	e.msg(creator, grp, "/add @wifey b")
 	e.fs.Sent = nil
 	e.press(creator, grp, "td:1")  // creator completes in the group
 	e.press(assignee, grp, "td:2") // assignee completes inside the group
@@ -320,7 +334,7 @@ func TestNoNoticeWhenCreatorOrSameChat(t *testing.T) {
 
 func TestReminderDoneInDMPostsNotice(t *testing.T) {
 	e := newAssignEnv()
-	e.msg(creator, grp, "/add @wife pick up son")
+	e.msg(creator, grp, "/add @wifey pick up son")
 	e.svc.rems[40] = 1
 	e.fs.Sent = nil
 	e.press(assignee, assignee, "rd:40")
@@ -341,7 +355,7 @@ func TestReminderDoneInDMPostsNotice(t *testing.T) {
 func TestAssignedSectionCappedWithMore(t *testing.T) {
 	e := newAssignEnv()
 	for range 25 {
-		e.msg(creator, grp, "/add @wife task")
+		e.msg(creator, grp, "/add @wifey task")
 	}
 	e.msg(assignee, assignee, "/list")
 	last, _ := e.fs.Last()
@@ -356,9 +370,54 @@ func TestAssignedSectionCappedWithMore(t *testing.T) {
 	}
 }
 
+func TestDoneCommandPostsDidNotice(t *testing.T) {
+	e := newAssignEnv()
+	e.svc.todos = append(e.svc.todos, &model.Todo{ID: 1, ChatID: grp, Num: 4, Text: "pick up son",
+		Status: model.TodoOpen, CreatedBy: creator, AssigneeID: assignee, AssigneeName: "wifey"})
+	e.msg(assignee, assignee, "/done 4")
+	var notice string
+	for _, s := range e.fs.Messages() {
+		if s.ChatID == grp {
+			notice = s.Msg.Text
+		}
+	}
+	if notice != `✅ <a href="tg://user?id=2">@wifey</a> did: pick up son` {
+		t.Errorf("notice = %q", notice)
+	}
+}
+
+func TestUnknownReplyEscapesHTML(t *testing.T) {
+	e := newAssignEnv()
+	e.h.BotUsername = "Bot<b>"
+	e.msg(creator, grp, "/add @nobody1 x")
+	last, _ := e.fs.Last()
+	if strings.Contains(last.Msg.Text, "<b>") || !strings.Contains(last.Msg.Text, "Bot&lt;b&gt;") {
+		t.Errorf("not escaped: %q", last.Msg.Text)
+	}
+}
+
+func TestUnknownReplyWithoutBotName(t *testing.T) {
+	e := newAssignEnv()
+	e.h.BotUsername = ""
+	e.msg(creator, grp, "/add @nobody1 x")
+	last, _ := e.fs.Last()
+	if strings.Contains(last.Msg.Text, "open @") || !strings.Contains(last.Msg.Text, "@nobody1 hasn't started") {
+		t.Errorf("got %q", last.Msg.Text)
+	}
+}
+
+func TestShortOrDigitNamesStayPlainText(t *testing.T) {
+	e := newAssignEnv()
+	e.msg(creator, grp, "/add @1abcd buy")
+	e.msg(creator, grp, "/add @abc buy")
+	if len(e.svc.todos) != 2 || len(e.svc.assigns) != 0 || e.svc.todos[1].Text != "@abc buy" {
+		t.Errorf("todos=%d assigns=%v", len(e.svc.todos), e.svc.assigns)
+	}
+}
+
 func TestDidNoticeSendFailureIsNotFatal(t *testing.T) {
 	e := newAssignEnv()
-	e.msg(creator, grp, "/add @wife x")
+	e.msg(creator, grp, "/add @wifey x")
 	e.fs.ErrFn = func(chat int64, _ tg.OutMessage) error {
 		if chat == grp {
 			return context.DeadlineExceeded

@@ -19,7 +19,7 @@ import (
 
 // leadingMention matches the first token of an /add text: "@name", with an
 // optional trailing "," or ":" ("@wife: buy milk").
-var leadingMention = regexp.MustCompile(`^@([A-Za-z0-9_]{4,32})[,:]?$`)
+var leadingMention = regexp.MustCompile(`^@([A-Za-z][A-Za-z0-9_]{4,31})[,:]?$`)
 
 // splitMention splits a leading @username off an /add text. It returns the
 // name (without "@") and the remaining text. name is "" when there is no

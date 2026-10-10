@@ -60,6 +60,9 @@ func (h *Handler) cmdAdd(ctx context.Context, m *tg.Message, r req, args string)
 			return rerr
 		}
 		if !ok {
+			if h.BotUsername == "" {
+				return h.say(ctx, m, lc.T("todo.assign.unknown.nobot", ui.Escape(assigneeName)))
+			}
 			return h.say(ctx, m, lc.T("todo.assign.unknown", ui.Escape(assigneeName), ui.Escape(h.BotUsername)))
 		}
 		td, err = h.Svc.AddTodoFor(ctx, r.Actor, assignee.ID, res)
