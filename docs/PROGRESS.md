@@ -7,15 +7,15 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | # | Wave | Issue | Status | PR |
 |---|---|---|---|---|
 | 1 | 0 | Bootstrap and contracts (+ calendar, i18n core) | ✅ merged | #18 |
-| 2 | 1 | Config and logging | ⏳ todo | |
+| 2 | 1 | Config and logging | 🔨 in progress | |
 | 3 | 1 | Recurrence engine (DST, Jalali monthly) | ✅ merged | #19 |
-| 24 | 1.5 | Contracts v2: registry, multi-node store methods | 🔍 in review | #38 |
+| 24 | 1.5 | Contracts v2: registry, multi-node store methods | ✅ merged | #38 |
 | 4 | 1 | SQLite store and migrations | ✅ merged | #21 |
 | 5 | 1 | Natural-language parser (en + fa, Jalali) | ✅ merged | #22 |
-| 25 | 2 | sqlstore + Dialect; port SQLite; multi-node methods | ⏳ todo | |
-| 26 | 2 | storetest conformance suite | ⏳ todo | |
+| 25 | 2 | sqlstore + Dialect; port SQLite; multi-node methods | 🔨 in progress (with #26) | |
+| 26 | 2 | storetest conformance suite | 🔨 in progress (with #25) | |
 | 27 | 2 | Leader lease loop | ⏳ todo | |
-| 6 | 2 | Telegram adapter | ⏳ todo | |
+| 6 | 2 | Telegram adapter | 🔨 in progress | |
 | 7 | 2 | UI rendering and callback codec | ✅ merged | #20 |
 | 8 | 2 | Service layer | ⏳ todo | |
 | 9 | 2 | Deployment tooling | ✅ merged | #37 |
@@ -51,3 +51,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - Security fixes before merge:
     - the deploy script no longer lets root follow paths the service user controls;
     - store URL parse errors no longer echo credentials.
+- **2026-10-10**
+  - #24 merged (#38) after an architecture review. The review found that a node whose claim had expired could resurrect a sent reminder; that is fixed with token-conditional writes.
+  - Wave 2 started: #25+#26 (one PR), #6 and #2.
+  - #8 (service) and #27 (lease) start after #25.

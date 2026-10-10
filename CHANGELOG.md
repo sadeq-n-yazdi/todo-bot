@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Multi-node contracts (#24):
+  - a store provider registry, opened by URL scheme;
+  - claim-based scheduling with conditional writes;
+  - the leader lease;
+  - persisted prompts;
+  - update dedupe;
+  - per-dialect migrations.
 - Deployment tooling (#9):
   - a hardened systemd unit (exposure score 1.1), with sysusers and an env template;
   - `scripts/deploy.sh` with bootstrap, update, rollback, status and logs.
