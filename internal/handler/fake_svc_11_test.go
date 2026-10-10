@@ -167,3 +167,14 @@ func (f *fakeSvc11) DigestView(_ context.Context, chatID int64, now time.Time) (
 }
 
 func (f *fakeSvc11) MarkUpdate(context.Context, int64) (bool, error) { return true, nil }
+
+// NoteUsername, UserByUsername and ListAssigned keep newReq (which records
+// the sender's username on every update) and /list off the nil embedded
+// interface. The assignment tests use fakeAssign instead.
+func (f *fakeSvc11) NoteUsername(context.Context, int64, string) error { return nil }
+
+func (f *fakeSvc11) UserByUsername(context.Context, string) (model.User, error) {
+	return model.User{}, service.ErrNotFound
+}
+
+func (f *fakeSvc11) ListAssigned(context.Context, int64) ([]model.Todo, error) { return nil, nil }

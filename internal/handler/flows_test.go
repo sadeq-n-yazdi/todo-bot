@@ -76,7 +76,7 @@ func TestExpiredPromptIgnored(t *testing.T) {
 	hh.fs.Reset()
 
 	m := &tg.Message{ID: 9, ChatID: -9, ChatKind: model.ChatGroup, FromID: 1, Text: "too late", ReplyToID: id}
-	r, err := hh.h.newReq(context.Background(), 1, "", -9, model.ChatGroup, "")
+	r, err := hh.h.newReq(context.Background(), 1, "", "", -9, model.ChatGroup, "")
 	if err != nil {
 		t.Fatal(err)
 	}

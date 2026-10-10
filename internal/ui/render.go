@@ -66,21 +66,60 @@ func itemLine(td model.Todo, lc i18n.Locale, loc *time.Location, now time.Time) 
 	if td.Recur != "" {
 		s += " 🔁"
 	}
+	return s + AssigneeSuffix(td, lc)
+}
+
+// AssigneeSuffix is " → @name" (a link by user ID) for an assigned item and
+// "" for any other (#58).
+func AssigneeSuffix(td model.Todo, lc i18n.Locale) string {
+	if td.AssigneeID == 0 {
+		return ""
+	}
+	return " → " + Mention(td.AssigneeID, td.AssigneeName, lc)
+}
+
+// Limits of the "Assigned to me" section of /list. A message holds 4096
+// characters and an inline keyboard 100 buttons; a full page of own items
+// uses 42 of them, so each assigned row has two buttons (Done, Delete).
+const (
+	MaxAssigned     = 20
+	assignedTextMax = 80 // runes of an item's text shown in the section
+	assignedBtnMax  = 20 // runes of an item's text shown on its Done button
+)
+
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
 	return s
 }
 
 // TodoList renders one page of a list with per-item buttons and paging.
 // page is 0-based; pages is the total page count (>= 1).
 func TodoList(ts []model.Todo, lc i18n.Locale, loc *time.Location, now time.Time, page, pages int) tg.OutMessage {
-	if len(ts) == 0 {
+	return TodoListAssigned(ts, nil, lc, loc, now, page, pages)
+}
+
+// TodoListAssigned is TodoList plus, on the first page, an "Assigned to me"
+// section for items that live in other chats (#58). The section shows at
+// most MaxAssigned items and then "and N more". Its items are reached only
+// through their buttons: their numbers belong to other chats' lists.
+func TodoListAssigned(ts, assigned []model.Todo, lc i18n.Locale, loc *time.Location, now time.Time, page, pages int) tg.OutMessage {
+	if page != 0 {
+		assigned = nil
+	}
+	if len(ts) == 0 && len(assigned) == 0 {
 		return tg.OutMessage{Text: lc.T("ui.list.empty")}
 	}
-	title := lc.T("ui.list.title")
-	if pages > 1 {
-		title = lc.T("ui.list.title.paged", lc.Num(page+1), lc.Num(pages))
-	}
-	lines := []string{title}
+	var lines []string
 	var kb [][]tg.Button
+	if len(ts) > 0 {
+		title := lc.T("ui.list.title")
+		if pages > 1 {
+			title = lc.T("ui.list.title.paged", lc.Num(page+1), lc.Num(pages))
+		}
+		lines = append(lines, title)
+	}
 	for _, td := range ts {
 		lines = append(lines, itemLine(td, lc, loc, now))
 		kb = append(kb, []tg.Button{
@@ -89,6 +128,35 @@ func TodoList(ts []model.Todo, lc i18n.Locale, loc *time.Location, now time.Time
 			button("⏰", Action{Kind: ActRemind, ID: td.ID}),
 			button("🗑", Action{Kind: ActDelete, ID: td.ID}),
 		})
+	}
+	text := strings.Join(lines, "\n")
+	if len(assigned) > 0 {
+		shown := assigned[:min(len(assigned), MaxAssigned)]
+		sec := []string{"<b>" + lc.T("ui.assign.title") + "</b>"}
+		for _, td := range shown {
+			line := "• " + Escape(clip(td.Text, assignedTextMax))
+			if td.DueAt != nil {
+				line += " — " + FormatWhen(*td.DueAt, lc, loc, now)
+			}
+			if isOverdue(td, now) {
+				line += " ⚠️"
+			}
+			if td.Recur != "" {
+				line += " 🔁"
+			}
+			sec = append(sec, line)
+			kb = append(kb, []tg.Button{
+				button("✅ "+clip(td.Text, assignedBtnMax), Action{Kind: ActDone, ID: td.ID}),
+				button("🗑", Action{Kind: ActDelete, ID: td.ID}),
+			})
+		}
+		if n := len(assigned) - len(shown); n > 0 {
+			sec = append(sec, lc.T("ui.assign.more", lc.Num(n)))
+		}
+		if text != "" {
+			text += "\n\n"
+		}
+		text += strings.Join(sec, "\n")
 	}
 	if pages > 1 {
 		var row []tg.Button
@@ -100,7 +168,7 @@ func TodoList(ts []model.Todo, lc i18n.Locale, loc *time.Location, now time.Time
 		}
 		kb = append(kb, row)
 	}
-	return tg.OutMessage{Text: strings.Join(lines, "\n"), Keyboard: kb}
+	return tg.OutMessage{Text: text, Keyboard: kb}
 }
 
 // ReminderMsg renders a reminder with Done / 10m / 1h / Tomorrow buttons.

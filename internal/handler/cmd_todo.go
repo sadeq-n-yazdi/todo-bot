@@ -40,6 +40,7 @@ func (h *Handler) cmdAdd(ctx context.Context, m *tg.Message, r req, args string)
 	if tooLong(input) {
 		return h.sayTooLong(ctx, m, lc, input)
 	}
+	assigneeName, input := splitMention(input, h.BotUsername)
 	loc := tzOf(r)
 	// Parse normalises digits itself for matching but keeps the user's own
 	// characters in Result.Text, so Farsi digits in the text survive.
@@ -50,7 +51,25 @@ func (h *Handler) cmdAdd(ctx context.Context, m *tg.Message, r req, args string)
 	if strings.TrimSpace(res.Text) == "" {
 		return h.say(ctx, m, lc.T("todo.usage.add"))
 	}
-	td, err := h.Svc.AddTodo(ctx, r.Actor, res)
+	var td model.Todo
+	if assigneeName == "" {
+		td, err = h.Svc.AddTodo(ctx, r.Actor, res)
+	} else {
+		assignee, ok, rerr := h.resolveAssignee(ctx, assigneeName)
+		if rerr != nil {
+			return rerr
+		}
+		if !ok {
+			if h.BotUsername == "" {
+				return h.say(ctx, m, lc.T("todo.assign.unknown.nobot", ui.Escape(assigneeName)))
+			}
+			return h.say(ctx, m, lc.T("todo.assign.unknown", ui.Escape(assigneeName), ui.Escape(h.BotUsername)))
+		}
+		td, err = h.Svc.AddTodoFor(ctx, r.Actor, assignee.ID, res)
+		if err == nil && td.AssigneeID != 0 && td.AssigneeName == "" {
+			td.AssigneeName = assignee.Username
+		}
+	}
 	if err != nil {
 		return h.todoErr(ctx, m, lc, err)
 	}
@@ -78,8 +97,7 @@ func (h *Handler) cmdList(ctx context.Context, m *tg.Message, r req, args string
 			return err
 		}
 	}
-	out := ui.TodoList(todos, lc, tzOf(r), h.Clock.Now(), page-1, pages)
-	return h.reply(ctx, m, h.threaded(m, out))
+	return h.reply(ctx, m, h.threaded(m, h.renderList(ctx, r, r.Actor.ChatID, todos, page-1, pages)))
 }
 
 func (h *Handler) cmdDone(ctx context.Context, m *tg.Message, r req, args string) error {
@@ -92,6 +110,7 @@ func (h *Handler) cmdDone(ctx context.Context, m *tg.Message, r req, args string
 	if err != nil {
 		return h.todoErr(ctx, m, lc, err)
 	}
+	h.notifyDid(ctx, r, done)
 	text := lc.T("todo.done", lc.Num(done.Num), echo(done.Text))
 	// A recurring item stays open with its next due time.
 	if done.Status == model.TodoOpen && done.DueAt != nil {
@@ -215,7 +234,7 @@ func (h *Handler) itemSummary(td model.Todo, r req) string {
 	if td.Recur != "" {
 		s += " 🔁"
 	}
-	return s
+	return s + ui.AssigneeSuffix(td, r.Prefs.Locale)
 }
 
 // echoRunes is how much of an item's text confirmation replies repeat.
