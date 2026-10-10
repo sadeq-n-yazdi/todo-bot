@@ -7,7 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
-- Groundwork for assigning a task to another member (#58): schema migration 0003, which stores usernames and the assignee, the new store methods, and the sender's username on Telegram updates.
+- Assign a task to another member (#58): `/add @username …`.
+  - The reminder goes to the assignee's private chat, in their language and time zone, with Done and snooze buttons. If that message is refused, for example because they blocked the bot, it goes once to the chat where the task was added, with a mention.
+  - The task stays in the list where it was added, showing `→ @name`. The assignee's private `/list` shows it under "Assigned to me".
+  - The creator or the assignee can complete it. When the assignee does, the chat where it was added gets a "did" notice.
+  - The bot learns usernames as people use it, so the assignee must have started the bot. A username that moves to another account is cleared from the old one.
+  - Schema migration 0003 stores usernames and the assignee.
 
 ### Fixed
 - A date is now found when the text also has an `@mention` or `#tag` after it or inside it, for example `pick up our son today 15:00 @wife` (#57). The mention is kept in the item's text.

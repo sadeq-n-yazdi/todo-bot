@@ -33,7 +33,8 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | # | Issue | Status | PR |
 |---|---|---|---|
 | 57 | nlparse: a trailing @mention breaks date parsing | ✅ merged | #60 |
-| 58 | Assign a task to another member (reminder by DM) | 🚧 part 1 (contracts) merged; parts 2–4 in progress | #61 |
+| 58 | Assign a task to another member (reminder by DM) | 🚧 parts 1–4 merged; e2e tests in progress | #61, #63, #64, #62 |
+| 65 | nlparse: recognise a date phrase at the start of the text | 🚧 in progress | |
 
 ## Log
 - **2026-10-10**
@@ -67,3 +68,8 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - v0.1.1 started: #57 merged (#60) after review. The review caught `@3pm` being hidden as a mention, so a mention now has to start with a letter or underscore.
   - #58 part 1 (contracts) is in progress.
   - #58 part 1 (contracts) merged (#61) after an architecture review. The review moved `ui.Mention` to link by user ID, so a username that moved to another account can't ping the wrong person. Parts 2 (service), 3 (handler and ui) and 4 (scheduler and docs) started in parallel.
+  - #58 parts 2–4 merged: the service (#63), the handler and ui (#64), and the scheduler and docs (#62). Each was reviewed first. The reviews led to:
+    - the assignee being allowed to act only from their own private chat or the item's chat;
+    - the Farsi docs example being reordered so its date parses;
+    - the mention rule matching Telegram usernames (5–32 characters, starting with a letter).
+  - Filed #65, after a review showed that a date at the start of the text is ignored. The e2e tests for #58 and #65 started.
