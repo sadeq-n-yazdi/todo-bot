@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"strings"
+	"unicode"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/clock"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
@@ -210,7 +211,10 @@ func splitCommand(text, botUsername string) (cmd, args string, ok bool) {
 	if !strings.HasPrefix(text, "/") {
 		return "", "", false
 	}
-	head, rest, _ := strings.Cut(text[1:], " ")
+	head, rest := text[1:], ""
+	if i := strings.IndexFunc(head, unicode.IsSpace); i >= 0 {
+		head, rest = head[:i], head[i:]
+	}
 	if name, at, found := strings.Cut(head, "@"); found {
 		if !strings.EqualFold(at, botUsername) {
 			return "", "", false

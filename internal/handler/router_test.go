@@ -62,6 +62,8 @@ func TestSplitCommand(t *testing.T) {
 		ok            bool
 	}{
 		{"/add buy milk", "add", "buy milk", true},
+		{"/edit\t1 x", "edit", "1 x", true},
+		{"/add\nbuy milk", "add", "buy milk", true},
 		{"/List@TodoBot 2", "list", "2", true},
 		{"/list@todobot", "list", "", true},
 		{"/list@OtherBot", "", "", false},
