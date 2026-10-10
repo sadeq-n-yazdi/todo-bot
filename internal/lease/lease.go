@@ -42,8 +42,12 @@ const releaseTimeout = 5 * time.Second
 // release, or nil.
 func Run(ctx context.Context, st store.Store, clk clock.Clock, name, node string, ttl time.Duration,
 	lead func(ctx context.Context, epoch int64)) error {
-	l := &loop{st: st, clk: clk, name: name, holder: node + ":" + randomSuffix(), ttl: ttl, lead: lead}
-	return l.run(ctx)
+	return newLoop(st, clk, name, node, ttl, lead).run(ctx)
+}
+
+func newLoop(st store.Store, clk clock.Clock, name, node string, ttl time.Duration,
+	lead func(ctx context.Context, epoch int64)) *loop {
+	return &loop{st: st, clk: clk, name: name, holder: node + ":" + randomSuffix(), ttl: ttl, lead: lead}
 }
 
 type loop struct {
@@ -58,8 +62,18 @@ type loop struct {
 	epoch   int64
 	lastOK  time.Time // start time of the last successful renewal
 	fence   <-chan time.Time
+	fenceAt time.Time
 	cancel  context.CancelFunc
 	done    chan struct{}
+
+	// At most one AcquireLease is in flight per Run, so the writes of this
+	// process reach the store in increasing "now" order.
+	inflight       chan acquireResult
+	cancelInflight context.CancelFunc
+
+	// idle is a test hook, called before each blocking wait with the time
+	// before which nothing is due. It is nil in production.
+	idle func(next time.Time)
 }
 
 type acquireResult struct {
@@ -83,6 +97,13 @@ func (l *loop) run(ctx context.Context) error {
 func (l *loop) wait(ctx context.Context, until time.Time) bool {
 	tick := l.clk.After(until.Sub(l.clk.Now()))
 	for {
+		if l.idle != nil {
+			next := until
+			if l.leading && l.fenceAt.Before(next) {
+				next = l.fenceAt
+			}
+			l.idle(next)
+		}
 		select {
 		case <-tick:
 			return true
@@ -97,11 +118,23 @@ func (l *loop) wait(ctx context.Context, until time.Time) bool {
 
 // attempt takes or renews the lease once. The store call runs in its own
 // goroutine so that a call that ignores its context cannot delay the fence.
+// If the previous call is still running, no new call is started: the attempt
+// counts as failed. Its late result is discarded.
 func (l *loop) attempt(ctx context.Context, start time.Time) {
 	l.reapEarlyReturn()
+	l.drainInflight()
+	if l.inflight != nil {
+		// The previous call is still running: this attempt fails, and the old
+		// call's result is discarded when it arrives (see drainInflight).
+		slog.Warn("lease: previous acquire still running", "lease", l.name)
+		if l.leading && !l.clk.Now().Before(l.lastOK.Add(l.ttl/2)) {
+			l.stopLead()
+		}
+		return
+	}
 	actx, acancel := context.WithCancel(ctx)
-	defer acancel()
 	resCh := make(chan acquireResult, 1)
+	l.inflight, l.cancelInflight = resCh, acancel
 	go func() {
 		got, err := l.st.AcquireLease(actx, l.name, l.holder, start, l.ttl)
 		resCh <- acquireResult{got, err}
@@ -113,15 +146,17 @@ func (l *loop) attempt(ctx context.Context, start time.Time) {
 	var res acquireResult
 	got, fenceFired := false, false
 	select {
-	case res = <-resCh:
+	case res = <-l.inflight:
 		got = true
+		l.clearInflight()
 	case <-l.fence:
 		fenceFired = true
+		l.cancelInflight()
 	case <-bound:
+		l.cancelInflight()
 	case <-ctx.Done():
 		return
 	}
-	acancel()
 	if ctx.Err() != nil {
 		return
 	}
@@ -153,6 +188,23 @@ func (l *loop) attempt(ctx context.Context, start time.Time) {
 	}
 }
 
+// drainInflight drops the result of a call that finished since the last attempt.
+func (l *loop) drainInflight() {
+	if l.inflight == nil {
+		return
+	}
+	select {
+	case <-l.inflight:
+		l.clearInflight()
+	default:
+	}
+}
+
+func (l *loop) clearInflight() {
+	l.cancelInflight()
+	l.inflight, l.cancelInflight = nil, nil
+}
+
 // reapEarlyReturn notices a lead that returned by itself.
 func (l *loop) reapEarlyReturn() {
 	if !l.leading {
@@ -168,7 +220,8 @@ func (l *loop) reapEarlyReturn() {
 }
 
 func (l *loop) armFence() {
-	l.fence = l.clk.After(l.lastOK.Add(l.ttl / 2).Sub(l.clk.Now()))
+	l.fenceAt = l.lastOK.Add(l.ttl / 2)
+	l.fence = l.clk.After(l.fenceAt.Sub(l.clk.Now()))
 }
 
 func (l *loop) startLead(ctx context.Context, epoch int64) {
@@ -192,7 +245,16 @@ func (l *loop) stopLead() {
 	l.leading, l.fence = false, nil
 }
 
+// release gives an in-flight call a short time to finish, so that its write
+// cannot land after the release and retake the lease, then releases.
 func (l *loop) release(ctx context.Context) error {
+	if l.inflight != nil {
+		l.cancelInflight()
+		select {
+		case <-l.inflight:
+		case <-l.clk.After(releaseTimeout):
+		}
+	}
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
 	defer cancel()
 	return l.st.ReleaseLease(rctx, l.name, l.holder)

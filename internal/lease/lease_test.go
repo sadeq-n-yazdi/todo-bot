@@ -23,14 +23,11 @@ const (
 
 var t0 = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
-// tracker is shared by the nodes of one test. It counts AcquireLease calls
-// (to know when every loop has run its attempt) and the leaders running at
-// the same time across all nodes.
+// tracker is shared by the nodes of one test. It records the leaders running
+// at the same time across all nodes.
 type tracker struct {
-	calls atomic.Int64
-	done  atomic.Int64 // AcquireLease calls that have returned
-	cur   atomic.Int64
-	max   atomic.Int64
+	cur atomic.Int64
+	max atomic.Int64
 }
 
 func (tr *tracker) enter() {
@@ -45,17 +42,14 @@ func (tr *tracker) enter() {
 
 func (tr *tracker) exit() { tr.cur.Add(-1) }
 
-// flakyStore counts lease calls and misbehaves on demand.
+// flakyStore misbehaves on demand.
 type flakyStore struct {
 	store.Store
-	tr   *tracker
 	fail atomic.Bool
 	lost atomic.Bool // report another holder, as if it had taken over
 }
 
 func (f *flakyStore) AcquireLease(ctx context.Context, name, holder string, now time.Time, d time.Duration) (model.Lease, error) {
-	f.tr.calls.Add(1)
-	defer f.tr.done.Add(1)
 	if f.fail.Load() {
 		return model.Lease{}, errors.New("store down")
 	}
@@ -73,7 +67,8 @@ func (f *flakyStore) ReleaseLease(ctx context.Context, name, holder string) erro
 }
 
 type node struct {
-	st     *flakyStore
+	st     *flakyStore  // nil unless the node uses a flakyStore
+	next   atomic.Int64 // last idle report, UnixNano
 	cancel context.CancelFunc
 	done   chan error
 
@@ -92,15 +87,23 @@ func openDB(t *testing.T, path string) store.Store {
 	return db
 }
 
-// start runs a loop whose first earlyReturns lead calls return at once.
+// start runs a loop on a flakyStore whose first earlyReturns lead calls return at once.
 func start(t *testing.T, clk *clocktest.Fake, tr *tracker, path, name string, earlyReturns int) *node {
 	t.Helper()
-	n := &node{st: &flakyStore{Store: openDB(t, path), tr: tr}, done: make(chan error, 1)}
+	fs := &flakyStore{Store: openDB(t, path)}
+	n := startStore(t, clk, tr, fs, name, earlyReturns)
+	n.st = fs
+	return n
+}
+
+func startStore(t *testing.T, clk *clocktest.Fake, tr *tracker, st store.Store, name string, earlyReturns int) *node {
+	t.Helper()
+	n := &node{done: make(chan error, 1)}
 	ctx, cancel := context.WithCancel(context.Background())
 	n.cancel = cancel
 	t.Cleanup(cancel)
 	go func() {
-		n.done <- lease.Run(ctx, n.st, clk, leaseKey, name, ttl, func(lctx context.Context, epoch int64) {
+		n.done <- lease.RunWithIdle(ctx, st, clk, leaseKey, name, ttl, func(lctx context.Context, epoch int64) {
 			tr.enter()
 			n.mu.Lock()
 			n.epochs = append(n.epochs, epoch)
@@ -114,7 +117,7 @@ func start(t *testing.T, clk *clocktest.Fake, tr *tracker, path, name string, ea
 			n.running--
 			n.mu.Unlock()
 			tr.exit()
-		})
+		}, func(next time.Time) { n.next.Store(next.UnixNano()) })
 	}()
 	return n
 }
@@ -142,16 +145,27 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// advance moves the clock by d and waits until wantCalls more AcquireLease
-// calls have returned (so that no store call is in flight when the next
-// advance happens). The loops anchor their ticks to absolute times, so it
-// does not matter whether they are already blocked on the clock.
-func advance(t *testing.T, clk *clocktest.Fake, tr *tracker, d time.Duration, wantCalls int) {
+// settle waits until every node is idle with nothing due at or before now:
+// each has reported a next wake-up time after the current fake time.
+func settle(t *testing.T, clk *clocktest.Fake, nodes ...*node) {
 	t.Helper()
-	before := tr.done.Load()
+	eventually(t, "loops to go idle", func() bool {
+		now := clk.Now().UnixNano()
+		for _, n := range nodes {
+			if n.next.Load() <= now {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+// advance moves the clock by d and waits until every node has handled
+// everything that fell due.
+func advance(t *testing.T, clk *clocktest.Fake, d time.Duration, nodes ...*node) {
+	t.Helper()
 	clk.Advance(d)
-	eventually(t, "acquire attempts", func() bool { return tr.done.Load() >= before+int64(wantCalls) })
-	time.Sleep(10 * time.Millisecond) // let the loops handle the results
+	settle(t, clk, nodes...)
 }
 
 func countLeaders(ns ...*node) int {
@@ -173,10 +187,9 @@ func TestSingleLeader(t *testing.T) {
 	c := start(t, clk, tr, path, "a", 0) // same NodeID as a: must still not co-lead
 	nodes := []*node{a, b, c}
 	eventually(t, "a leader", func() bool { return countLeaders(nodes...) == 1 })
-	eventually(t, "first attempts", func() bool { return tr.done.Load() >= 3 })
-	time.Sleep(10 * time.Millisecond)
+	settle(t, clk, nodes...)
 	for i := 0; i < 10; i++ {
-		advance(t, clk, tr, ttl/3, 3)
+		advance(t, clk, ttl/3, nodes...)
 		if got := countLeaders(nodes...); got != 1 {
 			t.Fatalf("round %d: %d leaders, want 1", i, got)
 		}
@@ -201,13 +214,12 @@ func TestTakeoverAfterTTL(t *testing.T) {
 	eventually(t, "a leads", a.leading)
 	a.st.fail.Store(true) // a can neither renew nor release
 	b := start(t, clk, tr, path, "b", 0)
-	eventually(t, "first attempts", func() bool { return tr.done.Load() >= 2 })
-	time.Sleep(10 * time.Millisecond)
+	settle(t, clk, a, b)
 	if b.leading() {
 		t.Fatal("b leads while a holds the lease")
 	}
 	for i := 0; i < 4 && !b.leading(); i++ {
-		advance(t, clk, tr, ttl/3, 2)
+		advance(t, clk, ttl/3, a, b)
 	}
 	eventually(t, "b takes over", b.leading)
 	eventually(t, "a stops", func() bool { return !a.leading() })
@@ -227,17 +239,17 @@ func TestFenceAfterHalfTTLWithoutRenewal(t *testing.T) {
 	eventually(t, "a leads", a.leading)
 	a.st.fail.Store(true)
 
-	advance(t, clk, tr, ttl/3, 1) // t=10: 10s since the last renewal, within ttl/2
+	advance(t, clk, ttl/3, a) // t=10: 10s since the last renewal, within ttl/2
 	if !a.leading() {
 		t.Fatal("fenced too early")
 	}
-	advance(t, clk, tr, ttl/3, 1) // t=20: the fence point (15s) has passed
+	advance(t, clk, ttl/3, a) // t=20: the fence point (15s) has passed
 	eventually(t, "fence", func() bool { return !a.leading() })
 
 	// The store recovers at t=30. The lease expired at t=30 (held_until <= now),
 	// so a re-takes it with a new epoch and leads again.
 	a.st.fail.Store(false)
-	advance(t, clk, tr, ttl/3, 1)
+	advance(t, clk, ttl/3, a)
 	eventually(t, "re-lead", a.leading)
 	if got := a.starts(); len(got) != 2 || got[0] != 1 || got[1] != 2 {
 		t.Fatalf("epochs = %v, want [1 2]", got)
@@ -251,7 +263,7 @@ func TestLeadContextCancelledWhenLost(t *testing.T) {
 	a := start(t, clk, tr, path, "a", 0)
 	eventually(t, "a leads", a.leading)
 	a.st.lost.Store(true)
-	advance(t, clk, tr, ttl/3, 1) // well inside ttl/2: only the loss can stop it
+	advance(t, clk, ttl/3, a) // well inside ttl/2: only the loss can stop it
 	eventually(t, "a loses lead", func() bool { return !a.leading() })
 }
 
@@ -261,8 +273,8 @@ func TestLeadReturningEarlyIsRestarted(t *testing.T) {
 	tr := &tracker{}
 	a := start(t, clk, tr, path, "a", 1) // the first lead call returns at once
 	eventually(t, "first lead", func() bool { return len(a.starts()) == 1 })
-	eventually(t, "first attempt", func() bool { return tr.done.Load() >= 1 })
-	advance(t, clk, tr, ttl/3, 1)
+	settle(t, clk, a)
+	advance(t, clk, ttl/3, a)
 	eventually(t, "restart", func() bool { return len(a.starts()) == 2 && a.leading() })
 	if got := a.starts(); got[0] != got[1] {
 		t.Fatalf("epochs = %v, want the same epoch twice", got)
@@ -307,7 +319,7 @@ func TestRenewedEveryThirdOfTTL(t *testing.T) {
 	eventually(t, "a leads", a.leading)
 	other := openDB(t, path)
 	for i := 0; i < 3; i++ {
-		advance(t, clk, tr, ttl/3, 1)
+		advance(t, clk, ttl/3, a)
 		want := clk.Now().Add(ttl)
 		eventually(t, "renewal", func() bool {
 			// A probe far in the past never wins, so it only reads the row.
@@ -323,14 +335,26 @@ func TestRenewedEveryThirdOfTTL(t *testing.T) {
 type hangStore struct {
 	store.Store
 	hang       atomic.Bool
+	down       atomic.Bool // non-hanging calls fail
 	honourCtx  bool
 	entered    chan struct{}
 	unblock    chan struct{}
 	ctxWasDone atomic.Bool
+
+	passthrough bool // after unblock, perform the real call (a late write)
+	once        sync.Once
+	hung        atomic.Int64 // hanging calls started
+	inflight    atomic.Int64 // hanging calls running now
+	maxIn       atomic.Int64
 }
 
 func (h *hangStore) AcquireLease(ctx context.Context, name, holder string, now time.Time, d time.Duration) (model.Lease, error) {
 	if h.hang.Load() {
+		h.hung.Add(1)
+		cur := h.inflight.Add(1)
+		defer h.inflight.Add(-1)
+		for m := h.maxIn.Load(); cur > m && !h.maxIn.CompareAndSwap(m, cur); m = h.maxIn.Load() {
+		}
 		select {
 		case h.entered <- struct{}{}:
 		default:
@@ -345,7 +369,16 @@ func (h *hangStore) AcquireLease(ctx context.Context, name, holder string, now t
 		} else {
 			<-h.unblock
 		}
+		if h.passthrough {
+			return h.Store.AcquireLease(context.WithoutCancel(ctx), name, holder, now, d)
+		}
 		return model.Lease{}, errors.New("timeout")
+	}
+	if h.down.Load() {
+		return model.Lease{}, errors.New("store down")
+	}
+	if h.down.Load() {
+		return model.Lease{}, errors.New("store down")
 	}
 	return h.Store.AcquireLease(ctx, name, holder, now, d)
 }
