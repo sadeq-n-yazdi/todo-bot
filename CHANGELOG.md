@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Todo commands in English and Farsi (#11):
+  - /start, /help, /add (and plain text in a private chat), /list, /done, /del, /edit and /today;
+  - item text is capped at 1000 characters;
+  - confirmations stay safely under Telegram's message limit.
 - Telegram adapter (#6):
   - long polling that loses no updates on a lease handover;
   - HTML messages with inline keyboards;
