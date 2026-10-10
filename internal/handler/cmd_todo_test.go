@@ -156,6 +156,16 @@ func TestAddEmptyShowsUsage(t *testing.T) {
 	}
 }
 
+func TestAddServiceEmptyTextShowsUsage(t *testing.T) {
+	e := newTodoEnv(t)
+	e.svc.addErr = service.ErrEmptyText
+	e.say(userFa, userFa, "/add x")
+	want := i18n.Locale{Lang: i18n.Fa}.T("todo.usage.add")
+	if got := e.last(t).Msg.Text; got != want {
+		t.Fatalf("reply %q, want %q", got, want)
+	}
+}
+
 func TestAddEscapesHTML(t *testing.T) {
 	e := newTodoEnv(t)
 	e.say(userEn, userEn, "/add <b>x</b> & y")

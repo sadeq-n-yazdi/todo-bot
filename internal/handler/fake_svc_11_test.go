@@ -20,6 +20,7 @@ type fakeSvc11 struct {
 	prefs  map[int64]model.Prefs
 	todos  []*model.Todo
 	added  []nlparse.Result // every Result passed to AddTodo
+	addErr error            // returned by AddTodo when set
 	nextID int64
 	clock  func() time.Time
 	// failWith, if set, is returned by Complete, Delete and Edit.
@@ -40,6 +41,9 @@ func (f *fakeSvc11) AddTodo(_ context.Context, a service.Actor, r nlparse.Result
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.added = append(f.added, r)
+	if f.addErr != nil {
+		return model.Todo{}, f.addErr
+	}
 	f.nextID++
 	num := 1
 	for _, t := range f.todos {
