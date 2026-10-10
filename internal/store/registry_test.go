@@ -27,6 +27,11 @@ func TestRegistry(t *testing.T) {
 	if _, err := Open(context.Background(), "::bad"); err == nil {
 		t.Fatal("want error for unparsable URL")
 	}
+	// A parse error must not echo the URL (it may carry a password).
+	_, err = Open(context.Background(), "postgres://u:s3cret@h:bad/db")
+	if err == nil || strings.Contains(err.Error(), "s3cret") {
+		t.Fatalf("parse error leaks URL: %v", err)
+	}
 
 	defer func() {
 		if recover() == nil {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -9,7 +10,9 @@ import (
 	"sync"
 )
 
-// Opener opens (and migrates) a store for a parsed database URL.
+// Opener opens (and migrates) a store for a parsed database URL. The URL may
+// carry a password: openers must not include it in errors or logs (use
+// u.Redacted()).
 type Opener func(ctx context.Context, u *url.URL) (Store, error)
 
 var (
@@ -38,6 +41,11 @@ func Register(scheme string, o Opener) {
 func Open(ctx context.Context, rawURL string) (Store, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
+		// *url.Error embeds the full URL, password included; keep only the cause.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return nil, fmt.Errorf("store: bad database URL: %w", err)
 	}
 	scheme := strings.ToLower(u.Scheme)
