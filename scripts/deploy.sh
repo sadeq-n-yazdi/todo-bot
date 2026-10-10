@@ -3,7 +3,8 @@
 #   scripts/deploy.sh {bootstrap|update|rollback|status|logs}
 # Environment: HOST (default root@87.106.65.34), PORT (default 2524),
 # ARCH (default: detected with uname -m on the host),
-# LINES (logs, default 100), FOLLOW=1 (logs, follow).
+# LOG_LINES (logs, default 100), FOLLOW=1 (logs, follow),
+# HEALTH_WAIT (seconds to watch the service after a restart, default 12).
 set -euo pipefail
 
 HOST="${HOST:-root@87.106.65.34}"
@@ -12,7 +13,6 @@ APP=todo-bot
 BIN_DIR=/opt/todo-bot
 BIN="$BIN_DIR/todo-bot"
 STATE_DIR=/var/lib/todo-bot
-BACKUP_DIR="$STATE_DIR/backups"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 ssh_opts=(-p "$PORT" -o BatchMode=yes)
@@ -23,29 +23,33 @@ die() {
 	exit 1
 }
 
+# Arguments are expanded on the client on purpose.
+# shellcheck disable=SC2029
 remote() { ssh "${ssh_opts[@]}" "$HOST" "$@"; }
 
 usage() {
 	cat <<USAGE
 usage: $0 {bootstrap|update|rollback|status|logs}
-  bootstrap  install user, unit, env template and first binary
+  bootstrap  install user, unit, env template and binary
   update     back up the DB, install a new binary, restart, health-check
   rollback   restore the previous binary and restart
   status     show service status
-  logs       show recent journal (LINES=100, FOLLOW=1 to follow)
+  logs       show recent journal (LOG_LINES=100, FOLLOW=1 to follow)
 env: HOST=$HOST PORT=$PORT
 USAGE
 }
 
 detect_arch() {
+	local machine
 	if [ -n "${ARCH:-}" ]; then
 		echo "$ARCH"
 		return
 	fi
-	case "$(remote uname -m)" in
+	machine="$(remote uname -m)" || die "cannot reach $HOST over ssh (port $PORT)"
+	case "$machine" in
 	x86_64) echo amd64 ;;
 	aarch64 | arm64) echo arm64 ;;
-	*) die "unsupported architecture; set ARCH=amd64|arm64" ;;
+	*) die "unsupported architecture '$machine'; set ARCH=amd64|arm64" ;;
 	esac
 }
 
@@ -55,18 +59,27 @@ build() {
 	echo "$ROOT/dist/todo-bot-linux-$arch"
 }
 
-# Give the unit a moment, require it to be active, then show the journal.
+# Watch the unit for HEALTH_WAIT seconds (longer than one RestartSec=5s cycle,
+# so a crash loop is caught). Fail if it is not active/running or restarted.
 health_check() {
-	sleep 3
-	if ! remote "systemctl is-active --quiet $APP"; then
+	local label="$1" base out active sub now
+	base="$(remote "systemctl show -p NRestarts --value $APP")" || die "cannot reach $HOST"
+	sleep "${HEALTH_WAIT:-12}"
+	out="$(remote "systemctl show -p ActiveState -p SubState -p NRestarts $APP")" || die "cannot reach $HOST"
+	active="$(sed -n 's/^ActiveState=//p' <<<"$out")"
+	sub="$(sed -n 's/^SubState=//p' <<<"$out")"
+	now="$(sed -n 's/^NRestarts=//p' <<<"$out")"
+	if [ "$active" != active ] || [ "$sub" != running ] || [ "$now" != "$base" ]; then
+		echo "deploy: FAILED $label: state=$active/$sub restarts=$base->$now" >&2
 		remote "journalctl -u $APP -n 50 --no-pager" || true
 		return 1
 	fi
 	remote "journalctl -u $APP -n 20 --no-pager"
+	echo "deploy: $label OK"
 }
 
 cmd_bootstrap() {
-	local arch bin
+	local arch bin stage rc=0
 	arch="$(detect_arch)"
 	bin="$(build "$arch")"
 	# Private root-owned (0700) staging dir: never install from fixed /tmp names.
@@ -75,30 +88,45 @@ cmd_bootstrap() {
 	scp "${scp_opts[@]}" \
 		"$ROOT/deploy/todo-bot.service" "$ROOT/deploy/todo-bot.sysusers" \
 		"$ROOT/deploy/env.example" "$bin" "$HOST:$stage/"
-	remote "bash -s" "todo-bot-linux-$arch" "$stage" <<'REMOTE'
+	# Exit code 3 from the host means "installed, but not started".
+	remote "bash -s" "todo-bot-linux-$arch" "$stage" <<'REMOTE' || rc=$?
 set -euo pipefail
 src=$1
 d=$2
 trap 'rm -rf "$d"' EXIT
+bin=/opt/todo-bot/todo-bot
+env=/etc/todo-bot/env
+was_active=
+if systemctl is-active --quiet todo-bot; then was_active=1; fi
 install -D -m 0644 "$d/todo-bot.sysusers" /etc/sysusers.d/todo-bot.conf
 systemd-sysusers /etc/sysusers.d/todo-bot.conf
 install -D -m 0644 "$d/todo-bot.service" /etc/systemd/system/todo-bot.service
 install -d -m 0755 /opt/todo-bot /etc/todo-bot
-install -m 0755 "$d/$src" /opt/todo-bot/todo-bot
-created=
-if [ ! -e /etc/todo-bot/env ]; then
-	install -m 0600 -o root -g root "$d/env.example" /etc/todo-bot/env
-	created=1
+if [ -x "$bin" ]; then
+	cp -p "$bin" "$bin.prev"
 fi
-chmod 0600 /etc/todo-bot/env
+install -m 0755 "$d/$src" "$bin.new"
+mv -f "$bin.new" "$bin"
+if [ ! -e "$env" ]; then
+	install -m 0600 -o root -g root "$d/env.example" "$env"
+fi
+chmod 0600 "$env"
 systemctl daemon-reload
-if [ -n "$created" ]; then
-	echo "created /etc/todo-bot/env from the template: edit it, then run: systemctl enable --now todo-bot"
+if grep -q '^TELEGRAM_TOKEN=123456:replace-me' "$env"; then
+	echo "$env still has the placeholder token: edit it, then run: systemctl enable --now todo-bot"
+	exit 3
+fi
+if [ -n "$was_active" ]; then
+	systemctl restart todo-bot
 else
 	systemctl enable --now todo-bot
 fi
 REMOTE
-	echo "bootstrap done."
+	case "$rc" in
+	0) health_check bootstrap ;;
+	3) echo "deploy: bootstrap installed files; service not started" ;;
+	*) die "bootstrap failed on the host (exit $rc)" ;;
+	esac
 }
 
 cmd_update() {
@@ -106,47 +134,75 @@ cmd_update() {
 	arch="$(detect_arch)"
 	bin="$(build "$arch")"
 	scp "${scp_opts[@]}" "$bin" "$HOST:$BIN.new"
-	# Unquoted heredoc: $VARS expand locally, \$VARS on the host.
-	remote "bash -s" <<REMOTE
+	# Quoted heredoc; arguments are binary, state dir, service name.
+	remote "bash -s" "$BIN" "$STATE_DIR" "$APP" <<'REMOTE'
 set -euo pipefail
-chmod 0755 $BIN.new
-if [ -x $BIN ]; then
-	# Root never chown/chmods anything under $STATE_DIR (the service user owns
-	# it and could plant symlinks): state operations run as $APP.
-	if [ ! -e $STATE_DIR ] && [ ! -L $STATE_DIR ]; then
-		install -d -o $APP -g $APP -m 0750 $STATE_DIR
+bin=$1
+state=$2
+app=$3
+backups=$state/backups
+envfile=/etc/todo-bot/env
+chmod 0755 "$bin.new"
+if [ -x "$bin" ]; then
+	# Is the running service healthy? Only then is its binary worth keeping.
+	healthy=
+	if systemctl is-active --quiet "$app"; then
+		r1=$(systemctl show -p NRestarts --value "$app")
+		sleep 3
+		r2=$(systemctl show -p NRestarts --value "$app")
+		if systemctl is-active --quiet "$app" && [ "$r1" = "$r2" ]; then healthy=1; fi
 	fi
-	if [ -d $STATE_DIR ] && [ ! -L $STATE_DIR ]; then
-		# The env file is sourced as root: it must be root-owned and 0600.
-		[ "\$(stat -c %U:%a /etc/todo-bot/env)" = root:600 ] || { echo "/etc/todo-bot/env must be root:root 0600" >&2; exit 1; }
-		stamp=\$(date -u +%Y%m%dT%H%M%SZ)
-		set -a
-		. /etc/todo-bot/env
-		set +a
-		runuser -u $APP -- mkdir -p -m 0750 $BACKUP_DIR
-		runuser -u $APP -- env STATE_DIRECTORY=$STATE_DIR TODO_DB_PATH="\${TODO_DB_PATH:-$STATE_DIR/todo.db}" \\
-			$BIN backup "$BACKUP_DIR/todo-\$stamp.db"
+
+	# Root never chown/chmods anything under $state (the service user owns it
+	# and could plant symlinks): state operations run as the service user.
+	if [ -L "$state" ] || { [ -e "$state" ] && [ ! -d "$state" ]; }; then
+		echo "deploy: $state is a symlink or not a directory; refusing to continue" >&2
+		exit 1
 	fi
-	cp -p $BIN $BIN.prev
+	if [ -d "$state" ]; then
+		[ "$(stat -c %U:%a "$envfile")" = root:600 ] || { echo "deploy: $envfile must be root:root 0600" >&2; exit 1; }
+		# Read only the DB settings; never source the file.
+		db_path=$(sed -n 's/^TODO_DB_PATH=//p' "$envfile" | tail -n 1 | tr -d '\r')
+		db_url=$(sed -n 's/^TODO_DB_URL=//p' "$envfile" | tail -n 1 | tr -d '\r')
+		envargs=(STATE_DIRECTORY="$state")
+		if [ -n "$db_path" ]; then envargs+=(TODO_DB_PATH="$db_path"); fi
+		if [ -n "$db_url" ]; then envargs+=(TODO_DB_URL="$db_url"); fi
+		stamp=$(date -u +%Y%m%dT%H%M%SZ)
+		runuser -u "$app" -- mkdir -p -m 0750 "$backups"
+		runuser -u "$app" -- env "${envargs[@]}" "$bin" backup "$backups/todo-$stamp.db"
+		# Keep the newest 10 backups.
+		runuser -u "$app" -- sh -c 'ls -1t "$1"/todo-*.db | tail -n +11 | xargs -r rm -f --' sh "$backups"
+	else
+		install -d -o "$app" -g "$app" -m 0750 "$state"
+		echo "deploy: $state did not exist; nothing to back up"
+	fi
+
+	if [ -n "$healthy" ]; then
+		cp -p "$bin" "$bin.prev"
+	else
+		echo "deploy: running service not healthy; keeping existing $bin.prev" >&2
+	fi
 fi
-mv -f $BIN.new $BIN
-systemctl restart $APP
+mv -f "$bin.new" "$bin"
+systemctl restart "$app"
 REMOTE
-	if ! health_check; then
-		echo "deploy: health check failed; run '$0 rollback' to restore the previous binary" >&2
+	if ! health_check update; then
+		echo "deploy: run '$0 rollback' to restore the previous binary" >&2
 		exit 1
 	fi
 }
 
 cmd_rollback() {
-	remote "bash -s" <<REMOTE
+	remote "bash -s" "$BIN" "$APP" <<'REMOTE'
 set -euo pipefail
-[ -x $BIN.prev ] || { echo "no previous binary at $BIN.prev" >&2; exit 1; }
-cp -p $BIN.prev $BIN.new
-mv -f $BIN.new $BIN
-systemctl restart $APP
+bin=$1
+app=$2
+[ -x "$bin.prev" ] || { echo "deploy: no previous binary at $bin.prev" >&2; exit 1; }
+cp -p "$bin.prev" "$bin.new"
+mv -f "$bin.new" "$bin"
+systemctl restart "$app"
 REMOTE
-	health_check
+	health_check rollback || exit 1
 }
 
 cmd_status() { remote "systemctl status $APP --no-pager" || true; }
@@ -154,7 +210,7 @@ cmd_status() { remote "systemctl status $APP --no-pager" || true; }
 cmd_logs() {
 	local follow=""
 	if [ "${FOLLOW:-}" = 1 ]; then follow="-f"; fi
-	remote "journalctl -u $APP -n ${LINES:-100} --no-pager $follow"
+	remote "journalctl -u $APP -n ${LOG_LINES:-100} --no-pager $follow"
 }
 
 case "${1:-}" in

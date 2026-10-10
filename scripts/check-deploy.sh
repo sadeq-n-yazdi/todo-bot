@@ -38,7 +38,7 @@ if command -v systemd-analyze >/dev/null; then
 		echo "$out" >&2
 		fail=1
 	fi
-	score="$(systemd-analyze security --offline=true "$tmp/todo-bot.service" 2>&1 | sed -n 's/.*exposure level for [^:]*: \([0-9.]*\).*/\1/p')"
+	score="$(systemd-analyze security --offline=true "$tmp/todo-bot.service" 2>&1 | sed -n 's/.*exposure level for [^:]*: \([0-9.]*\).*/\1/p' || true)"
 	echo "exposure: ${score:-unknown}"
 	if [ -n "$score" ] && awk -v s="$score" 'BEGIN{exit !(s > 2.0)}'; then
 		echo "FAIL: exposure $score > 2.0" >&2
