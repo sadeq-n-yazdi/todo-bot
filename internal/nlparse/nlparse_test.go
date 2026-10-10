@@ -264,6 +264,25 @@ var rows = []row{
 	{in: "feed the cat sat", wantText: "feed the cat sat"},
 	{in: "send weekly", wantText: "send weekly"},
 	{in: "pills daily", wantText: "pills daily"},
+	// ---- @mentions and #tags around the date phrase ----
+	{in: "@wife pick up our son from school today 3pm", wantText: "@wife pick up our son from school", wantDue: "2026-10-10 15:00", wantTime: true},
+	{in: "pick up our son from school today 15:00 @wife", wantText: "pick up our son from school @wife", wantDue: "2026-10-10 15:00", wantTime: true},
+	{in: "pick up @wife from school today 15:00", wantText: "pick up @wife from school", wantDue: "2026-10-10 15:00", wantTime: true},
+	{in: "pick up from school today @wife 15:00", wantText: "pick up from school @wife", wantDue: "2026-10-10 15:00", wantTime: true},
+	{in: "call mom tomorrow @wife @bob_1", wantText: "call mom @wife @bob_1", wantDue: "2026-10-11 09:00"},
+	{in: "call mom tomorrow @wife, #family", wantText: "call mom @wife, #family", wantDue: "2026-10-11 09:00"},
+	{in: "buy milk #home tomorrow 18:00", wantText: "buy milk #home", wantDue: "2026-10-11 18:00", wantTime: true},
+	{in: "buy milk every day 9am @wife", wantText: "buy milk @wife", wantDue: "2026-10-10 09:00", wantTime: true, wantRule: daily(9, 0)},
+	{in: "fix 2 bugs @wife", wantText: "fix 2 bugs @wife"},
+	{in: "meet @bob", wantText: "meet @bob"},
+	{in: "call @_x tomorrow", wantText: "call @_x", wantDue: "2026-10-11 09:00"},
+	{in: "meet tomorrow @3pm", wantText: "meet tomorrow @3pm"},
+	{in: "meet tomorrow @ 3pm", wantText: "meet", wantDue: "2026-10-11 15:00", wantTime: true},
+	{in: "fix #3", wantText: "fix #3"},
+	{in: "بردن پسر از مدرسه فردا ساعت ۳ @wife", wantText: "بردن پسر از مدرسه @wife", wantDue: "2026-10-11 03:00", wantTime: true},
+	{in: "بردن پسر از مدرسه فردا ساعت ۱۵ @wife", wantText: "بردن پسر از مدرسه @wife", wantDue: "2026-10-11 15:00", wantTime: true},
+	{in: "@wife بردن پسر از مدرسه فردا ساعت ۱۵", wantText: "@wife بردن پسر از مدرسه", wantDue: "2026-10-11 15:00", wantTime: true},
+	{in: "بردن پسر از مدرسه @wife فردا ساعت ۱۵", wantText: "بردن پسر از مدرسه @wife", wantDue: "2026-10-11 15:00", wantTime: true},
 }
 
 func parseNow(t *testing.T, s, tz string) time.Time {

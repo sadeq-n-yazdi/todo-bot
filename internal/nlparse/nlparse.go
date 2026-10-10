@@ -7,7 +7,8 @@
 // cal decides how numeric dates ("15/7", "1405/07/15") and "every month on
 // the Nth" are read; Jalali month names ("۱۵ مهر", "15 Mehr") are always Jalali
 // and Gregorian month names always Gregorian. Dates are only recognised at
-// the END of the input (optionally after "at"/"on"/"in"/"ساعت"), so
+// the END of the input, ignoring @mentions and #tags, which stay in the text
+// (optionally after "at"/"on"/"in"/"ساعت"), so
 // "fix 2 bugs" stays plain text. Farsi "روزهای کاری" (workdays) means
 // Saturday..Wednesday; English "weekdays" means Monday..Friday.
 //
@@ -56,6 +57,7 @@ package nlparse
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -84,14 +86,35 @@ var ErrNoDate = errors.New("no date or time found")
 // Parse parses input relative to now. now must already be in the user's
 // location; returned times are in that location.
 func (p Parser) Parse(input string, now time.Time, cal calendar.Kind) (Result, error) {
-	toks := tokenize(i18n.NormalizeDigits(input))
+	all := tokenize(i18n.NormalizeDigits(input))
 	runes := []rune(input)
+	// @mentions and #tags are not part of a date phrase, so they are hidden
+	// from the grammar; those that fall inside or after the phrase are
+	// appended to the text, in order, exactly as written.
+	toks := make([]token, 0, len(all))
+	for _, t := range all {
+		if !isMention(t.key) {
+			toks = append(toks, t)
+		}
+	}
 	for s := max(0, len(toks)-maxStartTokens); s < len(toks); s++ {
 		res, ok := p.match(toks, s, now, cal, false)
 		if !ok {
 			continue
 		}
-		res.Text = cleanText(string(runes[:toks[s].start]))
+		text := string(runes[:toks[s].start])
+		if cut := toks[s].start; cut < len(runes) {
+			var kept []string
+			for _, t := range all {
+				if t.start >= cut && isMention(t.key) {
+					kept = append(kept, string(runes[t.start:t.end]))
+				}
+			}
+			if len(kept) > 0 {
+				text = strings.TrimSpace(text) + " " + strings.Join(kept, " ")
+			}
+		}
+		res.Text = cleanText(text)
 		return res, nil
 	}
 	return Result{Text: strings.TrimSpace(input)}, nil
@@ -127,3 +150,9 @@ const maxStartTokens = 16
 func cleanText(s string) string {
 	return strings.TrimRight(strings.TrimSpace(s), " \t,;:-–—")
 }
+
+// mentionRe matches "@wife", "#home" and "@bob_1": a sigil, a letter or underscore, then
+// word characters, so "@3pm", "#3" and a bare "@" (the "at" connector) are not mentions.
+var mentionRe = regexp.MustCompile(`^[@#][\p{L}_][\p{L}\p{N}_]*$`)
+
+func isMention(key string) bool { return mentionRe.MatchString(key) }
