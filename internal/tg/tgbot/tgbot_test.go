@@ -134,7 +134,7 @@ func TestNewFailsOnBadToken(t *testing.T) {
 const (
 	privateMsg = `{"update_id":100,"message":{"message_id":9,"date":1,"text":"/add@TodoBot buy milk",
 		"chat":{"id":5,"type":"private"},
-		"from":{"id":5,"is_bot":false,"first_name":"Ali","last_name":"Rezai","language_code":"fa"},
+		"from":{"id":5,"is_bot":false,"first_name":"Ali","last_name":"Rezai","username":"AliR","language_code":"fa"},
 		"reply_to_message":{"message_id":8,"date":1,"chat":{"id":5,"type":"private"}}}}`
 	groupMsg = `{"update_id":101,"message":{"message_id":10,"date":1,"text":"/list@OtherBot",
 		"chat":{"id":-100,"type":"supergroup","title":"Team"},
@@ -144,7 +144,7 @@ const (
 		"from":{"id":6,"is_bot":false,"first_name":"Sara"},
 		"migrate_to_chat_id":-1001234}}`
 	callbackUpd = `{"update_id":103,"callback_query":{"id":"cb1","chat_instance":"x","data":"done:3",
-		"from":{"id":5,"is_bot":false,"first_name":"Ali","language_code":"fa"},
+		"from":{"id":5,"is_bot":false,"first_name":"Ali","username":"AliR","language_code":"fa"},
 		"message":{"message_id":9,"date":1,"chat":{"id":5,"type":"private"}}}}`
 	ignoredUpd = `{"update_id":104,"edited_message":{"message_id":9,"date":1,"chat":{"id":5,"type":"private"}}}`
 )
@@ -192,7 +192,7 @@ func TestPollerConvertsUpdates(t *testing.T) {
 	}
 	wantP := tg.Message{
 		ID: 9, ChatID: 5, ChatKind: model.ChatPrivate, FromID: 5,
-		FromName: "Ali Rezai", FromLang: "fa", Text: "/add buy milk", ReplyToID: 8,
+		FromName: "Ali Rezai", FromUsername: "AliR", FromLang: "fa", Text: "/add buy milk", ReplyToID: 8,
 	}
 	if *p.Message != wantP {
 		t.Errorf("private message = %+v\nwant %+v", *p.Message, wantP)
@@ -213,7 +213,7 @@ func TestPollerConvertsUpdates(t *testing.T) {
 	}
 
 	c := got[3]
-	wantC := tg.Callback{ID: "cb1", FromID: 5, FromLang: "fa", ChatID: 5, MessageID: 9, Data: "done:3"}
+	wantC := tg.Callback{ID: "cb1", FromID: 5, FromUsername: "AliR", FromLang: "fa", ChatID: 5, MessageID: 9, Data: "done:3"}
 	if c.ID != 103 || c.Message != nil || c.Callback == nil || *c.Callback != wantC {
 		t.Errorf("callback update = %+v cb %+v\nwant %+v", c, c.Callback, wantC)
 	}

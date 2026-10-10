@@ -11,22 +11,32 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 )
 
-const todoCols = "id, chat_id, num, text, status, due_at, recur, tz, created_by, created_at, updated_at, done_at"
+// todoCols ends with the assignee's username, read live from users with a
+// correlated subquery (a join would make the unqualified columns ambiguous).
+// The subquery names the outer table as "todos", so todoCols works only in
+// "SELECT todoCols FROM todos ..." with no alias; with "FROM todos t" it
+// fails (or, worse, binds to another table). Use todoColsT with alias t.
+const todoCols = "id, chat_id, num, text, status, due_at, recur, tz, created_by, created_at, updated_at, done_at, " +
+	"assignee_id, (SELECT u.username FROM users u WHERE u.id = todos.assignee_id)"
 
 // todoColsT is todoCols qualified with the "t" alias, for joins.
-const todoColsT = "t.id, t.chat_id, t.num, t.text, t.status, t.due_at, t.recur, t.tz, t.created_by, t.created_at, t.updated_at, t.done_at"
+const todoColsT = "t.id, t.chat_id, t.num, t.text, t.status, t.due_at, t.recur, t.tz, t.created_by, t.created_at, t.updated_at, t.done_at, " +
+	"t.assignee_id, (SELECT u.username FROM users u WHERE u.id = t.assignee_id)"
 
 // todoDest returns the scan destinations for a todo row plus a finish func
 // that completes t from the intermediate nullable values.
 func todoDest(t *model.Todo) (dest []any, finish func()) {
 	var status string
 	var due, done sql.NullInt64
-	var recur sql.NullString
+	var recur, assigneeName sql.NullString
 	var created, updated int64
-	dest = []any{&t.ID, &t.ChatID, &t.Num, &t.Text, &status, &due, &recur, &t.TZ, &t.CreatedBy, &created, &updated, &done}
+	var assignee sql.NullInt64
+	dest = []any{&t.ID, &t.ChatID, &t.Num, &t.Text, &status, &due, &recur, &t.TZ, &t.CreatedBy, &created, &updated, &done,
+		&assignee, &assigneeName}
 	finish = func() {
 		t.Status, t.DueAt, t.Recur, t.DoneAt = model.TodoStatus(status), ptrTime(due), recur.String, ptrTime(done)
 		t.CreatedAt, t.UpdatedAt = fromUnix(created), fromUnix(updated)
+		t.AssigneeID, t.AssigneeName = assignee.Int64, assigneeName.String
 	}
 	return dest, finish
 }
@@ -61,8 +71,8 @@ func (d *DB) queryTodos(ctx context.Context, query string, args ...any) ([]model
 	return out, nil
 }
 
-// InsertTodo assigns t.ID and the next per-chat t.Num atomically. The chat
-// must exist.
+// InsertTodo assigns t.ID and the next per-chat t.Num atomically. The chat,
+// and a non-zero assignee, must exist.
 func (d *DB) InsertTodo(ctx context.Context, t *model.Todo) error {
 	return d.WithTx(ctx, func(tx store.Store) error {
 		return tx.(*DB).insertTodo(ctx, t)
@@ -87,10 +97,10 @@ func (d *DB) insertTodo(ctx context.Context, t *model.Todo) error {
 		updated = t.UpdatedAt.Unix()
 	}
 	id, err := d.d.InsertID(ctx, d.q, `
-INSERT INTO todos (chat_id, num, text, status, due_at, recur, tz, created_by, created_at, updated_at, done_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO todos (chat_id, num, text, status, due_at, recur, tz, created_by, created_at, updated_at, done_at, assignee_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ChatID, num, t.Text, string(status), nullTime(t.DueAt), nullString(t.Recur), t.TZ,
-		t.CreatedBy, created, updated, nullTime(t.DoneAt))
+		t.CreatedBy, created, updated, nullTime(t.DoneAt), nullInt(t.AssigneeID))
 	if err != nil {
 		return fmt.Errorf("sqlstore: insert todo: %w", err)
 	}
@@ -173,13 +183,14 @@ func (d *DB) CountTodos(ctx context.Context, q model.TodoQuery) (int, error) {
 	return n, nil
 }
 
-// UpdateTodo rewrites every mutable column of the todo with t.ID.
+// UpdateTodo rewrites every mutable column of the todo with t.ID, assignee_id
+// included.
 func (d *DB) UpdateTodo(ctx context.Context, t model.Todo) error {
 	res, err := d.q.ExecContext(ctx, `
-UPDATE todos SET text = ?, status = ?, due_at = ?, recur = ?, tz = ?, updated_at = ?, done_at = ?
+UPDATE todos SET text = ?, status = ?, due_at = ?, recur = ?, tz = ?, updated_at = ?, done_at = ?, assignee_id = ?
 WHERE id = ?`,
 		t.Text, string(t.Status), nullTime(t.DueAt), nullString(t.Recur), t.TZ,
-		unixOrNow(t.UpdatedAt), nullTime(t.DoneAt), t.ID)
+		unixOrNow(t.UpdatedAt), nullTime(t.DoneAt), nullInt(t.AssigneeID), t.ID)
 	return checkAffected(res, err, "update", "todo", t.ID)
 }
 
@@ -187,4 +198,10 @@ WHERE id = ?`,
 func (d *DB) ListRecurringByCreator(ctx context.Context, userID int64) ([]model.Todo, error) {
 	return d.queryTodos(ctx, "SELECT "+todoCols+
 		" FROM todos WHERE created_by = ? AND recur IS NOT NULL AND status = 'open' ORDER BY chat_id, num", userID)
+}
+
+// ListAssigned returns the open todos assigned to userID, in every chat.
+func (d *DB) ListAssigned(ctx context.Context, userID int64) ([]model.Todo, error) {
+	return d.queryTodos(ctx, "SELECT "+todoCols+
+		" FROM todos WHERE assignee_id = ? AND status = 'open' ORDER BY (due_at IS NULL), due_at, chat_id, num", userID)
 }

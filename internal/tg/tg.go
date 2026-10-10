@@ -20,6 +20,7 @@ type Message struct {
 	ChatTitle       string
 	FromID          int64
 	FromName        string
+	FromUsername    string // sender's @username without "@", as Telegram sends it; "" if none
 	FromLang        string // Telegram language_code of the sender, e.g. "fa", "en-GB"
 	Text            string // "/cmd@BotName args" is normalised to "/cmd args"
 	ReplyToID       int    // ID of the message this replies to, 0 if none
@@ -28,12 +29,13 @@ type Message struct {
 
 // Callback is an inline-keyboard button press.
 type Callback struct {
-	ID        string
-	FromID    int64
-	FromLang  string
-	ChatID    int64
-	MessageID int
-	Data      string
+	ID           string
+	FromID       int64
+	FromUsername string // presser's @username without "@"; "" if none
+	FromLang     string
+	ChatID       int64
+	MessageID    int
+	Data         string
 }
 
 // Update carries exactly one of Message or Callback.

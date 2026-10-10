@@ -56,6 +56,11 @@ type User struct {
 	Lang      i18n.Lang
 	Calendar  calendar.Kind
 	CreatedAt time.Time
+	// Username is the user's Telegram @username, lowercase and without "@";
+	// "" if unknown. It is written only by store.SetUsername (UpsertUser
+	// ignores it) and is unique among users: a name seen on a new account is
+	// cleared from the old one.
+	Username string
 }
 
 // Prefs is a user's resolved time zone and locale.
@@ -93,6 +98,14 @@ type Todo struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DoneAt    *time.Time
+	// AssigneeID is the user the item is assigned to (/add @name ...); 0 =
+	// none. Reminders of an assigned item go to the assignee's private chat
+	// (chat ID == AssigneeID); the item stays on ChatID's list.
+	AssigneeID int64
+	// AssigneeName is the assignee's current Username, filled by the store
+	// on every read; "" if there is no assignee or no known username.
+	// Read-only: InsertTodo and UpdateTodo ignore it.
+	AssigneeName string
 }
 
 // Reminder is a scheduled notification for a todo.

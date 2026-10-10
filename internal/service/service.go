@@ -86,6 +86,41 @@ type Service interface {
 	// already handled (re-delivery after a poller failover or webhook retry).
 	// Called only by handler.Handle, the single dedupe gate.
 	MarkUpdate(ctx context.Context, updateID int64) (first bool, err error)
+
+	// ---- Assignment (#58, ARCHITECTURE §11) ----
+	//
+	// The methods below are stubs until #58 part 2 implements them. That
+	// PR also widens the rule for item actions (Todo, Complete, Delete,
+	// Edit, Remind, Snooze, AckReminder): they will be allowed when the
+	// item belongs to a.ChatID OR a.UserID is its AssigneeID, and
+	// otherwise fail with ErrForeignChat. Until then only the chat check
+	// applies.
+
+	// NoteUsername records username (Telegram @username without "@"; ""
+	// = none) as userID's, creating the user with defaults if needed. It
+	// writes only when the stored name differs (compared with the database
+	// row, never an in-memory cache); a name taken over from another
+	// account is cleared from that account. It calls store.SetUsername on
+	// the pool, never inside WithTx, so concurrent nodes cannot make it
+	// fail. The handler calls it for every update from an allowlisted
+	// user, and only logs an error.
+	NoteUsername(ctx context.Context, userID int64, username string) error
+	// UserByUsername resolves a @username (case-insensitive, leading "@"
+	// optional) to a user who has talked to the bot; ErrNotFound if none.
+	// It does not check the allowlist: the handler does.
+	UserByUsername(ctx context.Context, username string) (model.User, error)
+	// AddTodoFor is AddTodo with an assignee. assigneeID 0, or the
+	// assignee's own private chat (assigneeID == a.ChatID), stores no
+	// assignee. ErrNotFound if the assignee does not exist. The returned
+	// todo has AssigneeID and AssigneeName (the assignee's current
+	// username) filled, as a store read would, so the handler can name the
+	// assignee in its confirmation without another lookup. Every reminder
+	// of the item (due, custom, snooze) is delivered to the assignee.
+	AddTodoFor(ctx context.Context, a Actor, assigneeID int64, r nlparse.Result) (model.Todo, error)
+	// ListAssigned returns the open items assigned to userID that live in
+	// other chats than userID's private chat, ordered by due time (undated
+	// last). /list in a private chat shows them under "Assigned to me".
+	ListAssigned(ctx context.Context, userID int64) ([]model.Todo, error)
 }
 
 // Config holds service defaults.

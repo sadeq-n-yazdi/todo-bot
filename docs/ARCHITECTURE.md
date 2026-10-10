@@ -62,6 +62,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
 - **model**:
   - Domain types: `User`, `Chat`, `Todo`, `Reminder`, `DueReminder`, `TodoQuery`, `DigestView`.
   - Enums: `ChatKind` (private/group), `TodoStatus` (open/done/deleted), `ReminderKind` (due/custom/snooze), `ReminderState` (pending/sent/cancelled/failed).
+  - Assignment (§11): `User.Username`, `Todo.AssigneeID` (0 = none) and the read-only `Todo.AssigneeName`.
 - **recur**:
   - `Rule{Freq, Interval, Weekdays, MonthDay, Hour, Minute, Anchor}`.
   - `Parse(s)`, `String()` and `Next(after, loc)`.
@@ -74,15 +75,17 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
   - `Parser{DefaultHour, DefaultMinute}`.
   - `Parse(input, now) (Result, error)`, which returns `Result{Text, Due, Rule, HasTime}`.
   - `ParseWhen(input, now)`, used for reminder prompts.
-- **store**: the `Store` interface, plus `ErrNotFound`. `WithTx(fn)` hands `fn` a store bound to the transaction, and that store is the only one `fn` may use.
+- **store**: the `Store` interface, plus `ErrNotFound`. `WithTx(fn)` hands `fn` a store bound to the transaction, and that store is the only one `fn` may use. Assignment (§11) adds `SetUsername`, `UserByUsername` and `ListAssigned`.
 - **tg**:
   - Types: `Message`, `Callback`, `Update`, `Button`, `OutMessage` (HTML text, inline keyboard, ForceReply).
+  - `Message.FromUsername` and `Callback.FromUsername` carry the sender's @username without "@", as Telegram sends it (§11).
   - `Sender{Send, Edit, AnswerCallback}`.
   - `APIError{Code, Desc, RetryAfter, MigrateTo}` and `IsPermanent(err)`.
 - **ui**:
   - `Action{Kind, ID, Arg}` with `Encode` (at most 64 bytes) and `Decode`.
   - `TodoList`, `ReminderMsg`, `Digest` and `FormatWhen`.
-- **service**: the `Service` interface, `Actor{UserID, ChatID, ChatKind, ChatTitle}`, and `Waker{Wake()}`.
+  - `Mention(userID, username, locale)` renders a `tg://user?id=` link labelled `@name`, or a translated label when the username is unknown (§11).
+- **service**: the `Service` interface, `Actor{UserID, ChatID, ChatKind, ChatTitle}`, and `Waker{Wake()}`. Assignment (§11) adds `NoteUsername`, `UserByUsername`, `AddTodoFor` and `ListAssigned`.
 - **scheduler**:
   - `Backend` is implemented by the service.
   - `New(b, sender, clock, log)`, plus `Run`, `Tick` and `Wake`.
@@ -98,7 +101,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
   - Users change these with `/lang` and `/calendar`.
 - **Which locale a message is shown in.**
   - Replies use the sender's locale.
-  - Reminders use the locale of the todo's creator.
+  - Reminders use the locale of the todo's creator. A reminder of an assigned item that goes to the assignee's private chat uses the assignee's locale and time zone (§11).
   - Digests use the locale of whoever set them (`chats.digest_by`).
   - This is the same rule as for time zones.
 - **Catalog.**
@@ -128,10 +131,10 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
 - **Migrations** are files named `migrations/<dialect>/NNNN_*.sql`, embedded in the binary. The runner records applied versions in a `schema_migrations` table and applies each newer file in its own transaction. It holds a migration lock while it runs, so two nodes starting at the same time don't race. Until #25 lands, SQLite still tracks versions with `PRAGMA user_version`, and #25 seeds `schema_migrations` from it.
 - **Times** are stored as INTEGER Unix seconds in UTC.
 - **DSN:** `file:<path>?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-2000)`. The pool is limited to one connection (`SetMaxOpenConns(1)`).
-- **Schema:** see `migrations/sqlite/0001_init.sql` and, from #25, `0002_multinode.sql` (§9).
-  - `users`: id, tz, lang and calendar.
+- **Schema:** see `migrations/sqlite/0001_init.sql`, `0002_multinode.sql` (§9) and `0003_assign.sql` (§11).
+  - `users`: id, tz, lang, calendar and `username` (unique where not null).
   - `chats`: kind, title, `next_num` (per-chat item numbering), and digest settings (`digest_time`, `digest_by`, `digest_next_at`).
-  - `todos`: num (per chat), text, status, `due_at`, `recur`, `tz`, `created_by`.
+  - `todos`: num (per chat), text, status, `due_at`, `recur`, `tz`, `created_by`, `assignee_id`.
   - `reminders`: `todo_id`, `chat_id`, `fire_at`, kind, state, attempts, `message_id`.
   - There is a partial index on pending reminders, and a partial unique index that allows only one pending `due` reminder per todo.
 
@@ -195,7 +198,7 @@ Startup runs `Tick` straight away, which is how missed reminders are caught up.
 |---|---|
 | `/start`, `/help` | Introduction and the command list. |
 | `/whoami` | Replies with your Telegram user ID. This is the **only** command that answers non-allowlisted users, and only in private chats. |
-| `/add <text> [when]` | Examples: `buy milk tomorrow 18:00`, `pills every day 9am`, `rent every month on 1st 10:00`, `standup weekdays 9:30`, `call mom in 2h`. In a private chat, plain text without a command also adds an item. |
+| `/add [@user] <text> [when]` | A leading `@user` assigns the item (§11). Examples: `buy milk tomorrow 18:00`, `pills every day 9am`, `rent every month on 1st 10:00`, `standup weekdays 9:30`, `call mom in 2h`. In a private chat, plain text without a command also adds an item. |
 | `/list [page]` | Ten items per page, each shown as `3. buy milk — today 18:00 🔁`. Each item has the buttons [✅ 3] [✏️] [⏰] [🗑], and the page has [‹] [›]. Moving between pages edits the message in place. |
 | `/done <n>`, `/del <n>`, `/edit <n> <text>` | Act on an item by its number in that chat. |
 | `/remind <n> <when>` / `/remind <text> <when>` | Add a reminder to an existing item, or create an item that has a reminder. |
@@ -305,6 +308,17 @@ v0.1 ships SQLite on one host, but its code paths are already multi-node. v0.2 a
   - `schema_migrations(version PK, name, applied_at)`.
 - Postgres and MySQL use BIGINT for ids and times.
 - MySQL has no partial indexes, so it emulates the partial unique index ("one pending `due` reminder per todo") with a unique stored generated column.
+- The v0.2 providers must also ship `0003_assign.sql` (§11). The column types differ from SQLite:
+  - **MySQL:**
+    - `users.username` is `VARCHAR(32) NULL`, because a `TEXT` column cannot have a UNIQUE index without a prefix length. Telegram usernames are at most 32 characters.
+    - A plain `UNIQUE (username)` is enough, because MySQL allows several NULLs in a unique index.
+    - `todos.assignee_id` is `BIGINT NULL` with the same signedness as `users.id`, so that the foreign key is accepted.
+    - The index on `(assignee_id, status)` is a plain, non-partial index.
+  - **Postgres:**
+    - `users.username` is `TEXT` (or `VARCHAR(32)`).
+    - The partial unique index works as in SQLite. A plain `UNIQUE` also works, because NULLs never clash.
+    - `todos.assignee_id` is `BIGINT REFERENCES users (id)`.
+    - The index on `(assignee_id, status)` may stay partial.
 - The SQLite DSN adds `_txlock=immediate`, so that two handles on one file wait for each other instead of failing with `SQLITE_BUSY`.
 
 ## 10. CI
@@ -312,3 +326,131 @@ v0.1 ships SQLite on one host, but its code paths are already multi-node. v0.2 a
 The `.github/workflows/ci.yml` workflow runs `go vet`, the linter, `go test -race ./...` and `make build-linux` on PRs and on `main`. A tag workflow attaches linux amd64 and arm64 binaries to the GitHub release.
 
 From v0.2, a separate `db` job runs the store conformance suite against `postgres:17` and `mysql:8.4` service containers (#32). The main job stays SQLite-only, so `make ci` needs no Docker.
+
+## 11. Assigning an item to another member (#58)
+
+`/add @wife pick up our son from school today 3pm` adds the item to the chat where it was typed, and sends its reminders to the assignee's private chat. The contracts below were frozen in "Add assignment contracts (#58, part 1)". The follow-up PRs listed at the end implement the behaviour.
+
+### Data model (`0003_assign.sql`)
+- `users.username`: the Telegram @username, **lowercase and without "@"**. NULL means unknown. A partial unique index (`WHERE username IS NOT NULL`) ensures that at most one user has a given name.
+- `todos.assignee_id`: the user the item is assigned to. NULL means none. It references `users (id)`.
+- There is an index on `todos (assignee_id, status) WHERE assignee_id IS NOT NULL`, for `ListAssigned`.
+- In Go:
+  - `model.User.Username` is `""` when unknown.
+  - `model.Todo.AssigneeID` is 0 when there is no assignee. This follows the convention of `Chat.DigestBy`.
+  - `model.Todo.AssigneeName` is the assignee's current username. The store reads it live from `users` on every todo read, including `ClaimReminders`. It is read-only, so `InsertTodo` and `UpdateTodo` ignore it.
+- `reminders.chat_id` stays the **creating chat**. The delivery target is decided when the reminder is sent (see "Scheduler" below). As a result, `MigrateChat`, `CancelPending` and the 403 fallback need no change, and reassigning an item would never have to rewrite its reminders.
+- `UpdateTodo` writes `assignee_id`. A recurring item therefore keeps its assignee when `advanceRecurring` or `SetTZ` rewrites it, and `MigrateChat` keeps it too.
+- `UpsertUser` never writes `username`. Only `SetUsername` does. This means `SetLang`, `SetTZ` and `ensureUser` cannot erase a name.
+
+### Store API
+```go
+SetUsername(ctx, userID int64, name string) error            // lowercases, drops "@"; "" clears; ErrNotFound if no user
+UserByUsername(ctx, name string) (model.User, error)         // case-insensitive; ErrNotFound if none or name == ""
+ListAssigned(ctx, userID int64) ([]model.Todo, error)        // open, every chat; (due_at IS NULL, due_at, chat_id, num)
+```
+
+### Learning usernames
+- The Bot API cannot turn `@name` into a user ID, so the bot learns names from the updates it sees. The `tgbot` adapter fills `tg.Message.FromUsername` and `tg.Callback.FromUsername` with the raw value.
+- For every update from an allowlisted user, `handler.newReq` calls `Service.NoteUsername(userID, FromUsername)`.
+  - It compares the name with the **database row**, never with an in-memory cache (§9), and calls `SetUsername` only when the name differs.
+  - An empty `FromUsername` clears the stored name, because the user removed their @username.
+  - A failure there is logged at warn level, and handling of the update carries on.
+- **Reassignment rule:** Telegram usernames can move between accounts. `SetUsername` therefore clears the name from any other user in the same transaction. The new account wins, and the old account stops resolving until it sends a message with a new name.
+
+### Syntax (handler)
+- The **handler** splits off the mention, **before** `nlparse.Parse`. The service never sees `@name` text.
+- The first token of `/add` arguments (and of plain text in a private chat, which also adds an item) is a mention when it matches `@[A-Za-z0-9_]{4,32}` and is followed by more text. The text has already been through `i18n.NormalizeDigits`.
+  - A leading mention of the bot itself (`@<BotUsername>`, case-insensitive) is dropped and treated as "no assignee".
+  - An `@word` anywhere else stays plain item text.
+- To resolve a mention, the handler calls `Service.UserByUsername(name)` and then checks `Deps.Allowed[u.ID]`.
+  - If the name is unknown or the user is not allowlisted, the handler replies in the sender's language with "@name hasn't started the bot yet. Ask them to open @<bot> and press Start." It creates nothing.
+- Otherwise the handler calls `Service.AddTodoFor(a, u.ID, result)`.
+  - `AddTodo` is the same call with assignee 0.
+  - An assignee equal to `a.ChatID` (the assignee's own private chat) stores no assignee.
+  - Assigning to yourself from a group is allowed: the reminder then goes to you privately.
+- The "added" confirmation in the creating chat names the assignee (`→ @wife`).
+
+### Visibility and authorisation
+- The item stays on the creating chat's list. List rows of assigned items show `→ @name` (`ui.Mention(t.AssigneeID, t.AssigneeName, locale)`).
+- **Mentions link by user ID.** `ui.Mention` renders `<a href="tg://user?id=ID">@name</a>`, so a ping reaches the assignee even if the @username has since moved to an account that never talked to the bot (which the bot could not have noticed). With no known username the link text is a translated label (`ui.mention.noname`).
+- `/list` in a **private chat** also shows a section headed "Assigned to me", built from `Service.ListAssigned(userID)`.
+  - That list excludes items in the user's own private chat.
+  - The section is not paged and has per-item buttons. It is **capped** (PR 3 picks the limit, about 20 items), followed by a translated "and N more" line, because a message is limited to 4096 characters and the inline keyboard has a size limit too.
+  - It is not shown in group chats.
+  - Assigned items cannot be addressed by number from the private chat (`/done 3` uses that chat's numbers). They are reached through their buttons, whose callback data carries global IDs.
+- **Authorisation rule:** an item action is allowed when `t.ChatID == a.ChatID` (the actor is in the item's chat, as today) **or** `t.AssigneeID == a.UserID`. Otherwise it fails with `ErrForeignChat`.
+  - This covers `Todo`, `Complete`, `Delete`, `Edit`, `Remind`, `Snooze` and `AckReminder`.
+  - For reminder actions (`Snooze`, `AckReminder`) the check is made on the reminder's **todo**, not on `r.ChatID`. A reminder delivered by DM has `r.ChatID` set to the creating chat, while the button press comes from the assignee's chat.
+  - Messages are always edited through the callback's own `(ChatID, MessageID)`, never through `reminders.message_id`. A DM-delivered reminder's `message_id` belongs to the assignee's chat.
+- **"Did" notice:** when the assignee completes an item from a chat other than its own, the handler sends "✅ @wife did: …" to `t.ChatID`. This applies to `Complete` from the list button, `/done`, and `AckReminder` on a reminder.
+  - The notice is in the creator's locale.
+  - The name comes from `t.AssigneeName`, falling back to the sender's display name.
+  - The handler decides this from the returned todo and the actor. No new service API is needed.
+- Digests are unchanged. They show each chat's own items, and assigned items do not appear in the assignee's digest.
+- **Accepted limitation:** removing an assignee from `TODO_ALLOWED_USERS` does not unassign their items. They keep getting DMs for items already assigned to them, and cannot act on them, because the handler ignores non-allowlisted users. The creator can delete the item, or reassign it once reassignment exists.
+
+### Scheduler routing and the 403 fallback
+- **Every reminder of an assigned item goes to the assignee** (owner's decision). This covers the `due` reminder, `/remind` custom reminders, and snoozes, even a snooze pressed in the creating chat on a fallback message. Routing depends only on `dr.Todo.AssigneeID`, never on the reminder's kind or on who created it.
+- `scheduler.Backend` is **unchanged**. For each claimed `DueReminder`:
+  1. If `dr.Todo.AssigneeID == 0`, the reminder is delivered as today.
+  2. Otherwise the scheduler renders `ui.ReminderMsg` in the **assignee's** prefs (`Prefs(AssigneeID)`) and sends it to chat `AssigneeID`, the assignee's private chat. Recurrence is still computed in `todo.TZ`.
+  3. If that send fails **permanently** (`tg.IsPermanent`: 403 blocked or never started, chat not found), the scheduler falls back **once**. It renders the reminder in the creator's prefs, prefixes it with `ui.Mention(dr.Todo.AssigneeID, dr.Todo.AssigneeName, creatorLocale)`, and sends it to `dr.ChatID`, the creating chat, through the usual `sendWithRetry` (migration and 429 handling).
+     - If the fallback succeeds, the scheduler calls `ReminderSent(id, fallbackMsgID)`.
+     - If the fallback fails, it calls `ReminderFailed` with that error's permanence.
+  4. A **transient** error on the DM goes through the normal backoff (`ReminderFailed(permanent=false)`) and does not fall back.
+- The fallback happens inside one claim, within the same budget (`end`). The scheduler keeps no "already fell back" state. Each new reminder, including the next occurrence of a recurring item, tries the DM first, so a user who starts the bot later begins to receive reminders by DM.
+
+### Multi-node
+- Usernames, assignees and the authorisation inputs live only in the database. Any node handles any update. The rule from §9 stays: coordinate only through claims, the lease, `MarkUpdate` and `TakePrompt`.
+- `SetUsername` is one transaction, and the unique index guarantees one owner per name.
+  - Called **on the pool** (outside `WithTx`), concurrent calls that give one name to different users must end with exactly one owner and **no error**. The conformance case `UsernameConcurrent` checks this, and `NoteUsername` always calls it this way.
+  - SQLite serialises them (`_txlock=immediate`).
+  - The Postgres and MySQL providers (v0.2) must retry their own transaction on a unique violation.
+  - Called **inside** `WithTx`, it joins the outer transaction, which cannot be retried. A conflict may then surface as an error, and on Postgres it aborts the whole transaction. Do not call it inside a larger transaction.
+- **Stale names under parallel delivery:** with webhooks, two updates from one user can be handled at once on different nodes, so a name change can be recorded in either order. Whatever is stored corrects itself on that user's next update, because `NoteUsername` compares with the database row each time.
+- The DM attempt and the fallback both happen under the reminder's claim. The rest of delivery stays at-least-once (§5). A crash after the fallback but before `ReminderSent` repeats the whole sequence (DM, then fallback) after the claim expires.
+- The "did" notice is sent by whichever node handled the button press. It is sent at most once per update, because `MarkUpdate` drops a redelivered update.
+
+### Follow-up PRs
+Each PR owns only the files listed. They are numbered in merge order, but PRs 2–4 can be written in parallel against fakes, because the contracts above are frozen.
+
+1. **Contracts** (#58 part 1, this PR). It changes:
+   - `migrations/sqlite/0003_assign.sql`;
+   - `internal/model`, `internal/tg/tg.go`, `internal/tg/tgbot` (`FromUsername`);
+   - `internal/store/store.go`;
+   - `internal/store/sqlstore/{users,todos}.go`, implemented;
+   - `internal/store/storetest/assign.go`, the conformance suite;
+   - `internal/store/sqlite/sqlite_test.go` (version checks);
+   - `internal/service/service.go` (interface) and the stubs in `internal/service/assign.go`;
+   - `internal/ui/mention.go` and `internal/ui/messages_mention.go`;
+   - stub methods in `internal/handler/fake_svc_12_test.go`;
+   - this section.
+2. **service: assignment.** Owns:
+   - `internal/service/assign.go` (it replaces the stubs);
+   - the authorisation helpers in `internal/service/todos.go` (`ownedTodo`, `reminderOf`, `AckReminder`, and `AddTodo` delegating to `AddTodoFor`);
+   - new tests in `internal/service/assign_test.go`.
+
+   Tests use a real SQLite database in `t.TempDir()` and `clocktest.Fake`. They cover:
+   - `NoteUsername`: writes only on change, `""` clears, a name moving to another account;
+   - `AddTodoFor`: the own-private-chat rule, an unknown assignee;
+   - `ListAssigned`: excludes the own private chat;
+   - the either-or authorisation for every action, including Snooze and Done on a reminder by the assignee;
+   - a recurring assigned item keeping its assignee across `ReminderSent`, `Complete` and `SetTZ`.
+3. **handler + ui: `/add @user`, "Assigned to me", "did" notice.** Owns:
+   - `internal/handler/cmd_todo.go` and `messages_todo.go` (mention split, resolution, the "hasn't started the bot" reply, the `/list` section, `/done` notice);
+   - `callbacks.go` (Done-button notices);
+   - in `router.go`, only `newReq` and its two callers, to call `NoteUsername`. The exported handler API is unchanged, but `router.go` is a frozen file, so this PR needs a `CONTRACT CHANGE` line for it;
+   - `internal/ui/render.go` and a new `internal/ui/messages_assign.go` (`→ @name` on rows, the assigned section);
+   - new handler test files with their own fake service;
+   - the existing fakes that embed `service.Service`, in `internal/handler/fake_svc_11_test.go` and `router_test.go` (`prefsOnly`, `prefsPanics`). They need `NoteUsername` (and, where used, `UserByUsername`) methods. Without them the call panics on the nil embedded interface, and `Handle` recovers the panic, so the tests fail confusingly instead of crashing.
+
+   It registers every string in en and fa, with prefixes `todo.assign.*` and `ui.assign.*`.
+4. **scheduler + e2e + docs: deliver to the assignee, 403 fallback.** Owns:
+   - `internal/scheduler/run.go`, with tests in a new `internal/scheduler/assign_test.go` using the existing fake backend and `tgtest.FakeSender` with `ErrFn` returning a 403;
+   - a new `internal/e2e/assign_test.go`. It uses two users and the fake clock. It checks that `/add @wife … today 3pm` in a group reaches the assignee's DM at 15:00, that the assignee's Done completes the item and posts the "did" notice to the group, that the creator still sees and completes the item, and that the 403 fallback posts once;
+   - `docs/USAGE.md`, `README.md` and `README.fa.md`.
+
+   Its e2e part needs PRs 2 and 3 merged first.
+
+The v0.2 Postgres and MySQL providers ship their own `0003_assign.sql` and must pass the new conformance cases.
