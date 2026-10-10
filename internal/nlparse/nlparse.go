@@ -151,8 +151,8 @@ func cleanText(s string) string {
 	return strings.TrimRight(strings.TrimSpace(s), " \t,;:-–—")
 }
 
-// mentionRe matches "@wife", "#home" and "@bob_1": a sigil and at least one
-// word character, so a bare "@" (the "at" connector) is not a mention.
-var mentionRe = regexp.MustCompile(`^[@#][\p{L}\p{N}_]+$`)
+// mentionRe matches "@wife", "#home" and "@bob_1": a sigil, a letter or underscore, then
+// word characters, so "@3pm", "#3" and a bare "@" (the "at" connector) are not mentions.
+var mentionRe = regexp.MustCompile(`^[@#][\p{L}_][\p{L}\p{N}_]*$`)
 
 func isMention(key string) bool { return mentionRe.MatchString(key) }
