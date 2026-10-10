@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Inline buttons and settings (#12):
+  - list buttons (✅ ✏️ ⏰ 🗑) with paging, and reminder buttons (Done, 10m, 1h, Tomorrow);
+  - reply prompts for edit and remind;
+  - `/remind`, `/tz`, `/digest`, `/lang` and `/calendar`.
 - User docs (#15):
   - README in English and Farsi, with a quick start, the full config table and the BotFather setup;
   - `docs/USAGE.md` with a reference for every command, with English and Farsi examples.
