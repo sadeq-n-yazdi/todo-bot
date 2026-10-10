@@ -93,6 +93,8 @@ type Scheduler struct {
 
 	maxSleep time.Duration
 	claimTTL time.Duration
+
+	lastHousekeep time.Time
 }
 
 // New returns a Scheduler.
@@ -111,12 +113,3 @@ func (s *Scheduler) Wake() {
 	default:
 	}
 }
-
-// Run loops until ctx is cancelled. TODO(#10)
-func (s *Scheduler) Run(ctx context.Context) error {
-	<-ctx.Done()
-	return nil
-}
-
-// Tick delivers everything due at clk.Now(). Exported for tests. TODO(#10)
-func (s *Scheduler) Tick(ctx context.Context) {}
