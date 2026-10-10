@@ -76,7 +76,8 @@ func New(ctx context.Context, token string, opt Options) (*Bot, error) {
 		// processed twice, which dedupe by update ID absorbs.
 		bot.WithUpdatesChannelCap(0),
 		bot.WithDefaultHandler(w.dispatch),
-		bot.WithErrorsHandler(func(err error) { slog.Error("telegram client", "err", err) }),
+		// Polling-loop errors bypass the methods below; redact them here too.
+		bot.WithErrorsHandler(func(err error) { slog.Error("telegram client", "err", w.mapErr(err)) }),
 		bot.WithAllowedUpdates(bot.AllowedUpdates{"message", "callback_query"}),
 	}
 	if opt.ServerURL != "" {
