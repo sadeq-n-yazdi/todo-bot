@@ -173,7 +173,8 @@ Startup runs `Tick` straight away, which is how missed reminders are caught up.
 **DST:**
 - `Next` works on local calendar dates and builds times with `time.Date(y, m, d, H, M, 0, 0, loc)`. It never adds Durations.
 - Once the slot has passed, the next result is always on a strictly later local date. This means the repeated hour when clocks go back never fires twice.
-- A time in the spring-forward gap is moved forward by Go's normalization, which is accepted.
+- A time in the spring-forward gap is moved **forward**, so 02:30 becomes 03:30. Go's `time.Date` would move it backward to the time before the jump, which `Next` corrects.
+- Every-N-days is computed with integer arithmetic over Unix days. Anchors must be in 1900..2200 and intervals in 1..36500.
 - "Every N days" counts calendar days from the anchor date.
 - A monthly rule for the 29th, 30th or 31st falls on the last day of shorter months.
 
