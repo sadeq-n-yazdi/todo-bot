@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
@@ -98,21 +99,56 @@ type Config struct {
 	PromptTTL time.Duration
 }
 
+// Default claim and prompt lifetimes used when Config leaves them zero.
+const (
+	defaultClaimTTL  = 2 * time.Minute
+	defaultPromptTTL = 10 * time.Minute
+)
+
 // Svc implements Service and scheduler.Backend.
 type Svc struct {
 	st    store.Store
 	clk   clock.Clock
 	cfg   Config
 	waker Waker
+	log   *slog.Logger
+
+	// retry is the transient-send-failure policy (backoff.go); tests replace it.
+	retry func(attempts int) (time.Duration, bool)
 }
 
 // New returns a Svc. Call SetWaker before the scheduler starts.
 func New(st store.Store, clk clock.Clock, cfg Config) *Svc {
-	return &Svc{st: st, clk: clk, cfg: cfg}
+	if cfg.DefaultTZ == nil {
+		cfg.DefaultTZ = time.UTC
+	}
+	if cfg.ClaimTTL <= 0 {
+		cfg.ClaimTTL = defaultClaimTTL
+	}
+	if cfg.PromptTTL <= 0 {
+		cfg.PromptTTL = defaultPromptTTL
+	}
+	if cfg.NodeID == "" {
+		cfg.NodeID = "node"
+	}
+	return &Svc{st: st, clk: clk, cfg: cfg, log: slog.Default(), retry: retryDelay}
 }
 
 // SetWaker sets who is notified about schedule changes.
 func (s *Svc) SetWaker(w Waker) { s.waker = w }
+
+// SetLogger sets the logger; the default is slog.Default().
+func (s *Svc) SetLogger(l *slog.Logger) {
+	if l != nil {
+		s.log = l
+	}
+}
+
+func (s *Svc) wake() {
+	if s.waker != nil {
+		s.waker.Wake()
+	}
+}
 
 var (
 	_ Service           = (*Svc)(nil)
