@@ -6,7 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-10
+
 ### Added
+- A date at the start of the text is recognised (#65): `tomorrow 9am call mom`, `امروز ساعت ۱۵ بچه را از مدرسه بردار`.
+  - A bare hour from 1 to 12 at the start (`at 5 …`, `ساعت ۲ …`) needs am/pm, a colon or a part of day, so counts like `at 9 lives` stay plain text.
+  - Part-of-day words after a date: morning, noon, afternoon, evening, night; صبح، ظهر، بعدازظهر، عصر، شب. For example, `فردا صبح نان بخر` is due tomorrow at 09:00.
 - Assign a task to another member (#58): `/add @username …`.
   - The reminder goes to the assignee's private chat, in their language and time zone, with Done and snooze buttons. If that message is refused, for example because they blocked the bot, it goes once to the chat where the task was added, with a mention.
   - The task stays in the list where it was added, showing `→ @name`. The assignee's private `/list` shows it under "Assigned to me".
@@ -101,5 +106,6 @@ All notable changes to this project are documented here. The format follows
   - Times follow wall-clock time across DST changes.
   - A time that falls in the spring-forward gap fires at the shifted time, never earlier.
 
-[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sadeq-n-yazdi/todo-bot/releases/tag/v0.1.0

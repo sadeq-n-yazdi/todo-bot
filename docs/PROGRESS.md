@@ -2,7 +2,7 @@
 
 This page is updated on `main` after every merged PR.
 
-Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
+Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
 
 | # | Wave | Issue | Status | PR |
 |---|---|---|---|---|
@@ -33,8 +33,8 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | # | Issue | Status | PR |
 |---|---|---|---|
 | 57 | nlparse: a trailing @mention breaks date parsing | ✅ merged | #60 |
-| 58 | Assign a task to another member (reminder by DM) | 🚧 parts 1–4 merged; e2e tests in progress | #61, #63, #64, #62 |
-| 65 | nlparse: recognise a date phrase at the start of the text | 🚧 in progress | |
+| 58 | Assign a task to another member (reminder by DM) | ✅ merged | #61, #63, #64, #62, #67 |
+| 65 | nlparse: recognise a date phrase at the start of the text | ✅ merged | #66 |
 
 ## Log
 - **2026-10-10**
@@ -73,3 +73,6 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
     - the Farsi docs example being reordered so its date parses;
     - the mention rule matching Telegram usernames (5–32 characters, starting with a letter).
   - Filed #65, after a review showed that a date at the start of the text is ignored. The e2e tests for #58 and #65 started.
+  - #58 e2e tests merged (#67), closing #58. They found no bugs.
+  - #65 merged (#66). The review compared old and new results over about 300 inputs and found false positives from a bare hour at the start (`at 9 lives`), which are fixed. Part-of-day words were added.
+  - v0.1.1 tagged.
