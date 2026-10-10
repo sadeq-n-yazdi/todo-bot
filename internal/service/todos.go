@@ -17,9 +17,12 @@ import (
 // be completed from the list and still count as this occurrence.
 const completeAheadWindow = 12 * time.Hour
 
-// ownedTodo loads a todo and checks that it belongs to chatID. Deleted todos
-// count as missing.
-func ownedTodo(ctx context.Context, st store.Store, chatID, todoID int64) (model.Todo, error) {
+// ownedTodo loads a todo and checks that the actor may act on it: it lives in
+// the actor's chat, or the actor is its assignee acting from their own
+// private chat (ARCHITECTURE §11). The private-chat condition stops a
+// modified client from acting on the item from an unrelated group. Deleted
+// todos count as missing.
+func ownedTodo(ctx context.Context, st store.Store, a Actor, todoID int64) (model.Todo, error) {
 	t, err := st.GetTodo(ctx, todoID)
 	if err != nil {
 		return model.Todo{}, err
@@ -27,7 +30,7 @@ func ownedTodo(ctx context.Context, st store.Store, chatID, todoID int64) (model
 	if t.Status == model.TodoDeleted {
 		return model.Todo{}, ErrNotFound
 	}
-	if t.ChatID != chatID {
+	if t.ChatID != a.ChatID && (t.AssigneeID == 0 || t.AssigneeID != a.UserID || a.ChatID != a.UserID) {
 		return model.Todo{}, ErrForeignChat
 	}
 	return t, nil
@@ -85,10 +88,15 @@ func dateOnlySentinel(r nlparse.Result, loc *time.Location, now time.Time) bool 
 	return d.Hour() == 23 && d.Minute() == 59 && ny == dy && nm == dm && nd == dd
 }
 
-// AddTodo implements Service. A future due time creates a 'due' reminder. A
+// AddTodo implements Service as AddTodoFor with no assignee.
+func (s *Svc) AddTodo(ctx context.Context, a Actor, r nlparse.Result) (model.Todo, error) {
+	return s.AddTodoFor(ctx, a, 0, r)
+}
+
+// AddTodoFor implements Service. A future due time creates a 'due' reminder. A
 // due time that is already past (a date with no time earlier than the default
 // slot, or an explicit past time) is stored as overdue without a reminder.
-func (s *Svc) AddTodo(ctx context.Context, a Actor, r nlparse.Result) (model.Todo, error) {
+func (s *Svc) AddTodoFor(ctx context.Context, a Actor, assigneeID int64, r nlparse.Result) (model.Todo, error) {
 	now := s.clk.Now().UTC()
 	var out model.Todo
 	err := s.st.WithTx(ctx, func(tx store.Store) error {
@@ -102,7 +110,18 @@ func (s *Svc) AddTodo(ctx context.Context, a Actor, r nlparse.Result) (model.Tod
 		if strings.TrimSpace(r.Text) == "" {
 			return ErrEmptyText
 		}
+		var assigneeName string
+		if assigneeID != 0 && assigneeID != a.ChatID {
+			as, err := tx.GetUser(ctx, assigneeID)
+			if err != nil {
+				return err
+			}
+			assigneeName = as.Username
+		} else {
+			assigneeID = 0 // none, or the assignee's own private chat
+		}
 		t := model.Todo{
+			AssigneeID: assigneeID, AssigneeName: assigneeName,
 			ChatID: a.ChatID, Text: strings.TrimSpace(r.Text), Status: model.TodoOpen,
 			TZ: u.TZ, CreatedBy: a.UserID, CreatedAt: now, UpdatedAt: now,
 		}
@@ -175,7 +194,7 @@ func (s *Svc) ByNum(ctx context.Context, chatID int64, num int) (model.Todo, err
 // ErrNotFound if the todo is missing or deleted and ErrForeignChat if it
 // belongs to another chat.
 func (s *Svc) Todo(ctx context.Context, a Actor, id int64) (model.Todo, error) {
-	return ownedTodo(ctx, s.st, a.ChatID, id)
+	return ownedTodo(ctx, s.st, a, id)
 }
 
 // Complete implements Service. A one-off item becomes done and loses its
@@ -187,7 +206,7 @@ func (s *Svc) Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, 
 	var out model.Todo
 	changed := false
 	err := s.st.WithTx(ctx, func(tx store.Store) error {
-		t, err := ownedTodo(ctx, tx, a.ChatID, todoID)
+		t, err := ownedTodo(ctx, tx, a, todoID)
 		if err != nil {
 			return err
 		}
@@ -243,7 +262,7 @@ func markDone(ctx context.Context, tx store.Store, t model.Todo, now time.Time) 
 func (s *Svc) Delete(ctx context.Context, a Actor, todoID int64) error {
 	now := s.clk.Now().UTC()
 	err := s.st.WithTx(ctx, func(tx store.Store) error {
-		t, err := ownedTodo(ctx, tx, a.ChatID, todoID)
+		t, err := ownedTodo(ctx, tx, a, todoID)
 		if err != nil {
 			return err
 		}
@@ -269,7 +288,7 @@ func (s *Svc) Edit(ctx context.Context, a Actor, todoID int64, text string) (mod
 	}
 	var out model.Todo
 	err := s.st.WithTx(ctx, func(tx store.Store) error {
-		t, err := ownedTodo(ctx, tx, a.ChatID, todoID)
+		t, err := ownedTodo(ctx, tx, a, todoID)
 		if err != nil {
 			return err
 		}
@@ -289,7 +308,7 @@ func (s *Svc) Remind(ctx context.Context, a Actor, todoID int64, at time.Time) (
 	if !at.After(now) {
 		return model.Reminder{}, ErrInPast
 	}
-	t, err := ownedTodo(ctx, s.st, a.ChatID, todoID)
+	t, err := ownedTodo(ctx, s.st, a, todoID)
 	if err != nil {
 		return model.Reminder{}, err
 	}
@@ -310,10 +329,9 @@ func (s *Svc) reminderOf(ctx context.Context, a Actor, reminderID int64) (model.
 	if err != nil {
 		return model.Reminder{}, model.Todo{}, err
 	}
-	if r.ChatID != a.ChatID {
-		return model.Reminder{}, model.Todo{}, ErrForeignChat
-	}
-	t, err := ownedTodo(ctx, s.st, a.ChatID, r.TodoID)
+	// The check is on the todo, not on r.ChatID: a reminder delivered by DM
+	// keeps the creating chat in r.ChatID but is pressed from the assignee's.
+	t, err := ownedTodo(ctx, s.st, a, r.TodoID)
 	if err != nil {
 		return model.Reminder{}, model.Todo{}, err
 	}
@@ -366,12 +384,9 @@ func (s *Svc) AckReminder(ctx context.Context, a Actor, reminderID int64) (model
 	if err != nil {
 		return model.Todo{}, err
 	}
-	if r.ChatID != a.ChatID {
-		return model.Todo{}, ErrForeignChat
-	}
 	var out model.Todo
 	err = s.st.WithTx(ctx, func(tx store.Store) error {
-		t, err := ownedTodo(ctx, tx, a.ChatID, r.TodoID)
+		t, err := ownedTodo(ctx, tx, a, r.TodoID)
 		if err != nil {
 			return err
 		}

@@ -33,7 +33,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | # | Issue | Status | PR |
 |---|---|---|---|
 | 57 | nlparse: a trailing @mention breaks date parsing | ✅ merged | #60 |
-| 58 | Assign a task to another member (reminder by DM) | 🚧 part 1 (contracts) in progress | |
+| 58 | Assign a task to another member (reminder by DM) | 🚧 part 1 (contracts) merged; parts 2–4 in progress | #61 |
 
 ## Log
 - **2026-10-10**
@@ -66,3 +66,4 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - v0.1.0 released and deployed to vps00. Rollback was exercised (update, rollback, update).
   - v0.1.1 started: #57 merged (#60) after review. The review caught `@3pm` being hidden as a mention, so a mention now has to start with a letter or underscore.
   - #58 part 1 (contracts) is in progress.
+  - #58 part 1 (contracts) merged (#61) after an architecture review. The review moved `ui.Mention` to link by user ID, so a username that moved to another account can't ping the wrong person. Parts 2 (service), 3 (handler and ui) and 4 (scheduler and docs) started in parallel.

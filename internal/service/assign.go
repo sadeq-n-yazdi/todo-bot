@@ -3,34 +3,58 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
-	"github.com/sadeq-n-yazdi/todo-bot/internal/nlparse"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 )
 
-// Assignment (#58). This file is owned by the "service: assignment"
-// follow-up PR (ARCHITECTURE §11); until it lands these methods are stubs
-// and nothing calls them.
+// Assignment (#58, ARCHITECTURE §11). AddTodoFor lives in todos.go next to
+// AddTodo, which delegates to it; the authorisation rule is in ownedTodo.
 
-// errAssignPending is returned by the stubs below.
-var errAssignPending = errors.New("service: assignment not implemented yet (#58)")
+// normUsername lowercases a Telegram username and drops a leading "@".
+func normUsername(name string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(name), "@"))
+}
 
-// NoteUsername implements Service.
-func (s *Svc) NoteUsername(_ context.Context, _ int64, _ string) error {
-	return errAssignPending
+// NoteUsername implements Service. It compares with the database row, never
+// a cache, so any node can serve any update. SetUsername runs on the pool,
+// not inside WithTx, so concurrent nodes cannot make it fail (§11).
+func (s *Svc) NoteUsername(ctx context.Context, userID int64, username string) error {
+	u, err := s.st.GetUser(ctx, userID)
+	if errors.Is(err, store.ErrNotFound) {
+		// Do not create the user here: that would pin a first-time user
+		// to the default language before Prefs applies their Telegram
+		// language. The next update records the name.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	name := normUsername(username)
+	if u.Username == name {
+		return nil
+	}
+	return s.st.SetUsername(ctx, userID, name)
 }
 
 // UserByUsername implements Service.
-func (s *Svc) UserByUsername(_ context.Context, _ string) (model.User, error) {
-	return model.User{}, errAssignPending
+func (s *Svc) UserByUsername(ctx context.Context, username string) (model.User, error) {
+	return s.st.UserByUsername(ctx, normUsername(username))
 }
 
-// AddTodoFor implements Service.
-func (s *Svc) AddTodoFor(_ context.Context, _ Actor, _ int64, _ nlparse.Result) (model.Todo, error) {
-	return model.Todo{}, errAssignPending
-}
-
-// ListAssigned implements Service.
-func (s *Svc) ListAssigned(_ context.Context, _ int64) ([]model.Todo, error) {
-	return nil, errAssignPending
+// ListAssigned implements Service. Items in the user's own private chat are
+// left out: they already show in the normal list.
+func (s *Svc) ListAssigned(ctx context.Context, userID int64) ([]model.Todo, error) {
+	all, err := s.st.ListAssigned(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := all[:0]
+	for _, t := range all {
+		if t.ChatID != userID {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
