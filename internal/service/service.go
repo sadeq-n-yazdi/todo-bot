@@ -69,6 +69,15 @@ type Service interface {
 	SetDigest(ctx context.Context, a Actor, hhmm string) error
 	DigestView(ctx context.Context, chatID int64, now time.Time) (model.DigestView, error)
 	MigrateChat(ctx context.Context, oldID, newID int64) error
+
+	// PutPrompt persists a force-reply prompt; ExpiresAt is set to now+PromptTTL.
+	PutPrompt(ctx context.Context, p model.Prompt) error
+	// TakePrompt consumes the prompt a reply answers; ErrNotFound if missing,
+	// expired or already taken (by this or another node).
+	TakePrompt(ctx context.Context, chatID int64, msgID int) (model.Prompt, error)
+	// MarkUpdate records a Telegram update id; first=false means it was
+	// already handled (re-delivery after a poller failover or webhook retry).
+	MarkUpdate(ctx context.Context, updateID int64) (first bool, err error)
 }
 
 // Config holds service defaults.
@@ -76,6 +85,14 @@ type Config struct {
 	DefaultTZ     *time.Location
 	DefaultHour   int // TODO_DEFAULT_TIME, used for snooze "tomorrow"
 	DefaultMinute int
+
+	// NodeID identifies this process in claim tokens (NodeID+":"+random).
+	NodeID string
+	// ClaimTTL is how long a claimed reminder/digest stays reserved for this
+	// node; 0 means 2m.
+	ClaimTTL time.Duration
+	// PromptTTL is how long a force-reply prompt stays answerable; 0 means 10m.
+	PromptTTL time.Duration
 }
 
 // Svc implements Service and scheduler.Backend.

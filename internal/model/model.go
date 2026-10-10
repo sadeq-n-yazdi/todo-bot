@@ -130,3 +130,33 @@ type DigestView struct {
 	Today       []Todo
 	NoDateCount int
 }
+
+// Lease is a named, time-limited exclusive role shared through the database
+// (e.g. "poller": the one node that calls getUpdates). Epoch increments every
+// time the holder changes, so a node can tell a fresh win from a renewal.
+type Lease struct {
+	Name   string
+	Holder string
+	Until  time.Time
+	Epoch  int64
+}
+
+// PromptKind says what a pending force-reply prompt is waiting for.
+type PromptKind string
+
+const (
+	PromptEdit   PromptKind = "edit"   // new text for TodoID
+	PromptRemind PromptKind = "remind" // a time for TodoID's reminder
+)
+
+// Prompt is a force-reply question the bot sent (MsgID in ChatID) to UserID;
+// the user's reply to that message completes it. Persisted so any node, and
+// a restarted one, can complete it.
+type Prompt struct {
+	ChatID    int64
+	MsgID     int
+	UserID    int64
+	Kind      PromptKind
+	TodoID    int64
+	ExpiresAt time.Time
+}

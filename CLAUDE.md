@@ -12,7 +12,8 @@ Read `docs/ARCHITECTURE.md` before changing anything.
 2. **The contracts are frozen.** These are:
    - the exported types and signatures in `internal/{model,store,tg,ui,service,scheduler,recur,nlparse,config,i18n,calendar}`
    - `internal/handler/router.go`
-   - `migrations/0001_init.sql`
+   - every merged file in `migrations/<dialect>/`. Never edit a migration once it has merged; add a new `NNNN_*.sql` instead, with the same version in every dialect.
+   - Multi-node: see `docs/ARCHITECTURE.md` §9. Several processes may share one database. Coordinate only through store claims, the lease, `MarkUpdate` and `TakePrompt`, and never through in-memory state.
 
    Change them only when unavoidable. If you do, add a section headed `CONTRACT CHANGE` to the PR description explaining why.
 3. **Do not run `go get`, and do not edit `go.mod` or `go.sum`.** The dependencies are pinned. If you need a new module, ask in the PR.

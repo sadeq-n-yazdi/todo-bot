@@ -28,8 +28,12 @@ internal/i18n                 Lang, Locale{Lang,Cal}, catalog (Register/T), digi
 internal/model                plain domain types (no deps)
 internal/recur                recurrence Rule: Parse/String/Next (DST-correct)
 internal/nlparse              "/add" text -> item text + due + rule
-internal/store                Store interface, ErrNotFound
-internal/store/sqlite         implementation, embedded migrations, backup
+internal/store                Store interface, ErrNotFound, provider registry (Register/Open by URL scheme), Backuper/Migrator
+internal/store/sqlstore       shared SQL for all providers + migration runner, behind a small Dialect (#25)
+internal/store/sqlite         SQLite Dialect + Open + Backup; registers "sqlite"
+internal/store/storetest      conformance suite every provider must pass (#26)
+internal/store/{postgres,mysql}  v0.2 providers
+internal/lease                leader-lease loop (which node polls Telegram) (#27)
 internal/service              business logic; implements scheduler.Backend
 internal/scheduler            single-goroutine loop
 internal/tg                   Sender, Update, OutMessage (no Telegram library imported)
@@ -37,7 +41,7 @@ internal/tg/tgbot             adapter over go-telegram/bot
 internal/tg/tgtest            FakeSender
 internal/ui                   formatting, keyboards, callback-data codec
 internal/handler              router, auth, commands, callbacks, reply-prompt flows
-migrations/0001_init.sql      embedded via //go:embed
+migrations/<dialect>/NNNN_*.sql  embedded via //go:embed; same versions in every dialect
 deploy/                       todo-bot.service, todo-bot.sysusers, env.example
 scripts/deploy.sh
 assets/                       icon.svg + PNG exports
@@ -121,7 +125,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
 
 ## 4. Storage
 
-- **Migrations** are files named `migrations/NNNN_*.sql`, embedded in the binary. The runner reads `PRAGMA user_version` and applies each newer file in its own transaction.
+- **Migrations** are files named `migrations/<dialect>/NNNN_*.sql`, embedded in the binary. The runner records applied versions in a `schema_migrations` table and applies each newer file in its own transaction. It holds a migration lock while it runs, so two nodes starting at the same time don't race. Until #25 lands, SQLite still tracks versions with `PRAGMA user_version`, and #25 seeds `schema_migrations` from it.
 - **Times** are stored as INTEGER Unix seconds in UTC.
 - **DSN:** `file:<path>?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-2000)`. The pool is limited to one connection (`SetMaxOpenConns(1)`).
 - **Schema:** see `migrations/0001_init.sql`.
@@ -223,8 +227,15 @@ TELEGRAM_TOKEN=123:abc                 # required
 TODO_ALLOWED_USERS=11111,22222         # required, comma-separated int64
 TODO_DEFAULT_TZ=Europe/Berlin          # default UTC; validated with time.LoadLocation
 TODO_DEFAULT_TIME=09:00                # used for a date with no time, and for snooze "tomorrow"
-TODO_DB_PATH=/var/lib/todo-bot/todo.db # default $STATE_DIRECTORY/todo.db, else ./todo.db
+TODO_DB_URL=sqlite:///var/lib/todo-bot/todo.db  # default sqlite://$STATE_DIRECTORY/todo.db, else sqlite:todo.db
+                                       # (TODO_DB_PATH=<file> still accepted, deprecated)
+                                       # v0.2: postgres://u:p@h/db?sslmode=verify-full | mysql://u:p@h/db?tls=true
 TODO_LOG_LEVEL=info                    # debug|info|warn|error; slog text to stderr
+TODO_NODE_ID=vps00                     # default hostname; names this node in leases and claims
+TODO_LEASE_TTL=30s                     # poller lease
+TODO_CLAIM_TTL=2m                      # how long a node reserves a due reminder
+TODO_SCHED_MAX_SLEEP=5m                # use ~30s with several nodes
+TODO_MODE=polling                      # webhook from v0.2, with TODO_HTTP_ADDR, TODO_WEBHOOK_URL, TODO_WEBHOOK_SECRET
 ```
 
 If `GOMEMLIMIT` is unset, `main` sets `debug.SetMemoryLimit(40 << 20)`.
@@ -245,6 +256,58 @@ See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 **Use a separate dev bot token locally.** Two processes polling with the same token get 409 Conflict.
 
-## 9. CI
+## 9. Pluggable storage and multi-node
+
+v0.1 ships SQLite on one host, but its code paths are already multi-node. v0.2 adds Postgres, MySQL, webhook mode, and running the bot on vps00 and vps03 together. The work is tracked in issues #24–#36.
+
+### Providers
+- `store.Open(ctx, url)` picks a provider by URL scheme. Providers call `store.Register` in `init()`, and `main` blank-imports them.
+- All shared SQL lives in `sqlstore`. Each provider supplies a `Dialect` for the few places SQL differs between databases:
+  - placeholder rebinding (`?` becomes `$n` for Postgres);
+  - insert-id;
+  - upsert and insert-ignore syntax;
+  - allocating a todo number;
+  - the claim statements;
+  - the migration lock;
+  - detecting unique-key violations.
+- `storetest.Run` is the conformance suite. Every provider must pass it, including its concurrency tests, which open several independent handles to one database.
+- Optional capabilities are checked with type assertions:
+  - `store.Backuper` is SQLite only. Other databases use `pg_dump` or `mysqldump`.
+  - `store.Migrator`.
+
+### Coordination primitives (all in the database)
+
+| Problem | Mechanism |
+|---|---|
+| Two schedulers sending the same reminder | `ClaimReminders` / `ClaimDigests` stamp `claim_token` and `claim_until` (2m) in one statement; claimed rows are invisible to other nodes until the claim expires. `NextWakeup` skips rows other nodes have claimed until their claim expires |
+| A recurring todo advanced twice | `MarkReminderSent` is a conditional pending→sent update; only the winner advances the rule |
+| Two nodes calling `getUpdates` (409) | lease `"poller"`, renewed every TTL/3 (TTL 30s). It hands out an epoch; a new epoch means a fresh win. A node with no successful renewal for TTL/2 fences itself |
+| An update delivered twice (failover, webhook retry) | `MarkUpdate(update_id)` runs before handling, so each update is handled at most once. Ids are purged after 48h |
+| Prompts lost on restart or answered on another node | `prompts` table; `TakePrompt` deletes the row, so exactly one caller wins |
+
+- **Every node runs the scheduler.** Claims make that safe.
+- **Delivery stays at-least-once.** A reminder is sent twice only if a node dies after sending it but before marking it sent, and its claim then expires.
+- **Lease and claim expiry are compared on application clocks,** not database time. That keeps tests on the fake clock, but every node needs NTP (chrony) with skew of 1s or less.
+
+### Modes
+- **Polling** (v0.1, the default): only the lease holder polls. When a node wins the lease it calls `DeleteWebhook`, then `SetCommands` (en and fa), then runs `Poller().Run`. On SIGTERM it stops polling and calls `ReleaseLease`.
+- **Webhook** (v0.2): every node serves `POST /tg` and `/healthz` behind Caddy with TLS. We use our own `http.Handler`, not the library's (go-telegram/bot v1.27.0 returns 200 even on a bad secret). It checks the secret in constant time, handles the update synchronously, and returns 500 only when `MarkUpdate` fails, so Telegram retries. The `"setup"` lease calls `SetWebhook` and `SetCommands` once per epoch.
+- Running some nodes in one mode and others in the other is not supported.
+
+### Schema additions (`0002_multinode.sql`)
+- `reminders` gets `claim_token` and `claim_until`.
+- `chats` gets `digest_claim_token` and `digest_claim_until`.
+- New tables:
+  - `leases(name PK, holder, until, epoch)`;
+  - `prompts(chat_id, msg_id PK, user_id, kind, todo_id, expires_at)`;
+  - `processed_updates(update_id PK, seen_at)`;
+  - `schema_migrations(version PK, name, applied_at)`.
+- Postgres and MySQL use BIGINT for ids and times.
+- MySQL has no partial indexes, so it emulates the partial unique index ("one pending `due` reminder per todo") with a unique stored generated column.
+- The SQLite DSN adds `_txlock=immediate`, so that two handles on one file wait for each other instead of failing with `SQLITE_BUSY`.
+
+## 10. CI
 
 The `.github/workflows/ci.yml` workflow runs `go vet`, the linter, `go test -race ./...` and `make build-linux` on PRs and on `main`. A tag workflow attaches linux amd64 and arm64 binaries to the GitHub release.
+
+From v0.2, a separate `db` job runs the store conformance suite against `postgres:17` and `mysql:8.4` service containers (#32). The main job stays SQLite-only, so `make ci` needs no Docker.

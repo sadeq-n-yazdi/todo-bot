@@ -38,6 +38,7 @@ type Callback struct {
 
 // Update carries exactly one of Message or Callback.
 type Update struct {
+	ID       int64 // Telegram update_id; 0 if unknown (tests). Used for dedupe.
 	Message  *Message
 	Callback *Callback
 }
@@ -93,4 +94,10 @@ func containsAny(s string, subs ...string) bool {
 		}
 	}
 	return false
+}
+
+// Source delivers updates to h until ctx is done (long polling in v0.1;
+// webhook in v0.2). h is called synchronously, one update at a time.
+type Source interface {
+	Run(ctx context.Context, h func(context.Context, Update)) error
 }

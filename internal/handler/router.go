@@ -33,7 +33,6 @@ type Deps struct {
 // Handler dispatches updates. Handle is safe for concurrent use.
 type Handler struct {
 	Deps
-	prompts *prompts // pending ForceReply prompts (flows.go)
 }
 
 // New returns a Handler.
@@ -41,7 +40,7 @@ func New(d Deps) *Handler {
 	if d.Log == nil {
 		d.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Handler{Deps: d, prompts: newPrompts()}
+	return &Handler{Deps: d}
 }
 
 // req is the context every command, callback and flow receives.

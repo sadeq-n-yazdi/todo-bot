@@ -9,13 +9,11 @@ import (
 // Owned by #12: ForceReply prompt flows (edit text, set reminder time) and
 // group -> supergroup migration.
 
-// prompts tracks pending ForceReply prompts keyed by (chatID, promptMsgID),
-// with a TTL. Must be safe for concurrent use.
-type prompts struct{}
+// Pending prompts are persisted via Svc.PutPrompt / Svc.TakePrompt so that
+// any node, or a restarted process, can complete them.
 
-func newPrompts() *prompts { return &prompts{} }
-
-// onReply handles a reply to one of our prompts. handled=false means the
+// onReply handles a reply to one of our prompts (Svc.TakePrompt on
+// m.ChatID, m.ReplyToID). handled=false means the
 // message was not a reply to a pending prompt and should be processed
 // normally.
 func (h *Handler) onReply(ctx context.Context, m *tg.Message, r req) (handled bool, err error) {

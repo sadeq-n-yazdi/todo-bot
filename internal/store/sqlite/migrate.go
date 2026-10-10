@@ -24,7 +24,11 @@ func (d *DB) Migrate(ctx context.Context) error {
 	if d.inTx {
 		return errors.New("sqlite: migrate inside a transaction")
 	}
-	list, err := listMigrations(migrations.FS)
+	mfs, err := migrations.For("sqlite")
+	if err != nil {
+		return err
+	}
+	list, err := listMigrations(mfs)
 	if err != nil {
 		return err
 	}
@@ -36,7 +40,7 @@ func (d *DB) Migrate(ctx context.Context) error {
 		if m.version <= current {
 			continue
 		}
-		body, err := fs.ReadFile(migrations.FS, m.name)
+		body, err := fs.ReadFile(mfs, m.name)
 		if err != nil {
 			return fmt.Errorf("sqlite: read %s: %w", m.name, err)
 		}
