@@ -261,7 +261,7 @@ func TestListShowsArrowAndAssignedSection(t *testing.T) {
 	}
 	e.msg(assignee, assignee, "/list")
 	last, _ = e.fs.Last()
-	if !strings.Contains(last.Msg.Text, "محول\u200cشده به من") || !strings.Contains(last.Msg.Text, "pick up son") {
+	if !strings.Contains(last.Msg.Text, "سپرده\u200cشده به من") || !strings.Contains(last.Msg.Text, "pick up son") {
 		t.Errorf("assignee list = %q", last.Msg.Text)
 	}
 }

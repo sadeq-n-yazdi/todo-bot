@@ -9,7 +9,7 @@ func init() {
 		"ui.assign.more":  "…and %s more",
 	})
 	i18n.Register(i18n.Fa, map[string]string{
-		"ui.assign.title": "محول\u200cشده به من",
+		"ui.assign.title": "سپرده\u200cشده به من",
 		"ui.assign.more":  "…و %s مورد دیگر",
 	})
 }
