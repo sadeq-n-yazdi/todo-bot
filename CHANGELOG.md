@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- User docs (#15):
+  - README in English and Farsi, with a quick start, the full config table and the BotFather setup;
+  - `docs/USAGE.md` with a reference for every command, with English and Farsi examples.
 - `todo-bot` binary wiring (#13):
   - subcommands: `run`, `migrate`, `backup` and `version`;
   - leader-gated polling, with the bot commands set in English and Farsi;
