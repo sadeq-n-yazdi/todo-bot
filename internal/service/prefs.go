@@ -74,12 +74,14 @@ func (s *Svc) SetLang(ctx context.Context, userID int64, lang i18n.Lang) error {
 	if !lang.Valid() {
 		return ErrBadLang
 	}
-	u, err := s.ensureUser(ctx, s.st, userID, "")
-	if err != nil {
-		return err
-	}
-	u.Lang = lang
-	return s.st.UpsertUser(ctx, u)
+	return s.st.WithTx(ctx, func(tx store.Store) error {
+		u, err := s.ensureUser(ctx, tx, userID, "")
+		if err != nil {
+			return err
+		}
+		u.Lang = lang
+		return tx.UpsertUser(ctx, u)
+	})
 }
 
 // SetCalendar implements Service.
@@ -87,12 +89,14 @@ func (s *Svc) SetCalendar(ctx context.Context, userID int64, cal calendar.Kind) 
 	if !cal.Valid() {
 		return ErrBadCalendar
 	}
-	u, err := s.ensureUser(ctx, s.st, userID, "")
-	if err != nil {
-		return err
-	}
-	u.Calendar = cal
-	return s.st.UpsertUser(ctx, u)
+	return s.st.WithTx(ctx, func(tx store.Store) error {
+		u, err := s.ensureUser(ctx, tx, userID, "")
+		if err != nil {
+			return err
+		}
+		u.Calendar = cal
+		return tx.UpsertUser(ctx, u)
+	})
 }
 
 // SetTZ implements Service. Recurring todos created by the user are

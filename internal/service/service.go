@@ -37,6 +37,7 @@ var (
 	ErrBadCalendar = errors.New("unsupported calendar")
 	ErrBadTime     = errors.New("invalid time, use HH:MM")
 	ErrInPast      = errors.New("time is in the past")
+	ErrEmptyText   = errors.New("empty text")
 )
 
 // Service is the API used by handlers.

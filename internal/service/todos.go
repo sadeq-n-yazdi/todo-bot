@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -76,12 +75,14 @@ func (s *Svc) advanceRecurring(ctx context.Context, tx store.Store, t *model.Tod
 // of day": for today with the default slot already passed it returns
 // 23:59 and HasTime=false (see package nlparse). Such an item is overdue
 // from the start and gets no reminder.
-func dateOnlySentinel(r nlparse.Result, loc *time.Location) bool {
+func dateOnlySentinel(r nlparse.Result, loc *time.Location, now time.Time) bool {
 	if r.HasTime || r.Due == nil {
 		return false
 	}
 	d := r.Due.In(loc)
-	return d.Hour() == 23 && d.Minute() == 59
+	ny, nm, nd := now.In(loc).Date()
+	dy, dm, dd := d.Date()
+	return d.Hour() == 23 && d.Minute() == 59 && ny == dy && nm == dm && nd == dd
 }
 
 // AddTodo implements Service. A future due time creates a 'due' reminder. A
@@ -97,6 +98,9 @@ func (s *Svc) AddTodo(ctx context.Context, a Actor, r nlparse.Result) (model.Tod
 		}
 		if err := s.ensureChat(ctx, tx, a, now); err != nil {
 			return err
+		}
+		if strings.TrimSpace(r.Text) == "" {
+			return ErrEmptyText
 		}
 		t := model.Todo{
 			ChatID: a.ChatID, Text: strings.TrimSpace(r.Text), Status: model.TodoOpen,
@@ -120,7 +124,7 @@ func (s *Svc) AddTodo(ctx context.Context, a Actor, r nlparse.Result) (model.Tod
 		if err := tx.InsertTodo(ctx, &t); err != nil {
 			return err
 		}
-		if t.DueAt != nil && t.DueAt.After(now) && (r.Rule != nil || !dateOnlySentinel(r, s.locOrDefault(u.TZ))) {
+		if t.DueAt != nil && t.DueAt.After(now) && (r.Rule != nil || !dateOnlySentinel(r, s.locOrDefault(u.TZ), now)) {
 			if err := tx.InsertReminder(ctx, newReminder(t, *t.DueAt, model.ReminderDue, now)); err != nil {
 				return err
 			}
@@ -204,6 +208,9 @@ func (s *Svc) Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, 
 				return err
 			}
 			if ok {
+				if err := tx.CancelPending(ctx, t.ID, model.ReminderSnooze); err != nil {
+					return err
+				}
 				out, changed = t, true
 				return nil
 			}
@@ -253,21 +260,27 @@ func (s *Svc) Delete(ctx context.Context, a Actor, todoID int64) error {
 	return nil
 }
 
-// Edit implements Service.
+// Edit implements Service. The read and the write share one transaction so a
+// concurrent Complete, Delete, SetTZ or recurrence advance is not undone.
 func (s *Svc) Edit(ctx context.Context, a Actor, todoID int64, text string) (model.Todo, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return model.Todo{}, errors.New("service: empty text")
+		return model.Todo{}, ErrEmptyText
 	}
-	t, err := ownedTodo(ctx, s.st, a.ChatID, todoID)
+	var out model.Todo
+	err := s.st.WithTx(ctx, func(tx store.Store) error {
+		t, err := ownedTodo(ctx, tx, a.ChatID, todoID)
+		if err != nil {
+			return err
+		}
+		t.Text, t.UpdatedAt = text, s.clk.Now().UTC()
+		out = t
+		return tx.UpdateTodo(ctx, t)
+	})
 	if err != nil {
 		return model.Todo{}, err
 	}
-	t.Text, t.UpdatedAt = text, s.clk.Now().UTC()
-	if err := s.st.UpdateTodo(ctx, t); err != nil {
-		return model.Todo{}, err
-	}
-	return t, nil
+	return out, nil
 }
 
 // Remind implements Service.

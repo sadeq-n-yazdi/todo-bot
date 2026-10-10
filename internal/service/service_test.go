@@ -303,6 +303,7 @@ func TestCompleteRecurringTwelveHourRule(t *testing.T) {
 		t.Fatalf("near reminders = %+v", rs)
 	}
 
+	e.clk.Set(t0)
 	// due in 30h: outside the window -> unchanged, still open
 	far := e.add(alice, "far", dayPtr(2026, 10, 11, 18), mustRule(t, "daily 18:00"))
 	got, err = e.svc.Complete(ctx, alice, far.ID)

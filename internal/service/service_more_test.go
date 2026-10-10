@@ -490,7 +490,8 @@ func TestDigestClaimSurvivesMigrateChat(t *testing.T) {
 		t.Fatalf("digest next = %v, want %v", got.DigestNextAt, want)
 	}
 	// migrating again from the other node is harmless
-	e.must(e.svc.MigrateChat(ctx, -100, -1001234))
+	_, b := e.node("B")
+	e.must(b.MigrateChat(ctx, -100, -1001234))
 }
 
 func TestDigestDoneWithLostClaimIsNoop(t *testing.T) {
@@ -543,7 +544,12 @@ func TestPromptsUpdatesAndHousekeep(t *testing.T) {
 	if !first || again {
 		t.Fatalf("first=%v again=%v", first, again)
 	}
+	// Housekeep purges update ids older than 48h, so 100 is new again.
+	e.clk.Advance(49 * time.Hour)
 	e.must(e.svc.Housekeep(ctx, e.clk.Now()))
+	if first, err := b.MarkUpdate(ctx, 100); err != nil || !first {
+		t.Fatalf("after Housekeep first=%v err=%v", first, err)
+	}
 }
 
 func TestConfigPromptTTL(t *testing.T) {
