@@ -20,7 +20,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 8 | 2 | Service layer | ⏳ todo | |
 | 9 | 2 | Deployment tooling | ✅ merged | #37 |
 | 17 | 2 | App and bot icon | ✅ merged | #23 |
-| 10 | 3 | Scheduler | 🔍 in review | #41 |
+| 10 | 3 | Scheduler | ✅ merged | #41 |
 | 11 | 3 | Handlers: todo commands | ✅ merged | #43 |
 | 12 | 3 | Handlers: callbacks, prompts, settings | 🔍 in review | #44 |
 | 13 | 4 | Main wiring | ⏳ todo | |

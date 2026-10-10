@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Reminder and digest scheduler (#10). It is safe to run on several nodes:
+  - it claims due reminders before sending them;
+  - it waits out Telegram rate limits only while its claim is still valid;
+  - it records sends during shutdown and isolates crashes to one reminder;
+  - it retries a digest that fails within the hour.
 - Todo commands in English and Farsi (#11):
   - /start, /help, /add (and plain text in a private chat), /list, /done, /del, /edit and /today;
   - item text is capped at 1000 characters;
