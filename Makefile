@@ -9,7 +9,7 @@ LDFLAGS          := -s -w -X main.version=$(VERSION)
 
 all: ci
 
-ci: vet lint test build-linux
+ci: vet lint test check-deploy build-linux
 
 vet:
 	go vet ./...

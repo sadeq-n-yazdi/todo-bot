@@ -43,6 +43,11 @@ var (
 	startBackoffMax = 30 * time.Second
 )
 
+// maxStartWait caps any single wait before a getMe retry, including a
+// Telegram RetryAfter. A longer flood wait would outlast the deploy health
+// check; the service retries again after the cap. Tests shorten it.
+var maxStartWait = 5 * time.Minute
+
 // openStore opens the database; tests wrap it.
 var openStore = store.Open
 
@@ -334,6 +339,7 @@ func connectTelegram(ctx context.Context, token string, log *slog.Logger) (*tgbo
 		if !ok {
 			return nil, fmt.Errorf("telegram: %w", err)
 		}
+		wait = min(wait, maxStartWait)
 		log.Warn("telegram unavailable, retrying", "in", wait, "err", err)
 		select {
 		case <-ctx.Done():
@@ -348,7 +354,8 @@ func connectTelegram(ctx context.Context, token string, log *slog.Logger) (*tgbo
 // long to wait. Only network and transport errors (*url.Error implements
 // net.Error), 5xx, 429 and response-body decode errors are retried. A proxy
 // or gateway that answers 502 with an HTML page gives a decode error. On a
-// 429 the wait is at least the RetryAfter that Telegram sent.
+// 429 the wait is at least the RetryAfter that Telegram sent; the caller
+// caps it at maxStartWait.
 func retryWait(err error, delay time.Duration) (time.Duration, bool) {
 	var ae *tg.APIError
 	if errors.As(err, &ae) {

@@ -21,5 +21,6 @@ jobs:
       - run: make vet
       - run: make lint
       - run: make test
+      - run: make check-deploy
       - run: make build-linux ARCH=amd64
       - run: make build-linux ARCH=arm64

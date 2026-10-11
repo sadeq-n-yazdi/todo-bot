@@ -135,13 +135,13 @@ cmd_update() {
 	bin="$(build "$arch")"
 	scp "${scp_opts[@]}" "$bin" "$HOST:$BIN.new"
 	# Quoted heredoc; arguments are binary, state dir, service name.
-	remote "bash -s" "$BIN" "$STATE_DIR" "$APP" <<'REMOTE'
+	remote "bash -s" "$BIN" "$STATE_DIR" "$APP" /etc/todo-bot/env <<'REMOTE'
 set -euo pipefail
 bin=$1
 state=$2
 app=$3
+envfile=$4
 backups=$state/backups
-envfile=/etc/todo-bot/env
 chmod 0755 "$bin.new"
 if [ -x "$bin" ]; then
 	# Is the running service healthy? Only then is its binary worth keeping.
@@ -172,9 +172,20 @@ if [ -x "$bin" ]; then
 		# the sqlite file the same way the bot does and test it as the service
 		# user. A non-sqlite URL, or a path that is not a plain absolute path,
 		# is not checked: the backup command decides.
+		# The bot rejects a sqlite URL with a query, a fragment or credentials
+		# (internal/store/sqlite urlPath), so such a URL has no database path.
+		# Quotes are refused too: the bot would read them as part of the path.
 		dbfile=
 		if [ -n "$db_url" ]; then
 			case $db_url in
+			sqlite:*[?#]*)
+				echo "deploy: TODO_DB_URL in $envfile has a query or fragment; the bot rejects it and deploy.sh does not support it" >&2
+				exit 1
+				;;
+			sqlite:*[\"\']* | [\"\']*sqlite:*)
+				echo "deploy: deploy.sh does not support quotes in TODO_DB_URL in $envfile; remove them" >&2
+				exit 1
+				;;
 			sqlite:///*) dbfile=${db_url#sqlite://} ;;
 			esac
 		elif [ -n "$db_path" ]; then
@@ -189,15 +200,28 @@ if [ -x "$bin" ]; then
 		case $dbfile in
 		*%*) dbfile= ;;
 		esac
-		if [ -n "$dbfile" ] && ! runuser -u "$app" -- test -e "$dbfile"; then
-			echo "deploy: no database yet ($dbfile); nothing to back up"
-		else
+		# Exit 10 means "the file is missing and its directory is searchable"
+		# (an unsearchable directory gives 11, because test -e is false on EACCES). Any other failure, including
+		# runuser itself failing (it exits 1 for a missing user, as test does
+		# for a missing file), must stop the deploy: do not skip the backup.
+		exists=0
+		if [ -n "$dbfile" ]; then
+			runuser -u "$app" -- sh -c 'if [ -e "$1" ]; then exit 0; fi; d=${1%/*}; d=${d:-/}; if [ -d "$d" ] && [ -x "$d" ]; then exit 10; fi; exit 11' sh "$dbfile" || exists=$?
+		fi
+		case $exists in
+		0)
 			stamp=$(date -u +%Y%m%dT%H%M%SZ)
 			runuser -u "$app" -- mkdir -p -m 0750 "$backups"
 			runuser -u "$app" -- env "${envargs[@]}" "$bin" backup "$backups/todo-$stamp.db"
 			# Keep the newest 10 backups.
 			runuser -u "$app" -- sh -c 'ls -1t "$1"/todo-*.db | tail -n +11 | xargs -r rm -f --' sh "$backups"
-		fi
+			;;
+		10) echo "deploy: no database yet ($dbfile); nothing to back up" ;;
+		*)
+			echo "deploy: cannot check for the database $dbfile as user $app (status $exists); refusing to deploy without a backup" >&2
+			exit 1
+			;;
+		esac
 	else
 		install -d -o "$app" -g "$app" -m 0750 "$state"
 		echo "deploy: $state did not exist; nothing to back up"
