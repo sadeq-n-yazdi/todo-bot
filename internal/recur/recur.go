@@ -7,11 +7,13 @@
 //	weekly mon,wed 08:00        (weekdays = "weekly mon,tue,wed,thu,fri 09:30")
 //	monthly 31 10:00            (clamped to the last day of shorter months)
 //	monthly 1 10:00 jalali      (1st of every Jalali month)
+//	monthly fri#last 16:00      (last Friday of every month)
+//	monthly mon#2 09:00 jalali  (2nd Monday of every Jalali month)
 //	every 3d 2026-10-10 09:00   (every N calendar days from the Gregorian anchor date)
 //	yearly 02-29 09:00          (29 Feb; 28 Feb in common years)
 //	yearly 12-30 09:00 jalali   (30 Esfand; 29 Esfand in common years)
 //
-// Only Monthly and Yearly depend on the calendar: daily, weekly and every-N
+// Only Monthly, MonthlyWeekday and Yearly depend on the calendar: daily, weekly and every-N
 // rules are calendar-independent (a day is a day), so their Cal is always
 // Gregorian.
 package recur
@@ -37,16 +39,23 @@ const (
 	// Yearly repeats on Month/MonthDay of Cal every year (#68). A day the
 	// month lacks in a given year (29 Feb, 30 Esfand) falls on its last day.
 	Yearly Freq = "yearly"
+	// MonthlyWeekday repeats on the Nth (1..4) or the last weekday of each
+	// month of Cal (#85).
+	MonthlyWeekday Freq = "monthlyWeekday"
 )
+
+// Last is the Rule.Nth of "the last <weekday> of the month".
+const Last = -1
 
 // Rule describes when a recurring todo repeats.
 type Rule struct {
 	Freq     Freq
 	Interval int            // EveryN only: number of days, >= 1
-	Weekdays []time.Weekday // Weekly only: sorted, unique, non-empty
+	Weekdays []time.Weekday // Weekly: sorted, unique, non-empty; MonthlyWeekday: exactly one
+	Nth      int            // MonthlyWeekday only: 1..4, or Last
 	MonthDay int            // Monthly and Yearly: 1..31, in Cal's months
 	Month    int            // Yearly only: 1..12, in Cal
-	Cal      calendar.Kind  // Monthly and Yearly: Gregorian (default) or Jalali
+	Cal      calendar.Kind  // Monthly, MonthlyWeekday and Yearly: Gregorian (default) or Jalali
 	Hour     int            // 0..23, local time
 	Minute   int            // 0..59
 	Anchor   calendar.Date  // EveryN only: first occurrence, Gregorian date
@@ -107,11 +116,19 @@ func Parse(s string) (Rule, error) {
 			return Rule{}, invalid("want \"monthly D HH:MM [jalali]\", got %q", s)
 		}
 		r.Freq = Monthly
+		if strings.Contains(f[1], "#") {
+			r.Freq = MonthlyWeekday
+			if r.Weekdays, r.Nth, err = parseNthWeekday(f[1]); err != nil {
+				return Rule{}, err
+			}
+		}
 		d, e := strconv.Atoi(f[1])
-		if e != nil || d < 1 || d > 31 {
+		if r.Freq == Monthly && (e != nil || d < 1 || d > 31) {
 			return Rule{}, invalid("month day %q not in 1..31", f[1])
 		}
-		r.MonthDay = d
+		if r.Freq == Monthly {
+			r.MonthDay = d
+		}
 		if len(f) == 4 {
 			k := calendar.Kind(f[3])
 			if !k.Valid() || k == calendar.Gregorian {
@@ -199,6 +216,25 @@ func maxMonthLength(cal calendar.Kind, m int) int {
 	return n
 }
 
+// parseNthWeekday parses "fri#2" or "fri#last" of a MonthlyWeekday rule.
+func parseNthWeekday(s string) ([]time.Weekday, int, error) {
+	name, nth, _ := strings.Cut(s, "#")
+	if strings.Contains(name, ",") {
+		return nil, 0, invalid("want one weekday in %q", s)
+	}
+	wds, err := parseWeekdays(name)
+	if err != nil {
+		return nil, 0, err
+	}
+	if nth == "last" {
+		return wds, Last, nil
+	}
+	if len(nth) != 1 || nth[0] < '1' || nth[0] > '4' {
+		return nil, 0, invalid("week %q not in 1..4 or last", nth)
+	}
+	return wds, int(nth[0] - '0'), nil
+}
+
 func parseWeekdays(s string) ([]time.Weekday, error) {
 	var set [7]bool
 	for _, tok := range strings.Split(s, ",") {
@@ -235,6 +271,19 @@ func (r Rule) String() string {
 		return "weekly " + strings.Join(names, ",") + " " + clock
 	case Monthly:
 		s := fmt.Sprintf("monthly %d %s", r.MonthDay, clock)
+		if r.Cal == calendar.Jalali {
+			s += " jalali"
+		}
+		return s
+	case MonthlyWeekday:
+		if len(r.Weekdays) != 1 {
+			return ""
+		}
+		nth := strconv.Itoa(r.Nth)
+		if r.Nth == Last {
+			nth = "last"
+		}
+		s := fmt.Sprintf("monthly %s#%s %s", dayNames[r.Weekdays[0]], nth, clock)
 		if r.Cal == calendar.Jalali {
 			s += " jalali"
 		}
@@ -331,6 +380,17 @@ func (r Rule) matches(day time.Time, cal calendar.Kind) bool {
 			return false
 		}
 		return cd.Day == min(r.MonthDay, cal.MonthLength(cd.Year, cd.Month))
+	case MonthlyWeekday:
+		if len(r.Weekdays) != 1 || day.Weekday() != r.Weekdays[0] {
+			return false
+		}
+		cd := cal.Split(day)
+		if r.Nth == Last {
+			// The same weekday a week later falls in the next month.
+			return cd.Day+7 > cal.MonthLength(cd.Year, cd.Month)
+		}
+		// Days 1-7 hold the 1st of each weekday, 8-14 the 2nd, and so on.
+		return r.Nth >= 1 && r.Nth <= 4 && (cd.Day-1)/7+1 == r.Nth
 	}
 	return false
 }
