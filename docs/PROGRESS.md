@@ -94,3 +94,4 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - #68 e2e tests and docs merged (#76), closing #68. The review found four doc claims that did not match the code; all are fixed. A second press on a closed card now shows a neutral toast (#75).
   - v0.1.2 tagged.
   - The owner wrote the retry policy for reminders (#77): 5 s, 30 s, 2 min, 10 min, 30 min, then give up. The window is short because a retried reminder is not marked late. v0.1.3 tagged.
+  - v0.1.3 deployed to vps00 (it includes v0.1.2). Migration 0004 was applied at startup and the database was backed up first. The service is active with 0 restarts and about 24MB of memory. v0.1.1 is kept as `todo-bot.prev` for rollback.
