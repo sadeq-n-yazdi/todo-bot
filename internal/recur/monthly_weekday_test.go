@@ -183,3 +183,49 @@ func civil(t time.Time) time.Time {
 	y, m, d := t.Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
+
+func TestMonthlyWeekdayDSTTehran(t *testing.T) {
+	tehran := mustLoc(t, "Asia/Tehran")
+	// Until 2022 Iran moved its clocks forward at 00:00 on 1 Farvardin
+	// (22 Mar 2019, a Friday), so 00:30 did not exist that day.
+	r, _ := Parse("monthly fri#1 00:30 jalali")
+	got := r.Next(time.Date(2019, 3, 1, 0, 0, 0, 0, tehran), tehran)
+	if want := time.Date(2019, 3, 22, 1, 30, 0, 0, tehran); !got.Equal(want) {
+		t.Errorf("spring gap: got %v, want %v", got, want)
+	}
+}
+
+func TestMonthlyWeekdayInvalidRuleZero(t *testing.T) {
+	for _, r := range []Rule{
+		{Freq: MonthlyWeekday, Nth: 0, Weekdays: []time.Weekday{time.Friday}},
+		{Freq: MonthlyWeekday, Nth: 5, Weekdays: []time.Weekday{time.Friday}},
+		{Freq: MonthlyWeekday, Nth: -2, Weekdays: []time.Weekday{time.Friday}},
+		{Freq: MonthlyWeekday, Nth: 1},
+		{Freq: MonthlyWeekday, Nth: 1, Weekdays: []time.Weekday{time.Monday, time.Friday}},
+	} {
+		if got := r.Next(time.Now(), time.UTC); !got.IsZero() {
+			t.Errorf("%+v: got %v", r, got)
+		}
+	}
+}
+
+// FuzzParse checks that every rule Parse accepts survives String and Parse.
+func FuzzParse(f *testing.F) {
+	for _, s := range []string{
+		"daily 09:00", "weekly mon,wed 08:00", "monthly 31 10:00", "monthly 1 10:00 jalali",
+		"monthly fri#last 16:00", "monthly mon#2 09:00 jalali", "yearly 02-29 09:00",
+		"yearly 12-30 09:00 jalali", "every 3d 2026-10-10 09:00",
+	} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		r, err := Parse(s)
+		if err != nil {
+			return
+		}
+		r2, err := Parse(r.String())
+		if err != nil || !reflect.DeepEqual(r, r2) {
+			t.Fatalf("%q: %+v -> %q -> %+v (%v)", s, r, r.String(), r2, err)
+		}
+	})
+}
