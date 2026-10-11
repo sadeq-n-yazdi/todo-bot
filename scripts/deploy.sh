@@ -178,8 +178,12 @@ if [ -x "$bin" ]; then
 		dbfile=
 		if [ -n "$db_url" ]; then
 			case $db_url in
-			sqlite:*[?#\"\']* | [\"\']*sqlite:*)
-				echo "deploy: TODO_DB_URL in $envfile has a query, a fragment or quotes; the bot rejects it and deploy.sh does not support it" >&2
+			sqlite:*[?#]*)
+				echo "deploy: TODO_DB_URL in $envfile has a query or fragment; the bot rejects it and deploy.sh does not support it" >&2
+				exit 1
+				;;
+			sqlite:*[\"\']* | [\"\']*sqlite:*)
+				echo "deploy: deploy.sh does not support quotes in TODO_DB_URL in $envfile; remove them" >&2
 				exit 1
 				;;
 			sqlite:///*) dbfile=${db_url#sqlite://} ;;
@@ -196,12 +200,13 @@ if [ -x "$bin" ]; then
 		case $dbfile in
 		*%*) dbfile= ;;
 		esac
-		# Exit 10 means "the file is missing". Any other failure, including
+		# Exit 10 means "the file is missing and its directory is searchable"
+		# (an unsearchable directory gives 11, because test -e is false on EACCES). Any other failure, including
 		# runuser itself failing (it exits 1 for a missing user, as test does
 		# for a missing file), must stop the deploy: do not skip the backup.
 		exists=0
 		if [ -n "$dbfile" ]; then
-			runuser -u "$app" -- sh -c 'if [ -e "$1" ]; then exit 0; fi; exit 10' sh "$dbfile" || exists=$?
+			runuser -u "$app" -- sh -c 'if [ -e "$1" ]; then exit 0; fi; d=${1%/*}; d=${d:-/}; if [ -d "$d" ] && [ -x "$d" ]; then exit 10; fi; exit 11' sh "$dbfile" || exists=$?
 		fi
 		case $exists in
 		0)

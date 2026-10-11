@@ -47,7 +47,7 @@ chmod +x "$work/shims/"*
 fail=0
 # run NAME EXPECT_STATUS EXPECT_BACKUP(yes|no) EXPECT_TEXT ENV_LINES [DBFILE_PRESENT]
 run() {
-	local name=$1 want_rc=$2 want_backup=$3 want_text=$4 envlines=$5 present=${6:-}
+	local name=$1 want_rc=$2 want_backup=$3 want_text=$4 envlines=$5 present=${6:-} lock=${7:-}
 	local d="$work/case" rc=0 out
 	rm -rf "$d"
 	mkdir -p "$d/state" "$d/opt"
@@ -55,9 +55,11 @@ run() {
 	printf '#!/usr/bin/env bash\necho "$@" >>"%s"\n' "$d/backup.log" >"$d/opt/todo-bot"
 	chmod +x "$d/opt/todo-bot"
 	cp "$d/opt/todo-bot" "$d/opt/todo-bot.new"
-	if [ -n "$present" ]; then : >"$present"; fi
+	if [ -n "$present" ]; then mkdir -p "$(dirname "$present")"; : >"$present"; fi
+	if [ -n "$lock" ]; then chmod 000 "$lock"; fi
 	out="$(SHIM_LOG="$d/shim.log" PATH="$work/shims:$PATH" \
 		bash "$work/remote.sh" "$d/opt/todo-bot" "$d/state" todo-bot "$d/env" 2>&1)" || rc=$?
+	if [ -n "$lock" ]; then chmod 755 "$lock"; fi
 	local got_backup=no
 	if [ -s "$d/backup.log" ]; then got_backup=yes; fi
 	if [ "$rc" != "$want_rc" ] || [ "$got_backup" != "$want_backup" ] || ! grep -Fq -- "$want_text" <<<"$out"; then
@@ -80,13 +82,22 @@ RUNUSER_STATUS= run "TODO_DB_PATH, db present" 0 yes "" \
 RUNUSER_STATUS=1 run "runuser fails with 1 (missing user): stop" 1 no "cannot check for the database" \
 	"TODO_DB_URL=sqlite://$d/state/todo.db\n"
 RUNUSER_STATUS=127 run "runuser fails with 127: stop" 1 no "cannot check for the database" ""
-RUNUSER_STATUS= run "URL with query: stop, no 'no database yet'" 1 no "has a query, a fragment or quotes" \
+RUNUSER_STATUS= run "URL with query: stop, no 'no database yet'" 1 no "has a query or fragment" \
 	"TODO_DB_URL=sqlite://$d/state/todo.db?x=1\n"
-RUNUSER_STATUS= run "URL with fragment: stop" 1 no "has a query, a fragment or quotes" \
+RUNUSER_STATUS= run "URL with fragment: stop" 1 no "has a query or fragment" \
 	"TODO_DB_URL=sqlite://$d/state/todo.db#f\n"
-RUNUSER_STATUS= run "URL with double quotes: stop" 1 no "has a query, a fragment or quotes" \
+RUNUSER_STATUS= run "URL with double quotes: stop" 1 no "does not support quotes" \
 	"TODO_DB_URL=\"sqlite://$d/state/todo.db\"\n"
-RUNUSER_STATUS= run "URL with single quotes: stop" 1 no "has a query, a fragment or quotes" \
+RUNUSER_STATUS= run "URL with single quotes: stop" 1 no "does not support quotes" \
 	"TODO_DB_URL='sqlite://$d/state/todo.db'\n"
+
+# An existing DB under an unsearchable directory must stop the deploy, not
+# read as "missing". chmod does not block root, so skip then.
+if [ "$(id -u)" = 0 ]; then
+	echo "skip: unsearchable parent directory (running as root)"
+else
+	RUNUSER_STATUS= run "db under unsearchable dir: stop" 1 no "cannot check for the database" \
+		"TODO_DB_URL=sqlite://$d/state/sub/todo.db\n" "$d/state/sub/todo.db" "$d/state/sub"
+fi
 
 exit "$fail"
