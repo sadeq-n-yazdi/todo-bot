@@ -93,3 +93,4 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - #68 flow merged (#74). The review found that a second press of Save or Cancel replaced the finished card with "expired", and that editing a date skipped the repeat step, so a weekly item could silently become a one-off. Both are fixed. The e2e tests and user docs started.
   - #68 e2e tests and docs merged (#76), closing #68. The review found four doc claims that did not match the code; all are fixed. A second press on a closed card now shows a neutral toast (#75).
   - v0.1.2 tagged.
+  - The owner wrote the retry policy for reminders (#77): 5 s, 30 s, 2 min, 10 min, 30 min, then give up. The window is short because a retried reminder is not marked late. v0.1.3 tagged.

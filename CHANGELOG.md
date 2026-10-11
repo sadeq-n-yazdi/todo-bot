@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-11
+
+### Changed
+- A reminder that fails with a temporary error (network, Telegram 5xx, a long 429) is sent again after 5 s, 30 s, 2 min, 10 min and 30 min, then given up, about 43 minutes in total (#77). Before, the first such failure marked it failed. A permanent error, such as a blocked bot, still fails at once.
+
 ## [0.1.2] - 2026-10-11
 
 ### Added
@@ -113,7 +118,8 @@ All notable changes to this project are documented here. The format follows
   - Times follow wall-clock time across DST changes.
   - A time that falls in the spring-forward gap fires at the shifted time, never earlier.
 
-[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sadeq-n-yazdi/todo-bot/releases/tag/v0.1.0
