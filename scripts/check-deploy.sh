@@ -12,8 +12,9 @@ check() {
 }
 
 bash -n scripts/deploy.sh
+scripts/test-deploy.sh || fail=1
 if command -v shellcheck >/dev/null; then
-	shellcheck scripts/deploy.sh scripts/check-deploy.sh
+	shellcheck scripts/deploy.sh scripts/check-deploy.sh scripts/test-deploy.sh
 else
 	echo "shellcheck not installed; skipped"
 fi

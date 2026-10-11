@@ -38,18 +38,23 @@ var (
 const dsnParams = "?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)" +
 	"&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-2000)"
 
+// dsnParamsExisting is dsnParams without journal_mode: opening an existing
+// database for a backup must not convert its journal mode.
+const dsnParamsExisting = "?_txlock=immediate&_pragma=busy_timeout(5000)" +
+	"&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-2000)"
+
 var pathEscaper = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
 
 func dsn(path string) string { return "file:" + pathEscaper.Replace(path) + dsnParams }
 
-// dsnExisting is dsn with mode=rw: SQLite then fails on a missing file
-// instead of creating it.
+// dsnExisting is dsn with mode=rw (SQLite then fails on a missing file
+// instead of creating it) and without the journal_mode pragma.
 func dsnExisting(path string) string {
-	return "file:" + pathEscaper.Replace(path) + dsnParams + "&mode=rw"
+	return "file:" + pathEscaper.Replace(path) + dsnParamsExisting + "&mode=rw"
 }
 
 // OpenExisting opens the database at path, which must exist, with the same
-// pragmas as Open. It does not create the file and does not apply migrations.
+// pragmas as Open except journal_mode, which it leaves as it is. It does not create the file and does not apply migrations.
 func OpenExisting(ctx context.Context, path string) (*DB, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("sqlite: database %s: %w", path, err)
