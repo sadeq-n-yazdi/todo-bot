@@ -61,12 +61,19 @@ type User struct {
 	// ignores it) and is unique among users: a name seen on a new account is
 	// cleared from the old one.
 	Username string
+	// KBVersion is the version of the persistent "➕ New task" reply
+	// keyboard last sent to the user's private chat; 0 = never. Written
+	// only by store.SetKBVersion (UpsertUser ignores it).
+	KBVersion int
 }
 
 // Prefs is a user's resolved time zone and locale.
 type Prefs struct {
 	TZ     *time.Location
 	Locale i18n.Locale
+	// KBVersion is User.KBVersion, so the handler can tell without another
+	// query whether a private reply must carry the reply keyboard (#68).
+	KBVersion int
 }
 
 // Chat is a private chat (ID == user ID) or a group chat (shared list).
@@ -219,7 +226,9 @@ type DraftData struct {
 	Time string `json:"time,omitempty"`
 	// Repeat is one of the Repeat* constants.
 	Repeat string `json:"repeat,omitempty"`
-	// AssigneeID is the member the item is for; 0 = the actor / nobody.
+	// AssigneeID is who the item is for: 0 = nobody, the actor's own ID =
+	// Me (in a private chat AddTodoFor then stores no assignee), or a
+	// member's ID.
 	AssigneeID int64 `json:"assignee,omitempty"`
 	// Found* hold what nlparse recognised in the text (StepFound): the
 	// text without the date phrase, the first due time (UTC), the

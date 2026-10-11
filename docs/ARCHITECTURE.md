@@ -63,7 +63,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
   - Domain types: `User`, `Chat`, `Todo`, `Reminder`, `DueReminder`, `TodoQuery`, `DigestView`.
   - Enums: `ChatKind` (private/group), `TodoStatus` (open/done/deleted), `ReminderKind` (due/custom/snooze), `ReminderState` (pending/sent/cancelled/failed).
   - Assignment (§11): `User.Username`, `Todo.AssigneeID` (0 = none) and the read-only `Todo.AssigneeName`.
-  - Wizard (§12): `Draft`, `DraftData`, `DraftStep` (`Step*`) and the `Repeat*` choices.
+  - Wizard (§12): `Draft`, `DraftData`, `DraftStep` (`Step*`), the `Repeat*` choices, and `User.KBVersion` / `Prefs.KBVersion` (the reply keyboard).
 - **recur**:
   - `Rule{Freq, Interval, Weekdays, MonthDay, Month, Cal, Hour, Minute, Anchor}`.
   - `Parse(s)`, `String()` and `Next(after, loc)`.
@@ -77,7 +77,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
   - `Parser{DefaultHour, DefaultMinute}`.
   - `Parse(input, now) (Result, error)`, which returns `Result{Text, Due, Rule, HasTime}`.
   - `ParseWhen(input, now)`, used for reminder prompts.
-- **store**: the `Store` interface, plus `ErrNotFound`. `WithTx(fn)` hands `fn` a store bound to the transaction, and that store is the only one `fn` may use. Assignment (§11) adds `SetUsername`, `UserByUsername` and `ListAssigned`. The wizard (§12) adds `ListNamedUsers` and the compare-and-set draft methods `PutDraft`, `GetDraft`, `DraftByMessage`, `UpdateDraft` and `DeleteDraft`; `Purge` also deletes expired drafts.
+- **store**: the `Store` interface, plus `ErrNotFound`. `WithTx(fn)` hands `fn` a store bound to the transaction, and that store is the only one `fn` may use. Assignment (§11) adds `SetUsername`, `UserByUsername` and `ListAssigned`. The wizard (§12) adds `ListNamedUsers`, `SetKBVersion` and the compare-and-set draft methods `PutDraft`, `GetDraft`, `DraftByMessage`, `UpdateDraft` and `DeleteDraft`; `Purge` also deletes expired drafts.
 - **tg**:
   - Types: `Message`, `Callback`, `Update`, `Button`, `OutMessage` (HTML text, inline keyboard, ForceReply, and a persistent reply keyboard or its removal (§12)).
   - `Message.FromUsername` and `Callback.FromUsername` carry the sender's @username without "@", as Telegram sends it (§11).
@@ -88,7 +88,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
   - `TodoList`, `ReminderMsg`, `Digest` and `FormatWhen`.
   - `Mention(userID, username, locale)` renders a `tg://user?id=` link labelled `@name`, or a translated label when the username is unknown (§11).
   - Wizard (§12): the `ActWiz*` kinds and `Wiz*` arguments, `WizardView`/`WizardCard`, `DayCell`/`MonthGrid`/`FirstWeekday`, the "➕ New task" helpers and the argument helpers (`DateArg`, `MonthArg`, `TimeArg` and their parsers).
-- **service**: the `Service` interface, `Actor{UserID, ChatID, ChatKind, ChatTitle}`, and `Waker{Wake()}`. Assignment (§11) adds `NoteUsername`, `UserByUsername`, `AddTodoFor` and `ListAssigned`. The wizard (§12) adds `StartDraft`, `Draft`, `DraftByMessage`, `UpdateDraft`, `EndDraft`, `NamedUsers`, `ErrStaleDraft` and `Config.DraftTTL`.
+- **service**: the `Service` interface, `Actor{UserID, ChatID, ChatKind, ChatTitle}`, and `Waker{Wake()}`. Assignment (§11) adds `NoteUsername`, `UserByUsername`, `AddTodoFor` and `ListAssigned`. The wizard (§12) adds `StartDraft`, `Draft`, `DraftByMessage`, `UpdateDraft`, `EndDraft`, `NamedUsers`, `SetKBVersion`, `ErrStaleDraft` and `Config.DraftTTL`.
 - **scheduler**:
   - `Backend` is implemented by the service.
   - `New(b, sender, clock, log)`, plus `Run`, `Tick` and `Wake`.
@@ -135,7 +135,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
 - **Times** are stored as INTEGER Unix seconds in UTC.
 - **DSN:** `file:<path>?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-2000)`. The pool is limited to one connection (`SetMaxOpenConns(1)`).
 - **Schema:** see `migrations/sqlite/0001_init.sql`, `0002_multinode.sql` (§9), `0003_assign.sql` (§11) and `0004_wizard.sql` (§12).
-  - `users`: id, tz, lang, calendar and `username` (unique where not null).
+  - `users`: id, tz, lang, calendar, `username` (unique where not null) and `kb_version` (the reply keyboard last sent, §12).
   - `chats`: kind, title, `next_num` (per-chat item numbering), and digest settings (`digest_time`, `digest_by`, `digest_next_at`).
   - `todos`: num (per chat), text, status, `due_at`, `recur`, `tz`, `created_by`, `assignee_id`.
   - `reminders`: `todo_id`, `chat_id`, `fire_at`, kind, state, attempts, `message_id`.
@@ -328,6 +328,7 @@ v0.1 ships SQLite on one host, but its code paths are already multi-node. v0.2 a
   - **Postgres:** `chat_id`, `user_id`, `version`, `updated_at` and `expires_at` are `BIGINT`; `msg_id` and `ask_msg_id` are `INTEGER` (or `BIGINT`); `step` and `data` are `TEXT`. `data` stays `TEXT`, not `JSONB`: nothing queries inside it, and the store reads and writes it as an opaque JSON string.
   - **MySQL:** the same, with `step VARCHAR(16)` and `data TEXT`. MySQL does not accept a literal default on a `TEXT` column, so drop the `'{}'` default (or use the expression default `('{}')`). The store always writes `data`.
   - No foreign keys, as in SQLite.
+  - The same file adds `users.kb_version INTEGER NOT NULL DEFAULT 0` in every dialect.
 - The SQLite DSN adds `_txlock=immediate`, so that two handles on one file wait for each other instead of failing with `SQLITE_BUSY`.
 
 ## 10. CI
@@ -474,7 +475,16 @@ All four start a new draft for (chat, user), replacing any earlier one:
 - `/add` with no text. It starts the wizard instead of showing the usage help.
 - The **➕ New task** inline button under every `/list` page (`ui.NewTaskButton`, data `ws:0`).
 - The persistent reply-keyboard button **➕ New task** in private chats (`ui.NewTaskKeyboard`, sent as `tg.OutMessage.ReplyKeyboard`). Pressing it sends its label as plain text. The handler recognises it in both languages with `ui.IsNewTaskLabel`, in `onWizardText`, **before** the private-chat rule that turns plain text into an item.
-  - The keyboard is attached to the `/start` and `/help` replies in private chats, and is re-sent in the new language by `/lang`. A reply keyboard cannot be attached to a message with an inline keyboard, and Telegram cannot edit one, so it rides on these plain replies.
+  - See "The reply keyboard" below for when it is sent.
+
+### The reply keyboard
+Telegram attaches a reply keyboard only to a **sent** message (`sendMessage`). It cannot be added by an edit or a callback answer, and a message carries one markup only, so a message with an inline keyboard or ForceReply cannot carry it. Once sent, it stays under the chat's input field until replaced or removed.
+- **Who has it** is stored per user: `users.kb_version` (`0004_wizard.sql`, `model.User.KBVersion`, returned as `model.Prefs.KBVersion`). 0 means never sent. `ui.NewTaskKeyboardVersion` (1) is the current layout; bumping it re-sends the keyboard to everyone.
+- **When.** In a **private** chat, while `r.Prefs.KBVersion != ui.NewTaskKeyboardVersion`, the first plain reply the bot sends to that message carries `ui.NewTaskKeyboard` in the user's language. After that send succeeds, the handler calls `Svc.SetKBVersion(user, ui.NewTaskKeyboardVersion)`. Never in groups: a reply keyboard there would show for every member.
+- **Where.** In the handler's shared reply helper, `reply` in `router.go`, which `say` and every command answer go through. `handleMessage` marks the request (`newTaskKeyboardCtx`, a value in `ctx` that lasts one update), and `reply` asks `offerNewTaskKeyboard` before each send. The mark is used once, and skipped for an `OutMessage` with `Keyboard`, `ForceReply` or `RemoveKeyboard`. Edits, callback answers and the scheduler's sends never carry it. Both hooks are in `handler/wizard.go`: stubs in part 1, implemented by PR 3.
+- **Always attached** to the `/start` and `/help` replies in private chats, even when the version matches. This lets a user who removed it get it back.
+- **After a language change**, `/lang <lang>` in a private chat attaches the keyboard in the new language to its confirmation. The language buttons answer through an edit, which cannot carry a keyboard, so in a private chat the callback calls `Svc.SetKBVersion(user, 0)` and the next reply carries it.
+- **Multi-node.** Two nodes answering two messages of one user at once may both attach it. That is harmless, and the version written is the same.
 
 ### Steps
 The draft (`model.Draft`) holds the step and the answers (`model.DraftData`). Each row is one card. "Next" is where an answer goes.
@@ -488,7 +498,7 @@ The draft (`model.Draft`) holds the step and the answers (`model.DraftData`). Ea
 | `time` | 09:00, 12:00, 15:00, 18:00, 20:00 (`ui.WizardTimes`); ⌨️ Type a time; Default | `wt:v:HHMM`, `wt:v:k`, `wt:v:d`; ⏭ Skip (= Default), ◀ Back, ✖ Cancel | `repeat`; Type: `time_text` |
 | `time_text` | "Reply with a time: 15:30, 3pm, ۱۵:۳۰" | ◀ Back, ✖ Cancel | `repeat` |
 | `repeat` | Once, Daily, Weekly (on the chosen weekday), Monthly (in the user's calendar), Yearly | `wr:v:o\|d\|w\|m\|y`; ⏭ Skip (= Once), ◀ Back, ✖ Cancel | `assignee` |
-| `assignee` | Me / nobody, then one button per member | `wa:v:0`, `wa:v:<userID>`; ⏭ Skip (= Me / nobody), ◀ Back, ✖ Cancel | `confirm` |
+| `assignee` | group: Nobody, Me, then one button per member; private: Me, then one button per member | `wa:v:n` (Nobody, group only), `wa:v:m` (Me), `wa:v:<userID>`; ⏭ Skip (= Nobody in a group, Me in a private chat), ◀ Back, ✖ Cancel | `confirm` |
 | `confirm` | summary in the user's language and calendar | ✅ Save `wn:v:v`, ✏️ Edit `wn:v:e`, ✖ Cancel | Save: done |
 | `confirm`, edit menu | "What do you want to change?" | `we:v:text\|date\|time\|repeat\|assignee`, ◀ Back (to the summary) | the chosen step |
 
@@ -497,7 +507,14 @@ The draft (`model.Draft`) holds the step and the answers (`model.DraftData`). Ea
 **Skipped steps.**
 - `found` is shown only when `nlparse.Parse` of the text (normalised with `i18n.NormalizeDigits`) returns a `Due`. Yes keeps `FoundText` as the text and `FoundDue`, `FoundRule` and `FoundTime` as the date, and clears `Date`, `Time` and `Repeat`. No clears the `Found*` fields and keeps the whole original text.
 - `time` and `repeat` are skipped when there is no date (No date, or a found date was used). Choosing No date clears `Time` and `Repeat`.
-- `assignee` is skipped when `NamedUsers(actor)`, filtered by `Deps.Allowed`, is empty. The list is read from the store every time the step is drawn, never from memory.
+- The members are `NamedUsers(actor)` filtered by `Deps.Allowed`. The list is read from the store every time the step is drawn, never from memory.
+- `assignee` is skipped in a **private** chat when there are no members, because Me is then the only choice. In a **group** it is always shown, because Nobody and Me differ there.
+- **What the choices store** in `Data.AssigneeID`:
+  - Nobody (`wa:v:n`) stores 0. The reminder goes to the group, as for `/add`.
+  - Me (`wa:v:m`) stores the actor's own ID. In a group, Save calls `AddTodoFor` with assignee = actor, so the item stays on the group's list and its reminders come to the actor by DM (§11). In a private chat, `AddTodoFor`'s own-private-chat rule (§11) turns it into no assignee.
+  - A member stores their ID.
+
+  The summary shows Nobody, Me or `@name`. A skipped step stores the Skip value.
 
 **Validation.**
 - The text must not be empty; otherwise the step is asked again.
@@ -521,7 +538,7 @@ The draft (`model.Draft`) holds the step and the answers (`model.DraftData`). Ea
 ### Text answers
 - A text step (`text`, `time_text`) is answered by a message from the draft's user in the draft's chat that is either
   - a reply to the card (`MsgID`) or to the question (`AskMsgID`), or
-  - in a **private** chat, any non-command text while the draft is on a text step.
+  - in a **private** chat, any non-command text while the draft is on a text step (owner's decision). It is the wizard's answer and does **not** become an item. The reply-keyboard label is the exception: it starts a new wizard. Cancel, or the draft's expiry, ends this, and plain text becomes an item again. While the draft is on a button step, plain text is handled as before.
 - In a **group** the answer must be a reply. Other messages are ignored by the wizard and handled as before; in a group that means nothing happens. To make replying easy, a text step in a group also sends a ForceReply question (`AskMsgID`), because a message with an inline keyboard cannot carry ForceReply.
 - `onWizardText` runs after `onReply` (prompts) and before command dispatch. It is reached only for non-commands. `/new` and the other commands are never taken as an answer.
 
@@ -560,18 +577,16 @@ The `Result`:
 
      These are the rules `nlparse` builds for the same phrases: `Cal` is Gregorian except for monthly and yearly rules.
 
-**Equivalence (acceptance test) — open question for the owner.** The issue says text → Tomorrow → 15:00 → Weekly → @member → Save must create the same item as `/add @member text tomorrow 15:00 every week`. Today `nlparse` parses that command differently: it takes only the trailing `every week` as the date phrase, and stores the text `text tomorrow 15:00` with `weekly <today's weekday> 09:00`. The wizard path stores text `text`, `due_at` tomorrow 15:00 and `weekly <tomorrow's weekday> 15:00`, which is what `/add @member text every week on <tomorrow's weekday> 15:00` produces. Either
-- (a) a small extra PR fixes `nlparse` (a trailing `<date> <time> every week` means weekly on that date's weekday, at that time), owning `internal/nlparse/grammar.go`, `resolve.go` and a new test file, so that the criterion holds as written; or
-- (b) the owner accepts the rephrased command as the e2e reference.
+**Equivalence (acceptance test).** The issue says text → Tomorrow → 15:00 → Weekly → @member → Save must create the same item as `/add @member text tomorrow 15:00 every week`. The criterion holds as written, and the e2e test compares against that original command. The wizard path stores text `text`, `due_at` tomorrow 15:00 and `weekly <tomorrow's weekday> 15:00`.
 
-Until that is decided, PR 4 compares against the rephrased command.
+Today `nlparse` parses that command differently. It takes only the trailing `every week` as the date phrase, and stores the text `text tomorrow 15:00` with `weekly <today's weekday> 09:00`. The **nlparse PR** (PR 5 below, owner's decision) fixes this: `<date> <time> every week|month|year`, in en and fa, starts on that date, at that time, and repeats on that date's weekday, day of month, or month and day. PR 4's equivalence test needs it merged.
 
 ### Groups
 - Only the user who started a wizard can press its buttons. Anyone else gets a toast (check 4 above).
 - Text answers must be replies (see "Text answers").
 - The item goes to the group's list (`Actor.ChatID` is the group), exactly as `/add` in that group.
 - Several members can run wizards in one group at the same time, because the key is (chat, user).
-- "Me / nobody" (`wa:v:0`) stores no assignee. Assigning yourself from a group, which sends reminders to you privately (§11), is not offered by the wizard; `/add @me …` still does it.
+- The `assignee` step offers Nobody (the reminder goes to the group) and Me (assigned to yourself, so the reminder comes to you by DM, as with `/add @me …`, §11), then the members.
 
 ### State, expiry and multi-node
 - **The draft lives only in the database** (`drafts`, `0004_wizard.sql`). No node keeps wizard state in memory, so a restart or a failover mid-way loses nothing. Coordination is only through `MarkUpdate` (each update once) and the draft's version (each press once), in line with §9.
@@ -582,19 +597,20 @@ Until that is decided, PR 4 compares against the rephrased command.
 - **Rollback.** An item with a `yearly …` rule cannot be read by a binary older than this PR (`recur.Parse` rejects it), and that binary's scheduler fails on it. Rolling back past this release needs those items edited or deleted first. The `drafts` table is harmless to an older binary.
 
 ### Contracts frozen by part 1
-- `migrations/sqlite/0004_wizard.sql`.
-- `model.Draft`, `model.DraftData`, `model.DraftStep` (`Step*`) and the `Repeat*` constants.
+- `migrations/sqlite/0004_wizard.sql`: the `drafts` table and `users.kb_version INTEGER NOT NULL DEFAULT 0`.
+- `model.Draft`, `model.DraftData`, `model.DraftStep` (`Step*`) and the `Repeat*` constants; `model.User.KBVersion` and `model.Prefs.KBVersion`.
 - `recur.Yearly` and `recur.Rule.Month`, implemented, with the canonical form `yearly MM-DD HH:MM [jalali]`.
 - `store.Store`:
   ```go
   ListNamedUsers(ctx) ([]model.User, error)                                 // username IS NOT NULL, by username
+  SetKBVersion(ctx, userID int64, v int) error                              // ErrNotFound if no user; UpsertUser never writes it
   PutDraft(ctx, d *model.Draft) error                                       // replace; sets d.Version
   GetDraft(ctx, chatID, userID int64, now time.Time) (model.Draft, error)   // ErrNotFound if none or expired
   DraftByMessage(ctx, chatID int64, msgID int, now time.Time) (model.Draft, error)
   UpdateDraft(ctx, d *model.Draft, now time.Time) (ok bool, err error)      // CAS on d.Version; bumps it
   DeleteDraft(ctx, chatID, userID, version int64) (ok bool, err error)      // CAS on version
   ```
-  `Purge` also deletes expired drafts. These are implemented in `sqlstore` and covered by the conformance cases `Drafts`, `DraftExpiry`, `DraftConcurrent`, `PutDraftConcurrent` and `ListNamedUsers`. `PutDraft` replaces with an in-place `UPDATE … version = version + 1` (and inserts only a missing row), so it stays monotonic under read committed too.
+  `Purge` also deletes expired drafts. These are implemented in `sqlstore` and covered by the conformance cases `Drafts`, `DraftExpiry`, `DraftConcurrent`, `PutDraftConcurrent`, `ListNamedUsers` and `KBVersion`. Every user read returns `kb_version`. `PutDraft` replaces with an in-place `UPDATE … version = version + 1` (and inserts only a missing row), so it stays monotonic under read committed too.
 - `service.Service`:
   ```go
   StartDraft(ctx, d *model.Draft) error                       // sets UpdatedAt, ExpiresAt (now+DraftTTL), Version
@@ -603,18 +619,20 @@ Until that is decided, PR 4 compares against the rephrased command.
   UpdateDraft(ctx, d *model.Draft) error                      // ErrStaleDraft
   EndDraft(ctx, d model.Draft) error                          // ErrStaleDraft
   NamedUsers(ctx, exceptID int64) ([]model.User, error)
+  SetKBVersion(ctx, userID int64, v int) error                // creates the user if new
   ```
-  The service also gets `ErrStaleDraft` and `Config.DraftTTL` (default 30m). These are implemented as thin wrappers.
+  The service also gets `ErrStaleDraft` and `Config.DraftTTL` (default 30m), and `Prefs` returns `KBVersion`. These are implemented as thin wrappers.
 - `tg.OutMessage.ReplyKeyboard [][]string` and `RemoveKeyboard bool`. At most one markup takes effect, with this precedence: inline keyboard, ForceReply, reply keyboard, remove. `Edit` ignores the last two. The `tgbot` adapter maps them (persistent, resized) and has tests. `tgtest.FakeSender` records the whole `OutMessage`, so they need no change there.
 - `ui`:
-  - the kinds `ActWizStart`, `ActWizDate`, `ActWizMonth`, `ActWizTime`, `ActWizRepeat`, `ActWizAssign`, `ActWizNav`, `ActWizEdit` and `ActWizNoop`, with the `Wiz*` arguments, in `Encode`/`Decode`;
+  - the kinds `ActWizStart`, `ActWizDate`, `ActWizMonth`, `ActWizTime`, `ActWizRepeat`, `ActWizAssign`, `ActWizNav`, `ActWizEdit` and `ActWizNoop`, with the `Wiz*` arguments, in `Encode`/`Decode`. `ActWizAssign` takes `WizAssignNone` (`n`), `WizAssignMe` (`m`) or a positive user ID;
+  - `NewTaskKeyboardVersion`;
   - `WizardView`, `WizardCard(v, lc, loc, now) tg.OutMessage` and `WizardTimes`;
   - `DayCell`, `MonthGrid(cal, year, month, today calendar.Date) [][]DayCell` and `FirstWeekday(cal)`;
   - `NewTaskLabel`, `IsNewTaskLabel`, `NewTaskKeyboard` and `NewTaskButton`, implemented, with the key `ui.newtask.label` in en and fa;
   - `DateArg`/`ParseDateArg`, `MonthArg`/`ParseMonthArg` and `TimeArg`/`ParseTimeArg`, implemented.
 
   `WizardCard` and `MonthGrid` are stubs (they return zero values).
-- `handler`: `router.go` registers `/new` (`cmdNew`) and calls `onWizardText` for non-commands after `onReply`. Both live in `wizard.go` as stubs: `/new` answers like an unknown command, and `onWizardText` handles nothing. The stubs call no new service method, so the existing fakes keep working.
+- `handler`: `router.go` registers `/new` (`cmdNew`) and calls `onWizardText` for non-commands after `onReply`. `handleMessage` calls `newTaskKeyboardCtx`, and `reply` calls `offerNewTaskKeyboard` and, after a successful send, the function it returns. All four live in `wizard.go` as stubs: `/new` answers like an unknown command, `onWizardText` handles nothing, and the keyboard hooks attach nothing. The stubs call no new service method, so the existing fakes keep working.
 
 ### Follow-up PRs
 Each PR owns only the files listed. They are numbered in merge order, but PRs 2–4 can be written in parallel against the frozen contracts.
@@ -641,23 +659,31 @@ Each PR owns only the files listed. They are numbered in merge order, but PRs 2�
    - `internal/handler/wizard.go` (it replaces the stubs), new `internal/handler/wizard_*.go` files and `internal/handler/messages_wizard.go` (keys `wizard.*`);
    - `callbacks.go`: dispatching `ActWiz*` to the wizard;
    - `cmd_todo.go`: bare `/add` starts the wizard, and the `/start` and `/help` replies carry `ui.NewTaskKeyboard` in private chats;
-   - `cmd_settings.go`: `/lang` re-sends the keyboard;
+   - `cmd_settings.go`: `/lang <lang>` attaches the keyboard in the new language;
+   - `callbacks.go` also: the language buttons reset `KBVersion` to 0 in a private chat (see "The reply keyboard");
+   - the keyboard hooks `newTaskKeyboardCtx` and `offerNewTaskKeyboard` in `wizard.go`;
    - `assign.go` (`renderList`): appends a row with `ui.NewTaskButton` under the list. It does not change `ui.TodoList`;
    - `cmd/todo-bot/run.go` (`menu`) and `cmd/todo-bot/messages_main.go` (`cmd.menu.new` in en and fa);
    - the draft methods on the fakes that embed `service.Service`: `fake_svc_11_test.go`, `router_test.go` (`prefsOnly`, `prefsPanics`) and `assign_test.go`. `onWizardText` calls `Svc.Draft` for every non-command text, so without them the call panics on the nil embedded interface, `Handle` recovers it, and tests fail confusingly;
    - new handler tests. They use a fake service with an in-memory, version-checked draft map (or the real service on SQLite in `t.TempDir()`), `tgtest.FakeSender` and `clocktest.Fake`. They build button data with `ui.Encode` and assert on the stored draft and the service calls, not on card text, because `WizardCard` may still be a stub.
 
-   It covers Skip, Back, Cancel and Edit from every step; an expired draft; a stale version; another member's press (toast); a non-reply text in a group (ignored); the reply-keyboard label in en and fa; and the Save mapping above.
+   It covers Skip, Back, Cancel and Edit from every step; an expired draft; a stale version; another member's press (toast); a non-reply text in a group (ignored); plain text in a private chat on a text step (an answer, not an item) and after Cancel (an item); Nobody and Me in a group and in a private chat; the reply-keyboard label in en and fa; the keyboard attached once and then not again, never in a group, never on an inline-keyboard reply, and again after `/lang`; and the Save mapping above.
 4. **e2e + docs.** Owns:
    - a new `internal/e2e/wizard_test.go`. With the fake clock and the mock Telegram server, it checks:
      - every entry point in en and fa;
-     - the full path text → Tomorrow → 15:00 → Weekly → @member → Save, against `/add @member text every week on <day> 15:00` (see "Equivalence");
+     - the full path text → Tomorrow → 15:00 → Weekly → @member → Save, against `/add @member text tomorrow 15:00 every week` (see "Equivalence");
+     - the reply keyboard on the first private reply, and its version in the database;
      - Jalali monthly and yearly items;
      - a wizard started on node A and finished on node B after A stops (two-node);
      - expiry after 30 minutes;
      - the group rules;
    - `docs/USAGE.md`, `README.md` and `README.fa.md`.
 
-   It needs PRs 2 and 3 merged first.
+   It needs PRs 2, 3 and 5 merged first.
+5. **nlparse: `<date> <time> every week|month|year`.** A separate small PR, independent of PRs 2–4. Owns:
+   - `internal/nlparse/grammar.go` and `internal/nlparse/resolve.go`;
+   - a new test file `internal/nlparse/date_repeat_test.go`.
+
+   It does not change the exported `nlparse` API. A date and a time followed by `every week`, `every month` or `every year` (and the fa forms) starts on that date at that time and repeats on that date's weekday, day of the month, or month and day, in the user's calendar for monthly and yearly. Existing phrases keep their results, and the existing tests pass unchanged.
 
 The v0.2 Postgres and MySQL providers ship their own `0004_wizard.sql` (§9) and must pass the new conformance cases.

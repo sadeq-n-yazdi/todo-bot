@@ -63,6 +63,7 @@ func Run(t *testing.T, f Factory) {
 		{"DraftConcurrent", testDraftConcurrent},
 		{"PutDraftConcurrent", testPutDraftConcurrent},
 		{"ListNamedUsers", testListNamedUsers},
+		{"KBVersion", testKBVersion},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

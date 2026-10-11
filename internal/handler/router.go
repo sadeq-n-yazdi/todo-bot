@@ -149,6 +149,8 @@ func (h *Handler) handleMessage(ctx context.Context, m *tg.Message) {
 		h.Log.Error("prefs", "user", m.FromID, "err", err)
 		return
 	}
+	// The first plain reply may carry the reply keyboard (#68).
+	ctx = h.newTaskKeyboardCtx(ctx, m, r)
 	if m.ReplyToID != 0 {
 		handled, err := h.onReply(ctx, m, r)
 		if handled {
@@ -213,11 +215,14 @@ func (h *Handler) logErr(what string, err error) {
 	}
 }
 
-// reply sends text (HTML) to the message's chat.
-//
-//nolint:unused // used by cmd_todo.go / cmd_settings.go (#11, #12)
+// reply sends text (HTML) to the message's chat. In a private chat it may
+// attach the "➕ New task" reply keyboard (#68, offerNewTaskKeyboard).
 func (h *Handler) reply(ctx context.Context, m *tg.Message, out tg.OutMessage) error {
+	sent := h.offerNewTaskKeyboard(ctx, &out)
 	_, err := h.Send.Send(ctx, m.ChatID, out)
+	if err == nil && sent != nil {
+		sent()
+	}
 	return err
 }
 

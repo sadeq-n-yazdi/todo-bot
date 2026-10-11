@@ -30,7 +30,7 @@ const (
 	ActWizMonth  ActionKind = "wm" // show the month grid of Arg: "g202610" / "j140507" (calendar letter, year, month)
 	ActWizTime   ActionKind = "wt" // Arg: "HHMM", WizTimeDefault or WizTimeType
 	ActWizRepeat ActionKind = "wr" // Arg: one of WizRepeat*
-	ActWizAssign ActionKind = "wa" // Arg: the assignee's user ID; "0" = me / nobody
+	ActWizAssign ActionKind = "wa" // Arg: WizAssignNone, WizAssignMe, or a member's user ID
 	ActWizNav    ActionKind = "wn" // Arg: one of WizNav*
 	ActWizEdit   ActionKind = "we" // Arg: the step to go back to: one of WizEdit*
 	ActWizNoop   ActionKind = "wz" // not a choice (grid padding, headers, past days); Arg "" or WizNoopPast; ID may be 0
@@ -50,6 +50,12 @@ const (
 	WizRepeatWeekly  = "w"
 	WizRepeatMonthly = "m"
 	WizRepeatYearly  = "y"
+
+	// ActWizAssign. In a group, Nobody keeps the reminders in the group
+	// and Me assigns the item to the actor (reminders by DM). A private
+	// chat offers only Me, which stores no assignee.
+	WizAssignNone = "n" // Nobody (groups only)
+	WizAssignMe   = "m" // Me
 
 	WizNavSkip     = "s" // ⏭ Skip
 	WizNavBack     = "b" // ◀ Back

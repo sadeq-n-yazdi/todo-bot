@@ -13,13 +13,13 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 )
 
-const userCols = "id, tz, lang, calendar, COALESCE(username, ''), created_at"
+const userCols = "id, tz, lang, calendar, COALESCE(username, ''), created_at, kb_version"
 
 func scanUser(s scanner) (model.User, error) {
 	var u model.User
 	var lang, cal string
 	var created int64
-	if err := s.Scan(&u.ID, &u.TZ, &lang, &cal, &u.Username, &created); err != nil {
+	if err := s.Scan(&u.ID, &u.TZ, &lang, &cal, &u.Username, &created, &u.KBVersion); err != nil {
 		return model.User{}, err
 	}
 	u.Lang, u.Calendar, u.CreatedAt = i18n.Lang(lang), calendar.Kind(cal), fromUnix(created)
@@ -87,6 +87,13 @@ func (d *DB) UserByUsername(ctx context.Context, name string) (model.User, error
 		return model.User{}, fmt.Errorf("sqlstore: user by username %q: %w", name, err)
 	}
 	return u, nil
+}
+
+// SetKBVersion stores the version of the reply keyboard last sent to the
+// user, or store.ErrNotFound if there is no such user.
+func (d *DB) SetKBVersion(ctx context.Context, userID int64, v int) error {
+	res, err := d.q.ExecContext(ctx, "UPDATE users SET kb_version = ? WHERE id = ?", v, userID)
+	return checkAffected(res, err, "set kb version of user", "user", userID)
 }
 
 // ListNamedUsers returns the users with a known username, by username.

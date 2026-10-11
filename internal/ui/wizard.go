@@ -20,7 +20,7 @@ import (
 // WizardView is everything WizardCard needs to draw the card of one step.
 type WizardView struct {
 	Draft model.Draft
-	// Members are the assignee step's choices besides "me / nobody":
+	// Members are the assignee step's choices besides Nobody and Me:
 	// allowlisted users with a username, the actor excluded, in order.
 	Members []model.User
 	// Grid, on the date step, shows the month grid of (Grid.Year,
@@ -89,6 +89,13 @@ func FirstWeekday(cal calendar.Kind) time.Weekday {
 }
 
 // ---- the "➕ New task" entry points ----
+
+// NewTaskKeyboardVersion identifies the layout of NewTaskKeyboard. The
+// handler attaches the keyboard to a private chat's next reply while the
+// user's stored version (model.Prefs.KBVersion) differs, then stores this
+// one. Bump it whenever the keyboard's buttons change, so every user gets
+// the new one.
+const NewTaskKeyboardVersion = 1
 
 // NewTaskLabel is the label of the persistent reply-keyboard button, in
 // lc's language.

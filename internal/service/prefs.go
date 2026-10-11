@@ -34,7 +34,7 @@ func (s *Svc) locOrDefault(name string) *time.Location {
 }
 
 func prefsOf(u model.User, loc *time.Location) model.Prefs {
-	return model.Prefs{TZ: loc, Locale: i18n.Locale{Lang: u.Lang, Cal: u.Calendar}}
+	return model.Prefs{TZ: loc, Locale: i18n.Locale{Lang: u.Lang, Cal: u.Calendar}, KBVersion: u.KBVersion}
 }
 
 // ensureUser returns the user, creating it with defaults on first contact.

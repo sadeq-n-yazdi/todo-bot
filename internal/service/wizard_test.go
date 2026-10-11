@@ -75,3 +75,24 @@ func TestNamedUsers(t *testing.T) {
 		t.Fatalf("NamedUsers = %+v", us)
 	}
 }
+
+func TestKBVersion(t *testing.T) {
+	e := newEnv(t)
+	// A user the bot has not seen yet is created.
+	e.must(e.svc.SetKBVersion(ctx, 7, 1))
+	p, err := e.svc.Prefs(ctx, 7, "")
+	e.must(err)
+	if p.KBVersion != 1 {
+		t.Fatalf("Prefs.KBVersion = %d, want 1", p.KBVersion)
+	}
+	// Changing the language keeps it; the handler re-sends on /lang itself.
+	e.must(e.svc.SetLang(ctx, 7, "fa"))
+	p, err = e.svc.Prefs(ctx, 7, "")
+	e.must(err)
+	if p.KBVersion != 1 {
+		t.Fatalf("after SetLang KBVersion = %d, want 1", p.KBVersion)
+	}
+	if p, err := e.svc.Prefs(ctx, 8, ""); err != nil || p.KBVersion != 0 {
+		t.Fatalf("new user Prefs = %+v, %v", p, err)
+	}
+}

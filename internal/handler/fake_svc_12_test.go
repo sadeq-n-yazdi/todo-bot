@@ -397,6 +397,7 @@ func (f *fakeSvc12) UpdateDraft(context.Context, *model.Draft) error { return se
 func (f *fakeSvc12) EndDraft(context.Context, model.Draft) error { return service.ErrStaleDraft }
 
 func (f *fakeSvc12) NamedUsers(context.Context, int64) ([]model.User, error) { return nil, nil }
+func (f *fakeSvc12) SetKBVersion(context.Context, int64, int) error          { return nil }
 
 // harness12 wires a Handler to a fakeSvc12 and a FakeSender.
 type harness12 struct {

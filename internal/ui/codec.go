@@ -57,7 +57,7 @@ func validArg(k ActionKind, arg string) bool {
 	case ActWizRepeat:
 		return oneOf(arg, WizRepeatOnce, WizRepeatDaily, WizRepeatWeekly, WizRepeatMonthly, WizRepeatYearly)
 	case ActWizAssign:
-		if arg == "0" {
+		if arg == WizAssignNone || arg == WizAssignMe {
 			return true
 		}
 		n, err := strconv.ParseInt(arg, 10, 64)

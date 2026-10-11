@@ -161,6 +161,12 @@ type Service interface {
 	// exceptID, ordered by username. It does not check the allowlist: the
 	// handler does.
 	NamedUsers(ctx context.Context, exceptID int64) ([]model.User, error)
+	// SetKBVersion records that the user's private chat now has version v
+	// of the persistent reply keyboard (ui.NewTaskKeyboardVersion); Prefs
+	// returns it as KBVersion. The user is created with defaults if new.
+	// The handler calls it after a private reply carrying the keyboard was
+	// sent.
+	SetKBVersion(ctx context.Context, userID int64, v int) error
 }
 
 // Config holds service defaults.

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 )
 
 // Task-creation wizard drafts (#68, ARCHITECTURE §12). These are thin
@@ -53,6 +54,16 @@ func (s *Svc) EndDraft(ctx context.Context, d model.Draft) error {
 		return ErrStaleDraft
 	}
 	return nil
+}
+
+// SetKBVersion implements Service.
+func (s *Svc) SetKBVersion(ctx context.Context, userID int64, v int) error {
+	return s.st.WithTx(ctx, func(tx store.Store) error {
+		if _, err := s.ensureUser(ctx, tx, userID, ""); err != nil {
+			return err
+		}
+		return tx.SetKBVersion(ctx, userID, v)
+	})
 }
 
 // NamedUsers implements Service.

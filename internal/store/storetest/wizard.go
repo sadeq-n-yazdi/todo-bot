@@ -277,3 +277,55 @@ func testListNamedUsers(t *testing.T, open func() store.Store) {
 		t.Fatalf("ListNamedUsers = %+v", us)
 	}
 }
+
+func testKBVersion(t *testing.T, open func() store.Store) {
+	ctx := context.Background()
+	d := open()
+	if err := d.SetKBVersion(ctx, 404, 1); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("SetKBVersion(missing) = %v, want ErrNotFound", err)
+	}
+	user(t, d, 1)
+	user(t, d, 2)
+	kb := func(id int64) int {
+		t.Helper()
+		u, err := d.GetUser(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u.KBVersion
+	}
+	if v := kb(1); v != 0 {
+		t.Fatalf("new user KBVersion = %d, want 0", v)
+	}
+	if err := d.SetKBVersion(ctx, 1, 3); err != nil {
+		t.Fatal(err)
+	}
+	if v := kb(1); v != 3 {
+		t.Fatalf("KBVersion = %d, want 3", v)
+	}
+	if v := kb(2); v != 0 {
+		t.Fatalf("other user KBVersion = %d, want 0", v)
+	}
+	// UpsertUser (e.g. /lang) keeps it, even when given another value.
+	u := model.User{ID: 1, TZ: "UTC", Lang: "fa", Calendar: "jalali", CreatedAt: base, KBVersion: 9}
+	if err := d.UpsertUser(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	if v := kb(1); v != 3 {
+		t.Fatalf("after UpsertUser KBVersion = %d, want 3", v)
+	}
+	// Every user read carries it.
+	setName(t, d, 1, "amy")
+	if got, err := d.UserByUsername(ctx, "amy"); err != nil || got.KBVersion != 3 {
+		t.Fatalf("UserByUsername = %+v, %v", got, err)
+	}
+	if us, err := d.ListNamedUsers(ctx); err != nil || len(us) != 1 || us[0].KBVersion != 3 {
+		t.Fatalf("ListNamedUsers = %+v, %v", us, err)
+	}
+	if err := d.SetKBVersion(ctx, 1, 0); err != nil {
+		t.Fatal(err)
+	}
+	if v := kb(1); v != 0 {
+		t.Fatalf("reset KBVersion = %d, want 0", v)
+	}
+}

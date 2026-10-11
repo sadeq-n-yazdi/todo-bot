@@ -20,7 +20,7 @@ var ErrNotFound = errors.New("not found")
 type Store interface {
 	GetUser(ctx context.Context, id int64) (model.User, error)
 	// UpsertUser inserts the user or updates tz, lang and calendar. It never
-	// writes Username; use SetUsername.
+	// writes Username or KBVersion; use SetUsername and SetKBVersion.
 	UpsertUser(ctx context.Context, u model.User) error
 	// SetUsername stores name (lowercased, a leading "@" ignored) as the
 	// user's Telegram @username, and in the same transaction clears it from
@@ -41,6 +41,10 @@ type Store interface {
 	// username. The wizard's assignee step offers them (the handler
 	// filters by the allowlist and drops the actor).
 	ListNamedUsers(ctx context.Context) ([]model.User, error)
+	// SetKBVersion records the version of the reply keyboard last sent to
+	// the user (model.User.KBVersion). ErrNotFound if no user. UpsertUser
+	// never writes it.
+	SetKBVersion(ctx context.Context, userID int64, v int) error
 
 	// EnsureChat inserts the chat if missing, or updates its title.
 	EnsureChat(ctx context.Context, c model.Chat) error

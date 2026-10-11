@@ -27,7 +27,8 @@ func TestWizardEncodeDecode(t *testing.T) {
 		{Action{Kind: ActWizTime, ID: 3, Arg: WizTimeDefault}, "wt:3:d"},
 		{Action{Kind: ActWizTime, ID: 3, Arg: WizTimeType}, "wt:3:k"},
 		{Action{Kind: ActWizRepeat, ID: 3, Arg: WizRepeatYearly}, "wr:3:y"},
-		{Action{Kind: ActWizAssign, ID: 3, Arg: "0"}, "wa:3:0"},
+		{Action{Kind: ActWizAssign, ID: 3, Arg: WizAssignNone}, "wa:3:n"},
+		{Action{Kind: ActWizAssign, ID: 3, Arg: WizAssignMe}, "wa:3:m"},
 		{Action{Kind: ActWizAssign, ID: 3, Arg: "123456789"}, "wa:3:123456789"},
 		{Action{Kind: ActWizNav, ID: 3, Arg: WizNavSave}, "wn:3:v"},
 		{Action{Kind: ActWizNav, ID: 3, Arg: WizNavEdit}, "wn:3:e"},
@@ -59,7 +60,7 @@ func TestWizardDecodeRejects(t *testing.T) {
 		"wm:3:202610", "wm:3:x202610", "wm:3:g202613", "wm:3:g202600", "wm:3:j14051", "wm:3:g000001",
 		"wt:3:2400", "wt:3:1560", "wt:3:930", "wt:3:15:30", "wt:3:x",
 		"wr:3:z", "wr:3",
-		"wa:3:-5", "wa:3:007", "wa:3:00", "wa:3:x", "wa:3:99999999999999999999",
+		"wa:3:-5", "wa:3:0", "wa:3:007", "wa:3:00", "wa:3:x", "wa:3:99999999999999999999",
 		"wn:3:z", "we:3:confirm", "we:3:found",
 		"wz:-1", "wz:0:", "wz:0:x",
 	} {

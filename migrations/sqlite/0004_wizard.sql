@@ -29,3 +29,8 @@ CREATE TABLE drafts (
 -- Button presses find the draft by the card they were pressed on.
 CREATE INDEX drafts_msg ON drafts (chat_id, msg_id);
 CREATE INDEX drafts_expires ON drafts (expires_at);
+
+-- The version of the persistent "➕ New task" reply keyboard last sent to
+-- the user's private chat; 0 = never. The handler attaches the keyboard to
+-- the next private reply while this differs from the current version.
+ALTER TABLE users ADD COLUMN kb_version INTEGER NOT NULL DEFAULT 0;

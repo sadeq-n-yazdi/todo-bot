@@ -37,3 +37,40 @@ func (h *Handler) onWizardText(ctx context.Context, m *tg.Message, r req) (handl
 	_, _, _ = ctx, m, r
 	return false, nil
 }
+
+// ---- the persistent "➕ New task" reply keyboard (§12) ----
+//
+// Telegram attaches a reply keyboard only to a sent message (not to an
+// edit, a callback answer, or a message that carries an inline keyboard or
+// ForceReply). So the keyboard rides on the next plain reply in the user's
+// private chat while the user's stored version (r.Prefs.KBVersion) is not
+// ui.NewTaskKeyboardVersion. handleMessage marks the request with
+// newTaskKeyboardCtx; reply, the shared helper behind say and every
+// command's answer, asks offerNewTaskKeyboard before each send. The mark is
+// request-scoped (a value in ctx), never shared between updates or nodes:
+// what a user has is known only from users.kb_version.
+
+// newTaskKeyboardCtx returns ctx marked so that the request's first plain
+// reply carries the keyboard, if m is in a private chat and the user's
+// KBVersion is out of date. Otherwise it returns ctx unchanged.
+//
+// TODO(#68): the handler follow-up PR implements it.
+func (h *Handler) newTaskKeyboardCtx(ctx context.Context, m *tg.Message, r req) context.Context {
+	_, _ = m, r
+	return ctx
+}
+
+// offerNewTaskKeyboard is called by reply before it sends out. If ctx is
+// marked and the mark is unused, and out has no Keyboard, ForceReply or
+// RemoveKeyboard, it sets out.ReplyKeyboard to ui.NewTaskKeyboard in the
+// user's language and uses the mark. It also accepts an out whose
+// ReplyKeyboard the caller set itself (/start, /help, /lang). In both
+// cases it returns a function that reply calls once the send succeeded,
+// which stores ui.NewTaskKeyboardVersion with Svc.SetKBVersion (an error
+// is only logged). Otherwise it returns nil.
+//
+// TODO(#68): the handler follow-up PR implements it.
+func (h *Handler) offerNewTaskKeyboard(ctx context.Context, out *tg.OutMessage) (sent func()) {
+	_, _ = ctx, out
+	return nil
+}
