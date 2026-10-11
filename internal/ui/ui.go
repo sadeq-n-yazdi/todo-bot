@@ -21,6 +21,10 @@ const (
 	ActSnooze        ActionKind = "rs" // snooze reminder ID by Arg (see Snooze*)
 	ActCancel        ActionKind = "cx" // dismiss a confirmation
 
+	// Settings buttons under /lang and /calendar (#45). ID is always 0.
+	ActSetLang ActionKind = "sl" // set the language to Arg: an i18n.Lang ("en", "fa")
+	ActSetCal  ActionKind = "sc" // set the calendar to Arg: a calendar.Kind ("gregorian", "jalali")
+
 	// Wizard buttons (#68, ARCHITECTURE §12). ID is the draft's Version
 	// (> 0), so a press on an out-of-date card is detected; the draft is
 	// found by the card the button is on. Arg values are listed by each
