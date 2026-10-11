@@ -13,9 +13,8 @@ import (
 )
 
 // Task-creation wizard (#68, ARCHITECTURE §12): the contract between the
-// handler (which runs the flow) and ui (which draws it). WizardCard and
-// MonthGrid are implemented by the ui follow-up PR; the label and
-// argument helpers below are final.
+// handler (which runs the flow) and ui (which draws it). The card is in
+// wizard_card.go and the month grid in wizard_grid.go.
 
 // WizardView is everything WizardCard needs to draw the card of one step.
 type WizardView struct {
@@ -51,12 +50,8 @@ type WizardView struct {
 // carry ForceReply. The handler sends it and stores its message ID as
 // Draft.AskMsgID. Its text is the step's question in lc's language; the
 // question strings live in ui only.
-//
-// TODO(#68): implemented by the ui follow-up PR. Until then it returns
-// only ForceReply.
 func WizardAsk(step model.DraftStep, lc i18n.Locale) tg.OutMessage {
-	_, _ = step, lc
-	return tg.OutMessage{ForceReply: true}
+	return wizardAsk(step, lc)
 }
 
 // WizardTimes are the time step's quick picks: morning, noon, afternoon,
@@ -68,12 +63,8 @@ var WizardTimes = [...]string{"09:00", "12:00", "15:00", "18:00", "20:00"}
 // time. Every button's data comes from Encode with ID v.Draft.Version.
 // The keyboard follows ARCHITECTURE §12: quick picks first, then
 // ⏭ Skip / ◀ Back / ✖ Cancel where the step allows them.
-//
-// TODO(#68): implemented by the ui follow-up PR. Until then it returns
-// the zero OutMessage.
 func WizardCard(v WizardView, lc i18n.Locale, loc *time.Location, now time.Time) tg.OutMessage {
-	_, _, _, _ = v, lc, loc, now
-	return tg.OutMessage{}
+	return wizardCard(v, lc, loc, now)
 }
 
 // DayCell is one cell of a month grid.
@@ -92,11 +83,8 @@ type DayCell struct {
 // week starts on Saturday for Jalali and on Monday for Gregorian. today is
 // the user's current Gregorian civil date; days before it are Past. Every
 // row has exactly 7 cells, padded with Day 0 cells.
-//
-// TODO(#68): implemented by the ui follow-up PR. Until then it returns nil.
 func MonthGrid(cal calendar.Kind, year, month int, today calendar.Date) [][]DayCell {
-	_, _, _, _ = cal, year, month, today
-	return nil
+	return monthGrid(cal, year, month, today)
 }
 
 // FirstWeekday is the first column of a month grid in cal: Saturday for
