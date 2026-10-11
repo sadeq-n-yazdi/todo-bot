@@ -36,6 +36,13 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 58 | Assign a task to another member (reminder by DM) | ✅ merged | #61, #63, #64, #62, #67 |
 | 65 | nlparse: recognise a date phrase at the start of the text | ✅ merged | #66 |
 
+### v0.1.2
+
+| # | Issue | Status | PR |
+|---|---|---|---|
+| 68 | Step-by-step task creation (wizard) | 🚧 contracts in review | #69 |
+| 70 | nlparse: combine a date/time with every week, month or year | 🚧 weekly and monthly merged; yearly waits on #69 | #71 |
+
 ## Log
 - **2026-10-10**
   - Planned the project and created the repo and 17 issues.
@@ -78,3 +85,5 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - v0.1.1 tagged.
 - **2026-10-11**
   - v0.1.1 deployed to vps00. Migration 0003 was applied at startup and the database was backed up first. The service is active with 0 restarts and about 19MB of memory.
+  - Planned v0.1.2: the step-by-step wizard (#68), filed after the owner decided where it starts, which steps it has, the date grid and group rules. Contracts PR #69 is open.
+  - #70 weekly and monthly merged (#71). The review found first due times in the past, a first due that wasn't a real occurrence of the rule, and dates jumping a year; all three are fixed. A property check over every combined test row now guards this.
