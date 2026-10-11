@@ -64,7 +64,7 @@ run() {
 	if [ -s "$d/backup.log" ]; then got_backup=yes; fi
 	if [ "$rc" != "$want_rc" ] || [ "$got_backup" != "$want_backup" ] || ! grep -Fq -- "$want_text" <<<"$out"; then
 		echo "FAIL: $name: rc=$rc (want $want_rc) backup=$got_backup (want $want_backup) text '$want_text'" >&2
-		echo "$out" | sed 's/^/    /' >&2
+		printf "    %s\n" "${out//$'\n'/$'\n    '}" >&2
 		fail=1
 	else
 		echo "ok: $name"
@@ -72,23 +72,23 @@ run() {
 }
 
 d="$work/case"
-RUNUSER_STATUS= run "db missing: skip backup, continue" 0 no "no database yet" \
+RUNUSER_STATUS='' run "db missing: skip backup, continue" 0 no "no database yet" \
 	"TODO_DB_URL=sqlite://$d/state/todo.db\n"
-RUNUSER_STATUS= run "db present: back up" 0 yes "" \
+RUNUSER_STATUS='' run "db present: back up" 0 yes "" \
 	"TODO_DB_URL=sqlite://$d/state/todo.db\n" "$d/state/todo.db"
-RUNUSER_STATUS= run "default path, db missing" 0 no "no database yet" ""
-RUNUSER_STATUS= run "TODO_DB_PATH, db present" 0 yes "" \
+RUNUSER_STATUS='' run "default path, db missing" 0 no "no database yet" ""
+RUNUSER_STATUS='' run "TODO_DB_PATH, db present" 0 yes "" \
 	"TODO_DB_PATH=$d/state/x.db\n" "$d/state/x.db"
 RUNUSER_STATUS=1 run "runuser fails with 1 (missing user): stop" 1 no "cannot check for the database" \
 	"TODO_DB_URL=sqlite://$d/state/todo.db\n"
 RUNUSER_STATUS=127 run "runuser fails with 127: stop" 1 no "cannot check for the database" ""
-RUNUSER_STATUS= run "URL with query: stop, no 'no database yet'" 1 no "has a query or fragment" \
+RUNUSER_STATUS='' run "URL with query: stop, no 'no database yet'" 1 no "has a query or fragment" \
 	"TODO_DB_URL=sqlite://$d/state/todo.db?x=1\n"
-RUNUSER_STATUS= run "URL with fragment: stop" 1 no "has a query or fragment" \
+RUNUSER_STATUS='' run "URL with fragment: stop" 1 no "has a query or fragment" \
 	"TODO_DB_URL=sqlite://$d/state/todo.db#f\n"
-RUNUSER_STATUS= run "URL with double quotes: stop" 1 no "does not support quotes" \
+RUNUSER_STATUS='' run "URL with double quotes: stop" 1 no "does not support quotes" \
 	"TODO_DB_URL=\"sqlite://$d/state/todo.db\"\n"
-RUNUSER_STATUS= run "URL with single quotes: stop" 1 no "does not support quotes" \
+RUNUSER_STATUS='' run "URL with single quotes: stop" 1 no "does not support quotes" \
 	"TODO_DB_URL='sqlite://$d/state/todo.db'\n"
 
 # An existing DB under an unsearchable directory must stop the deploy, not
@@ -96,7 +96,7 @@ RUNUSER_STATUS= run "URL with single quotes: stop" 1 no "does not support quotes
 if [ "$(id -u)" = 0 ]; then
 	echo "skip: unsearchable parent directory (running as root)"
 else
-	RUNUSER_STATUS= run "db under unsearchable dir: stop" 1 no "cannot check for the database" \
+	RUNUSER_STATUS='' run "db under unsearchable dir: stop" 1 no "cannot check for the database" \
 		"TODO_DB_URL=sqlite://$d/state/sub/todo.db\n" "$d/state/sub/todo.db" "$d/state/sub"
 fi
 
