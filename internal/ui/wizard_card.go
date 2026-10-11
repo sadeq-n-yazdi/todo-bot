@@ -94,7 +94,7 @@ func wizardCard(v WizardView, lc i18n.Locale, loc *time.Location, now time.Time)
 		kb = append(kb, []tg.Button{skip(), back(), cancel()})
 	}
 	if v.Note != "" {
-		text = Escape(v.Note) + "\n\n" + text
+		text = Escape(clip(v.Note, wizardNoteMax)) + "\n\n" + text
 	}
 	return tg.OutMessage{Text: text, Keyboard: kb}
 }
@@ -182,6 +182,14 @@ func repeatKeyboard(v WizardView, lc i18n.Locale, cal calendar.Kind) [][]tg.Butt
 	}
 }
 
+// Limits that keep a card under Telegram's 4096 characters and 100 buttons
+// (with the worst case of escaping, 5x for "&", included).
+const (
+	maxWizardMembers = 85 // plus Nobody, Me, Skip, Back, Cancel: at most 90 buttons
+	wizardTextMax    = 300
+	wizardNoteMax    = 200
+)
+
 func memberLabel(u model.User, lc i18n.Locale) string {
 	if u.Username == "" {
 		return lc.T("ui.mention.noname")
@@ -199,7 +207,7 @@ func assigneeKeyboard(v WizardView, lc i18n.Locale) [][]tg.Button {
 	} else {
 		kb = append(kb, []tg.Button{me})
 	}
-	for _, u := range v.Members {
+	for _, u := range v.Members[:min(len(v.Members), maxWizardMembers)] {
 		kb = append(kb, []tg.Button{b(memberLabel(u, lc), strconv.FormatInt(u.ID, 10))})
 	}
 	return kb
@@ -221,7 +229,7 @@ func editKeyboard(v WizardView, lc i18n.Locale) [][]tg.Button {
 // summary is the confirm step's text: the item, when, repeat and assignee.
 func summary(v WizardView, lc i18n.Locale, loc *time.Location, now time.Time) string {
 	d := v.Draft.Data
-	lines := []string{lc.T("ui.wizard.sum.text", Escape(d.Text))}
+	lines := []string{lc.T("ui.wizard.sum.text", Escape(clip(d.Text, wizardTextMax)))}
 	switch t, ok := dateOf(d.Date); {
 	case ok:
 		hhmm := d.Time

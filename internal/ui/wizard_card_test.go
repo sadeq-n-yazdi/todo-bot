@@ -384,3 +384,33 @@ func TestWizardKeysInBothLanguages(t *testing.T) {
 
 // keep the calendar import used by helpers shared with the grid tests
 var _ = calendar.Gregorian
+
+func TestAssigneeCap(t *testing.T) {
+	v := wview(model.StepAssignee, model.DraftData{})
+	v.Group = true
+	v.Members = nil
+	for i := 1; i <= 150; i++ {
+		v.Members = append(v.Members, model.User{ID: int64(100 + i), Username: "u"})
+	}
+	m := WizardCard(v, locEnG, testLoc, testNow)
+	if n := len(buttonsOf(m)); n > 90 {
+		t.Fatalf("%d buttons", n)
+	}
+	for _, d := range []string{nav(WizNavSkip), nav(WizNavBack), nav(WizNavCancel), "wa:4242:n", "wa:4242:m", "wa:4242:101"} {
+		if !hasData(m, d) {
+			t.Errorf("missing %s", d)
+		}
+	}
+}
+
+func TestLongTextStaysUnderLimit(t *testing.T) {
+	v := wview(model.StepConfirm, model.DraftData{Text: strings.Repeat("<", 1000), Date: "2026-10-14"})
+	v.Note = strings.Repeat("&", 1000)
+	m := WizardCard(v, locFaJ, testLoc, testNow)
+	if len([]rune(m.Text)) > 3000 {
+		t.Fatalf("text has %d runes", len([]rune(m.Text)))
+	}
+	if !strings.Contains(m.Text, "…") {
+		t.Error("no ellipsis")
+	}
+}

@@ -63,7 +63,7 @@ func gridKeyboard(v WizardView, lc i18n.Locale, cal calendar.Kind, today calenda
 		for _, c := range week {
 			switch {
 			case c.Day == 0:
-				r = append(r, noop(" ", ""))
+				r = append(r, noop("·", ""))
 			case c.Past:
 				r = append(r, noop(lc.Num(c.Day), WizNoopPast))
 			default:
