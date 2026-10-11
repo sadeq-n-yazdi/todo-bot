@@ -412,7 +412,7 @@ func TestWizardEditAnswersReturnToConfirm(t *testing.T) {
 		got.Data.Editing || got.Data.FoundDue == nil {
 		t.Fatalf("after text edit %+v", got)
 	}
-	// A new date walks on to the time step, then back to confirm.
+	// A new date walks on through time and repeat, then back to confirm.
 	e.pressD(got, wzAlice, ui.ActWizEdit, ui.WizEditDate)
 	got = e.draft(wzGrp, wzAlice)
 	e.pressD(got, wzAlice, ui.ActWizDate, "20261020")
@@ -421,8 +421,100 @@ func TestWizardEditAnswersReturnToConfirm(t *testing.T) {
 		t.Fatalf("after date edit %+v", got)
 	}
 	e.pressD(got, wzAlice, ui.ActWizTime, "1800")
-	if got = e.draft(wzGrp, wzAlice); got.Step != model.StepConfirm || got.Data.Time != "18:00" || got.Data.Editing {
+	got = e.draft(wzGrp, wzAlice)
+	if got.Step != model.StepRepeat || got.Data.Time != "18:00" {
 		t.Fatalf("after time %+v", got)
+	}
+	e.pressD(got, wzAlice, ui.ActWizRepeat, ui.WizRepeatOnce)
+	e.pressD(e.draft(wzGrp, wzAlice), wzAlice, ui.ActWizAssign, ui.WizAssignNone)
+	if got = e.draft(wzGrp, wzAlice); got.Step != model.StepConfirm || got.Data.Editing {
+		t.Fatalf("after assignee %+v", got)
+	}
+}
+
+func TestWizardEditRepeatOfNoDateItem(t *testing.T) {
+	e := newWz(t)
+	d := e.seed(wzGrp, model.StepConfirm, model.DraftData{Text: "gym", OrigText: "gym"})
+	e.pressD(d, wzAlice, ui.ActWizEdit, ui.WizEditRepeat)
+	d = e.draft(wzGrp, wzAlice)
+	e.pressD(d, wzAlice, ui.ActWizDate, "20261012")
+	e.pressD(e.draft(wzGrp, wzAlice), wzAlice, ui.ActWizTime, "1800")
+	d = e.draft(wzGrp, wzAlice)
+	if d.Step != model.StepRepeat {
+		t.Fatalf("step %s", d.Step)
+	}
+	e.pressD(d, wzAlice, ui.ActWizRepeat, ui.WizRepeatWeekly)
+	e.pressD(e.draft(wzGrp, wzAlice), wzAlice, ui.ActWizAssign, ui.WizAssignNone)
+	e.pressD(e.draft(wzGrp, wzAlice), wzAlice, ui.ActWizNav, ui.WizNavSave)
+	ts := e.todos(wzGrp)
+	if len(ts) != 1 || ts[0].Recur != "weekly mon 18:00" {
+		t.Fatalf("items %+v", ts)
+	}
+}
+
+func TestWizardFoundRuleSurvivesDateEdit(t *testing.T) {
+	for _, edit := range []string{ui.WizEditRepeat, ui.WizEditDate} {
+		e := newWz(t)
+		e.msg(wzAlice, wzGrp, "/new", 0)
+		d := e.draft(wzGrp, wzAlice)
+		e.msg(wzAlice, wzGrp, "gym every monday 18:00", d.AskMsgID)
+		d = e.draft(wzGrp, wzAlice)
+		if d.Step != model.StepFound || d.Data.FoundRule == "" {
+			t.Fatalf("found %+v", d)
+		}
+		e.pressD(d, wzAlice, ui.ActWizNav, ui.WizNavUseFound)
+		e.pressD(e.draft(wzGrp, wzAlice), wzAlice, ui.ActWizAssign, ui.WizAssignNone)
+		d = e.draft(wzGrp, wzAlice)
+		e.pressD(d, wzAlice, ui.ActWizEdit, edit)
+		d = e.draft(wzGrp, wzAlice)
+		e.pressD(d, wzAlice, ui.ActWizDate, "20261019") // a Monday
+		e.pressD(e.draft(wzGrp, wzAlice), wzAlice, ui.ActWizTime, "1800")
+		d = e.draft(wzGrp, wzAlice)
+		if d.Step != model.StepRepeat || d.Data.Repeat != model.RepeatWeekly {
+			t.Fatalf("%s: repeat step %+v", edit, d)
+		}
+		e.pressD(d, wzAlice, ui.ActWizRepeat, ui.WizRepeatWeekly) // keep the pre-selected choice
+		e.pressD(e.draft(wzGrp, wzAlice), wzAlice, ui.ActWizAssign, ui.WizAssignNone)
+		e.pressD(e.draft(wzGrp, wzAlice), wzAlice, ui.ActWizNav, ui.WizNavSave)
+		ts := e.todos(wzGrp)
+		if len(ts) != 1 || ts[0].Recur != "weekly mon 18:00" {
+			t.Fatalf("%s: items %+v", edit, ts)
+		}
+	}
+}
+
+func TestWizardDoubleSaveAndCancelKeepFinalCard(t *testing.T) {
+	for _, finish := range []string{ui.WizNavSave, ui.WizNavCancel} {
+		for _, second := range []string{"sequential", "other node"} {
+			e := newWz(t)
+			d := e.seed(wzGrp, model.StepConfirm, model.DraftData{Text: "milk"})
+			e.pressD(d, wzAlice, ui.ActWizNav, finish)
+			final := e.lastEdit()
+			e.fs.Reset()
+			h := e.h
+			if second == "other node" {
+				h = New(Deps{Svc: e.svc, Send: e.fs, Clock: e.clk, Parser: e.h.Parser, Allowed: e.h.Allowed, BotUsername: "TodoBot"})
+			}
+			e.seq++
+			err := h.Handle(context.Background(), tg.Update{ID: e.seq, Callback: &tg.Callback{
+				ID: "cb2", FromID: wzAlice, ChatID: wzGrp, MessageID: d.MsgID,
+				Data: ui.Encode(ui.Action{Kind: ui.ActWizNav, ID: d.Version, Arg: finish}),
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range e.fs.Messages() {
+				if m.Edit {
+					t.Fatalf("%s/%s: second press edited the final card %q (was %q)", finish, second, m.Msg.Text, final.Msg.Text)
+				}
+			}
+			if len(e.fs.Answers) != 1 || e.fs.Answers[0].Text == "" {
+				t.Fatalf("%s/%s: want one toast, got %+v", finish, second, e.fs.Answers)
+			}
+			if finish == ui.WizNavSave && len(e.todos(wzGrp)) != 1 {
+				t.Fatalf("items %d", len(e.todos(wzGrp)))
+			}
+		}
 	}
 }
 
@@ -456,8 +548,10 @@ func TestWizardExpiredStaleAndForeign(t *testing.T) {
 	if got := e.pressD(cur, wzAlice, ui.ActWizNav, ui.WizNavSkip); got != lc.T("wizard.toast.expired") {
 		t.Fatalf("expired toast %q", got)
 	}
-	if last := e.lastEdit(); len(last.Msg.Keyboard) != 0 {
-		t.Fatal("an expired card keeps its keyboard")
+	for _, m := range e.fs.Messages() {
+		if m.Edit {
+			t.Fatalf("a missing draft must not edit the card: %+v", m)
+		}
 	}
 	// A card that never had a draft is expired too.
 	if got := e.press(wzAlice, wzGrp, 999, ui.Encode(ui.Action{Kind: ui.ActWizNav, ID: 5, Arg: ui.WizNavSkip})); got != lc.T("wizard.toast.expired") {

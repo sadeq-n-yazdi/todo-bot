@@ -106,13 +106,14 @@ func (h *Handler) draw(ctx context.Context, r req, d model.Draft, o cardOpts) {
 	h.logErr("edit wizard card", h.Send.Edit(ctx, d.ChatID, d.MsgID, out))
 }
 
-// expireCard replaces a card whose draft is gone; the edit drops its keyboard.
-func (h *Handler) expireCard(ctx context.Context, r req, chatID int64, msgID int) {
-	h.logErr("expire wizard card", h.Send.Edit(ctx, chatID, msgID, tg.OutMessage{Text: r.Prefs.Locale.T("wizard.expired")}))
-}
-
 // redrawStored redraws the card from the stored draft (after a stale press).
-// found=false means the draft is gone and the card was expired.
+// found=false means the draft is gone: nothing is drawn. The card is left
+// as it is, because a missing draft usually means the wizard just finished
+// (Save or Cancel on this or another node) and the card shows the result;
+// overwriting it with "expired" would make the user think it failed. This
+// deviates from §12 ("the card's keyboard is removed") on purpose: the
+// handler cannot tell a finished draft from an expired one, so it answers
+// with a toast only.
 func (h *Handler) redrawStored(ctx context.Context, r req, chatID int64, msgID int) (found bool) {
 	d, err := h.Svc.DraftByMessage(ctx, chatID, msgID)
 	if err != nil || !knownStep(d.Step) {
@@ -120,7 +121,6 @@ func (h *Handler) redrawStored(ctx context.Context, r req, chatID int64, msgID i
 			h.Log.Error("wizard draft", "chat", chatID, "err", err)
 			return true
 		}
-		h.expireCard(ctx, r, chatID, msgID)
 		return false
 	}
 	h.draw(ctx, r, d, cardOpts{})
@@ -177,8 +177,7 @@ func (h *Handler) wizardCallback(ctx context.Context, cb *tg.Callback, r req, ac
 	}
 	d, err := h.Svc.DraftByMessage(ctx, cb.ChatID, cb.MessageID)
 	if errors.Is(err, service.ErrNotFound) || (err == nil && !knownStep(d.Step)) {
-		h.expireCard(ctx, r, cb.ChatID, cb.MessageID)
-		return lc.T("wizard.toast.expired"), nil
+		return lc.T("wizard.toast.expired"), nil // toast only: see redrawStored
 	}
 	if err != nil {
 		return "", err
@@ -382,6 +381,22 @@ func (h *Handler) pressFound(ctx context.Context, r req, d model.Draft, use bool
 	return nd, cardOpts{}, err
 }
 
+// repeatKind maps a canonical rule string to the wizard's repeat choice
+// ("" = once, or a rule the wizard cannot express).
+func repeatKind(rule string) string {
+	switch kind, _, _ := strings.Cut(rule, " "); kind {
+	case "daily":
+		return model.RepeatDaily
+	case "weekly":
+		return model.RepeatWeekly
+	case "monthly":
+		return model.RepeatMonthly
+	case "yearly":
+		return model.RepeatYearly
+	}
+	return model.RepeatOnce
+}
+
 // clearFound drops the found date: an explicit date choice replaces it.
 func clearFound(d *model.Draft) {
 	d.Data.FoundText, d.Data.FoundDue, d.Data.FoundRule, d.Data.FoundTime = "", nil, "", false
@@ -423,7 +438,14 @@ func (h *Handler) pressDate(ctx context.Context, r req, d model.Draft, arg strin
 		return d, ignore, "", nil
 	}
 	nd.Data.Date = date.String()
+	if hasFound(d) {
+		// The found rule is dropped for an explicit date: offer its kind as
+		// the current repeat choice, so it is not lost silently.
+		nd.Data.Repeat = repeatKind(d.Data.FoundRule)
+	}
 	clearFound(&nd)
+	// A new date walks on through time and repeat, even during an edit.
+	nd.Data.Editing = false
 	nd.Step = model.StepTime
 	return nd, cardOpts{}, "", nil
 }

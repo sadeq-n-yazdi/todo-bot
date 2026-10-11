@@ -18,8 +18,6 @@ func init() {
 		"wizard.note.badtime":  "I could not read that time. Try 15:30 or 3pm.",
 		"wizard.note.passed":   "That time has passed. Please choose again.",
 		"wizard.note.assignee": "That person can't be assigned items any more. Please choose again.",
-		"wizard.ask.text":      "What's the task? Reply to this message.",
-		"wizard.ask.time_text": "What time? Reply to this message, for example 15:30 or 3pm.",
 	})
 	i18n.Register(i18n.Fa, map[string]string{
 		"wizard.starting":      "در حال شروع…",
@@ -34,7 +32,5 @@ func init() {
 		"wizard.note.badtime":  "این زمان را نفهمیدم. مثلاً ۱۵:۳۰ یا 3pm بنویسید.",
 		"wizard.note.passed":   "این زمان گذشته است. لطفاً دوباره انتخاب کنید.",
 		"wizard.note.assignee": "دیگر نمی\u200cتوان کار را به این فرد محول کرد. لطفاً دوباره انتخاب کنید.",
-		"wizard.ask.text":      "کار چیست؟ به این پیام پاسخ دهید.",
-		"wizard.ask.time_text": "چه ساعتی؟ به این پیام پاسخ دهید، مثلاً ۱۵:۳۰ یا 3pm.",
 	})
 }

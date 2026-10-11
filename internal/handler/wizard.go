@@ -68,9 +68,6 @@ func (h *Handler) startWizard(ctx context.Context, r req, chatID int64, replyTo 
 func (h *Handler) sendAsk(ctx context.Context, r req, d model.Draft) (int, error) {
 	lc := r.Prefs.Locale
 	out := ui.WizardAsk(d.Step, lc)
-	if out.Text == "" {
-		out.Text = lc.T("wizard.ask." + string(d.Step))
-	}
 	out.ForceReply = true
 	out.ReplyTo = d.MsgID
 	return h.Send.Send(ctx, d.ChatID, out)
