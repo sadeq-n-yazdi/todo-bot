@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-12
+
+### Added
+- `/list`, `/today` and the message after you add an item show the repeat rule next to 🔁, for example "🔁 every month, last Friday" or "🔁 هر سال ۲۷ فروردین" (#91). The rule shows in its own calendar. Thus a Farvardin item still shows Farvardin after you change your calendar to Gregorian. Items under "Assigned to me" show only 🔁, so that a long list stays in one message.
+
+### Fixed
+- `deploy.sh` stops when it cannot check for the database, for example when a folder has the wrong permissions (#84). Before, it treated this as "no database yet" and did not make a backup. It also stops with a clear message for a `TODO_DB_URL` with a query, a fragment or quotes.
+- `todo-bot backup` no longer changes the journal mode of the source database (#84).
+- At startup, one wait after a Telegram 429 is at most 5 minutes, and the log shows the wait (#84).
+- A test of the Telegram poller that failed at random on slow machines is now reliable (#94).
+
+### Changed
+- `make ci` and the CI workflow now test `deploy.sh` with shellcheck and with a local harness that runs the server part of the script (#84).
+
 ## [0.1.5] - 2026-10-11
 
 ### Added
@@ -141,7 +155,8 @@ All notable changes to this project are documented here. The format follows
   - Times follow wall-clock time across DST changes.
   - A time that falls in the spring-forward gap fires at the shifted time, never earlier.
 
-[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.2...v0.1.3

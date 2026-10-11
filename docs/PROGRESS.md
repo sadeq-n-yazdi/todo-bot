@@ -2,7 +2,7 @@
 
 This page is updated on `main` after every merged PR.
 
-Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released**) · [v0.1.5](https://github.com/sadeq-n-yazdi/todo-bot/milestone/6) (Nth and last weekday of the month, **released and deployed**) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
+Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released**) · [v0.1.5](https://github.com/sadeq-n-yazdi/todo-bot/milestone/6) (Nth and last weekday of the month, **released and deployed**) · [v0.1.6](https://github.com/sadeq-n-yazdi/todo-bot/milestone/7) (repeat rule text, deploy hardening, **released**) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
 
 | # | Wave | Issue | Status | PR |
 |---|---|---|---|---|
@@ -55,7 +55,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 53 | Open the store without migrations for backup | ✅ merged | #81 |
 | 54 | Startup getMe retry: honour RetryAfter | ✅ merged | #81 |
 | 82 | Minimum claim TTL; tighten the digest hang test | ✅ merged | #83 |
-| 84 | Backup and startup follow-ups from the #81 review | 📋 open | |
+| 84 | Backup and startup follow-ups from the #81 review | ➡️ moved to v0.1.6 | |
 
 ### v0.1.5
 
@@ -64,6 +64,14 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 85 | recur: Nth and last weekday of the month | ✅ merged | #88 |
 | 86 | nlparse: every last/Nth weekday of the month (en + fa) | ✅ merged | #90 |
 | 87 | Wizard: monthly on the Nth/last weekday; docs and e2e | ✅ merged | #89 |
+
+### v0.1.6
+
+| # | Issue | Status | PR |
+|---|---|---|---|
+| 91 | Show the repeat rule next to 🔁 | ✅ merged | #92 |
+| 84 | Backup and startup follow-ups from the #81 review | ✅ merged | #93 |
+| 94 | Flaky test: TestPollerAdvancesOffsetAndSurvivesHandlerError | ✅ merged | #95 |
 
 ## Log
 - **2026-10-10**
@@ -126,3 +134,9 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - #86 merged (#90). The review compared old and new results over about 1,000 inputs. Every changed result was the new rule, and each had a repeat word and a month word. It found that "of the last week of the month" was not read; this is fixed.
   - #87 merged (#89). The review found that the docs and the PR text did not match the code; these are fixed. A date edit never saves a choice that does not fit. v0.1.5 tagged.
   - v0.1.5 deployed to vps00. It has no schema change. The database was backed up first. v0.1.4 is kept as `todo-bot.prev` for rollback.
+- **2026-10-12**
+  - Planned v0.1.6: the repeat rule as text (#91) and the open follow-ups of #84.
+  - #91 merged (#92). The review found that a long rule on every row could push page 1 of `/list` past 4096 characters. The rule text is now clipped, and the "Assigned to me" rows show only 🔁. In Farsi, days start on Saturday, and Monday to Friday is not called "workdays".
+  - #92 was merged while its CI showed a failure. The failure was a flaky poller test in a package that #92 did not change, and main CI passed. Filed #94. Merges now wait on the exit status of the check itself.
+  - #84 merged (#93). The review found that a database under a folder the service user cannot open still read as "no database yet". This is fixed and tested. The deploy harness now runs in CI, and shellcheck on the runner found ten warnings in it, all fixed.
+  - #94 merged (#95). The fake Telegram server in the test did not wait like a real long poll. Both the author and the review reproduced the CI failure with a short delay. v0.1.6 tagged.
