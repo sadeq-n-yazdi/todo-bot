@@ -160,7 +160,7 @@ Use the wizard when you do not want to write the date in a sentence. The bot ask
 /add @sara_home buy milk tomorrow 15:00 every week
 ```
 
-gives the same item as the wizard with the text `buy milk`, **Tomorrow**, **15:00**, **Weekly** and **@sara_home**. If the time is already in the past when you press **✅ Save**, the bot sends you back to choose again. This is only for an item that does not repeat. A repeating item starts at its next occurrence. If you chose today with the default time and that time has passed, the item is due today at 23:59 and has no reminder, as with `/add`.
+gives the same item as the wizard with the text `buy milk`, **Tomorrow**, **15:00**, **Weekly** and **@sara_home**. If the time is already in the past when you press **✅ Save**, the bot sends you back to choose again. This is only for an item that does not repeat. A repeating item starts at its next occurrence. Sometimes you choose today with the default time, and that time has passed. Then the item is due today at 23:59 and has no reminder, as with `/add`.
 
 **Groups.**
 

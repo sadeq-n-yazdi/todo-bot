@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-11
+
 ### Added
 - Step-by-step task creation (#68). Start it with `/new`, with `/add` and no text, with the ➕ New task button under `/list`, or with the ➕ New task key on the keyboard in a private chat. The bot asks for the text, the date (quick picks or a month grid in your calendar), the time, the repeat (none, daily, weekly, monthly or yearly) and, in groups, who the item is for. Cancel is on every step, most steps have Back, and optional steps have Skip. The summary lets you edit any step before you save. If the text already contains a date or repeat, the bot asks if it must use it. In groups, answer the bot's questions with a reply. A wizard expires after 30 minutes. Several nodes can share one wizard safely.
 - A date and time combined with a repeat (#70): `call mom tomorrow 15:00 every week` and `گزارش فردا ساعت ۱۵ هر هفته` start on that date and repeat on that weekday at that time. Monthly repeats use the day of the month, and a Jalali month name (`۱ آبان هر ماه`) anchors a Jalali monthly repeat. The first due time is always the rule's next occurrence at or after now.
@@ -111,6 +113,7 @@ All notable changes to this project are documented here. The format follows
   - Times follow wall-clock time across DST changes.
   - A time that falls in the spring-forward gap fires at the shifted time, never earlier.
 
-[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sadeq-n-yazdi/todo-bot/releases/tag/v0.1.0
