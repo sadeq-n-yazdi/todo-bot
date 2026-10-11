@@ -61,12 +61,19 @@ type User struct {
 	// ignores it) and is unique among users: a name seen on a new account is
 	// cleared from the old one.
 	Username string
+	// KBVersion is the version of the persistent "➕ New task" reply
+	// keyboard last sent to the user's private chat; 0 = never. Written
+	// only by store.SetKBVersion (UpsertUser ignores it).
+	KBVersion int
 }
 
 // Prefs is a user's resolved time zone and locale.
 type Prefs struct {
 	TZ     *time.Location
 	Locale i18n.Locale
+	// KBVersion is User.KBVersion, so the handler can tell without another
+	// query whether a private reply must carry the reply keyboard (#68).
+	KBVersion int
 }
 
 // Chat is a private chat (ID == user ID) or a group chat (shared list).
@@ -178,4 +185,86 @@ type Prompt struct {
 	Kind      PromptKind
 	TodoID    int64
 	ExpiresAt time.Time
+}
+
+// DraftStep is where a task-creation wizard is (#68, ARCHITECTURE §12).
+type DraftStep string
+
+const (
+	StepText     DraftStep = "text"      // waiting for the item text (a reply)
+	StepFound    DraftStep = "found"     // the text had a date: use it?
+	StepDate     DraftStep = "date"      // quick picks, month grid, no date
+	StepTime     DraftStep = "time"      // quick picks, type a time, default
+	StepTimeText DraftStep = "time_text" // waiting for a typed time (a reply)
+	StepRepeat   DraftStep = "repeat"    // once, daily, weekly, monthly, yearly
+	StepAssignee DraftStep = "assignee"  // me / nobody, or a known member
+	StepConfirm  DraftStep = "confirm"   // summary: save, edit, cancel
+)
+
+// Repeat choices of the wizard's repeat step (DraftData.Repeat).
+const (
+	RepeatOnce    = ""
+	RepeatDaily   = "daily"
+	RepeatWeekly  = "weekly"  // on the chosen date's weekday
+	RepeatMonthly = "monthly" // on the chosen day of the month, in the user's calendar
+	RepeatYearly  = "yearly"  // on the chosen month and day, in the user's calendar
+)
+
+// DraftData is what a wizard has collected so far. The store keeps it as a
+// JSON object, so a field added here needs no migration: an older row
+// decodes with the new field at its zero value. Every field is optional
+// and its zero value means "not chosen".
+type DraftData struct {
+	// Text is the item text that Save stores, after i18n.NormalizeDigits.
+	// When a found date was accepted, it is FoundText (the date phrase
+	// removed); otherwise it is OrigText.
+	Text string `json:"text,omitempty"`
+	// OrigText is the text as the user typed it (normalised), set by the
+	// text step and by a text edit. No on a found date, and Back from the
+	// found step, restore Text from it, so Yes → Back → No keeps the date
+	// phrase.
+	OrigText string `json:"orig_text,omitempty"`
+	// Date is the chosen civil date, Gregorian "YYYY-MM-DD", in the user's
+	// time zone. "" = no date.
+	Date string `json:"date,omitempty"`
+	// Time is the chosen time of day "HH:MM". "" = the default time
+	// (TODO_DEFAULT_TIME).
+	Time string `json:"time,omitempty"`
+	// Repeat is one of the Repeat* constants.
+	Repeat string `json:"repeat,omitempty"`
+	// AssigneeID is who the item is for: 0 = nobody, the actor's own ID =
+	// Me (in a private chat AddTodoFor then stores no assignee), or a
+	// member's ID.
+	AssigneeID int64 `json:"assignee,omitempty"`
+	// Found* hold what nlparse recognised in the text (StepFound): the
+	// text without the date phrase, the first due time (UTC), the
+	// canonical recur string ("" = once) and whether a time of day was
+	// named. FoundDue nil = nothing found.
+	FoundText string     `json:"found_text,omitempty"`
+	FoundDue  *time.Time `json:"found_due,omitempty"`
+	FoundRule string     `json:"found_rule,omitempty"`
+	FoundTime bool       `json:"found_time,omitempty"`
+	// Editing is set by Edit on the confirm step: the next answer returns
+	// to StepConfirm instead of going on to the following step.
+	Editing bool `json:"editing,omitempty"`
+}
+
+// Draft is one in-progress wizard, one per (ChatID, UserID). It lives only
+// in the database, so any node, or a restarted one, can continue it.
+type Draft struct {
+	ChatID int64
+	UserID int64 // who started it; only they may press its buttons
+	// MsgID is the wizard card: the message with the inline keyboard that
+	// is edited at every step. Button presses find the draft by it.
+	MsgID int
+	// AskMsgID is a separate ForceReply question for a text step (groups),
+	// 0 if none. A text answer may reply to MsgID or to AskMsgID.
+	AskMsgID int
+	Step     DraftStep
+	Data     DraftData
+	// Version is the compare-and-set token. The store sets it on every
+	// write; UpdateDraft and DeleteDraft succeed only while it matches.
+	Version   int64
+	UpdatedAt time.Time
+	ExpiresAt time.Time // UpdatedAt + DraftTTL: 30 minutes of inactivity
 }

@@ -100,56 +100,9 @@ func (s *Svc) AddTodoFor(ctx context.Context, a Actor, assigneeID int64, r nlpar
 	now := s.clk.Now().UTC()
 	var out model.Todo
 	err := s.st.WithTx(ctx, func(tx store.Store) error {
-		u, err := s.ensureUser(ctx, tx, a.UserID, "")
-		if err != nil {
-			return err
-		}
-		if err := s.ensureChat(ctx, tx, a, now); err != nil {
-			return err
-		}
-		if strings.TrimSpace(r.Text) == "" {
-			return ErrEmptyText
-		}
-		var assigneeName string
-		if assigneeID != 0 && assigneeID != a.ChatID {
-			as, err := tx.GetUser(ctx, assigneeID)
-			if err != nil {
-				return err
-			}
-			assigneeName = as.Username
-		} else {
-			assigneeID = 0 // none, or the assignee's own private chat
-		}
-		t := model.Todo{
-			AssigneeID: assigneeID, AssigneeName: assigneeName,
-			ChatID: a.ChatID, Text: strings.TrimSpace(r.Text), Status: model.TodoOpen,
-			TZ: u.TZ, CreatedBy: a.UserID, CreatedAt: now, UpdatedAt: now,
-		}
-		if r.Due != nil {
-			d := r.Due.UTC()
-			t.DueAt = &d
-		}
-		if r.Rule != nil {
-			t.Recur = r.Rule.String()
-			if t.DueAt == nil || !t.DueAt.After(now) {
-				next := r.Rule.Next(now, s.locOrDefault(u.TZ))
-				if next.IsZero() {
-					return fmt.Errorf("service: recurrence %q has no next occurrence", t.Recur)
-				}
-				next = next.UTC()
-				t.DueAt = &next
-			}
-		}
-		if err := tx.InsertTodo(ctx, &t); err != nil {
-			return err
-		}
-		if t.DueAt != nil && t.DueAt.After(now) && (r.Rule != nil || !dateOnlySentinel(r, s.locOrDefault(u.TZ), now)) {
-			if err := tx.InsertReminder(ctx, newReminder(t, *t.DueAt, model.ReminderDue, now)); err != nil {
-				return err
-			}
-		}
-		out = t
-		return nil
+		var err error
+		out, err = s.addTodoTx(ctx, tx, a, assigneeID, r, now)
+		return err
 	})
 	if err != nil {
 		return model.Todo{}, err
@@ -158,6 +111,59 @@ func (s *Svc) AddTodoFor(ctx context.Context, a Actor, assigneeID int64, r nlpar
 		s.wake()
 	}
 	return out, nil
+}
+
+// addTodoTx is the body of AddTodoFor, inside the caller's transaction tx.
+func (s *Svc) addTodoTx(ctx context.Context, tx store.Store, a Actor, assigneeID int64, r nlparse.Result, now time.Time) (model.Todo, error) {
+	u, err := s.ensureUser(ctx, tx, a.UserID, "")
+	if err != nil {
+		return model.Todo{}, err
+	}
+	if err := s.ensureChat(ctx, tx, a, now); err != nil {
+		return model.Todo{}, err
+	}
+	if strings.TrimSpace(r.Text) == "" {
+		return model.Todo{}, ErrEmptyText
+	}
+	var assigneeName string
+	if assigneeID != 0 && assigneeID != a.ChatID {
+		as, err := tx.GetUser(ctx, assigneeID)
+		if err != nil {
+			return model.Todo{}, err
+		}
+		assigneeName = as.Username
+	} else {
+		assigneeID = 0 // none, or the assignee's own private chat
+	}
+	t := model.Todo{
+		AssigneeID: assigneeID, AssigneeName: assigneeName,
+		ChatID: a.ChatID, Text: strings.TrimSpace(r.Text), Status: model.TodoOpen,
+		TZ: u.TZ, CreatedBy: a.UserID, CreatedAt: now, UpdatedAt: now,
+	}
+	if r.Due != nil {
+		d := r.Due.UTC()
+		t.DueAt = &d
+	}
+	if r.Rule != nil {
+		t.Recur = r.Rule.String()
+		if t.DueAt == nil || !t.DueAt.After(now) {
+			next := r.Rule.Next(now, s.locOrDefault(u.TZ))
+			if next.IsZero() {
+				return model.Todo{}, fmt.Errorf("service: recurrence %q has no next occurrence", t.Recur)
+			}
+			next = next.UTC()
+			t.DueAt = &next
+		}
+	}
+	if err := tx.InsertTodo(ctx, &t); err != nil {
+		return model.Todo{}, err
+	}
+	if t.DueAt != nil && t.DueAt.After(now) && (r.Rule != nil || !dateOnlySentinel(r, s.locOrDefault(u.TZ), now)) {
+		if err := tx.InsertReminder(ctx, newReminder(t, *t.DueAt, model.ReminderDue, now)); err != nil {
+			return model.Todo{}, err
+		}
+	}
+	return t, nil
 }
 
 // List implements Service: open todos, ui.PageSize per page. An out-of-range

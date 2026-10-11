@@ -38,6 +38,10 @@ var (
 	ErrBadTime     = errors.New("invalid time, use HH:MM")
 	ErrInPast      = errors.New("time is in the past")
 	ErrEmptyText   = errors.New("empty text")
+	// ErrStaleDraft: the wizard draft changed since it was read (another
+	// button press, possibly on another node), or it was replaced, ended
+	// or expired (#68).
+	ErrStaleDraft = errors.New("wizard draft changed")
 )
 
 // Service is the API used by handlers.
@@ -124,6 +128,53 @@ type Service interface {
 	// other chats than userID's private chat, ordered by due time (undated
 	// last). /list in a private chat shows them under "Assigned to me".
 	ListAssigned(ctx context.Context, userID int64) ([]model.Todo, error)
+
+	// ---- Task-creation wizard (#68, ARCHITECTURE §12) ----
+	//
+	// Drafts live only in the database. Every change is a compare-and-set
+	// on Draft.Version: a write based on an out-of-date read fails with
+	// ErrStaleDraft and changes nothing. A draft expires DraftTTL (30m)
+	// after its last write and then reads as ErrNotFound. Save is SaveDraft:
+	// it ends the draft and creates the item in one transaction, through
+	// the same code as AddTodoFor (/add).
+
+	// StartDraft stores d as the draft of (d.ChatID, d.UserID), replacing
+	// any earlier one. It sets d.UpdatedAt to now, d.ExpiresAt to
+	// now+DraftTTL and d.Version.
+	StartDraft(ctx context.Context, d *model.Draft) error
+	// Draft returns the live draft of (chatID, userID); ErrNotFound if
+	// none or expired.
+	Draft(ctx context.Context, chatID, userID int64) (model.Draft, error)
+	// DraftByMessage returns the live draft whose card is (chatID, msgID),
+	// whoever started it; ErrNotFound if none or expired.
+	DraftByMessage(ctx context.Context, chatID int64, msgID int) (model.Draft, error)
+	// UpdateDraft writes d if d.Version is still the stored version,
+	// extends its expiry to now+DraftTTL, and updates d.Version,
+	// d.UpdatedAt and d.ExpiresAt. ErrStaleDraft if the draft was changed,
+	// replaced, ended or expired since d was read.
+	UpdateDraft(ctx context.Context, d *model.Draft) error
+	// EndDraft deletes the draft (Cancel) if d.Version is still the stored
+	// version and it has not expired; ErrStaleDraft otherwise. Exactly one
+	// of several concurrent callers succeeds.
+	EndDraft(ctx context.Context, d model.Draft) error
+	// SaveDraft is Save. In one transaction it deletes the draft if
+	// d.Version is still the stored version and it has not expired
+	// (ErrStaleDraft otherwise, and no item is created), then does what
+	// AddTodoFor(a, assigneeID, r) does. If that fails (ErrEmptyText, an
+	// unknown assignee, ...) the transaction is rolled back and the draft
+	// is still there with the same version. Of several concurrent calls
+	// with one version, at most one creates an item.
+	SaveDraft(ctx context.Context, d model.Draft, a Actor, assigneeID int64, r nlparse.Result) (model.Todo, error)
+	// NamedUsers returns every user with a known @username except
+	// exceptID, ordered by username. It does not check the allowlist: the
+	// handler does.
+	NamedUsers(ctx context.Context, exceptID int64) ([]model.User, error)
+	// SetKBVersion records that the user's private chat now has version v
+	// of the persistent reply keyboard (ui.NewTaskKeyboardVersion); Prefs
+	// returns it as KBVersion. The user is created with defaults if new.
+	// The handler calls it after a private reply carrying the keyboard was
+	// sent.
+	SetKBVersion(ctx context.Context, userID int64, v int) error
 }
 
 // Config holds service defaults.
@@ -140,12 +191,16 @@ type Config struct {
 	ClaimTTL time.Duration
 	// PromptTTL is how long a force-reply prompt stays answerable; 0 means 10m.
 	PromptTTL time.Duration
+	// DraftTTL is how long a wizard draft lives after its last change;
+	// 0 means 30m.
+	DraftTTL time.Duration
 }
 
-// Default claim and prompt lifetimes used when Config leaves them zero.
+// Default claim, prompt and draft lifetimes used when Config leaves them zero.
 const (
 	defaultClaimTTL  = 2 * time.Minute
 	defaultPromptTTL = 10 * time.Minute
+	defaultDraftTTL  = 30 * time.Minute
 )
 
 // Svc implements Service and scheduler.Backend.
@@ -170,6 +225,9 @@ func New(st store.Store, clk clock.Clock, cfg Config) *Svc {
 	}
 	if cfg.PromptTTL <= 0 {
 		cfg.PromptTTL = defaultPromptTTL
+	}
+	if cfg.DraftTTL <= 0 {
+		cfg.DraftTTL = defaultDraftTTL
 	}
 	if cfg.NodeID == "" {
 		cfg.NodeID = "node"

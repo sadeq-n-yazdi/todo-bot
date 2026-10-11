@@ -381,6 +381,27 @@ func (f *fakeSvc12) AddTodoFor(ctx context.Context, a service.Actor, _ int64, r 
 
 func (f *fakeSvc12) ListAssigned(context.Context, int64) ([]model.Todo, error) { return nil, nil }
 
+// Wizard drafts (#68): the fake has none.
+func (f *fakeSvc12) StartDraft(context.Context, *model.Draft) error { return nil }
+
+func (f *fakeSvc12) Draft(context.Context, int64, int64) (model.Draft, error) {
+	return model.Draft{}, service.ErrNotFound
+}
+
+func (f *fakeSvc12) DraftByMessage(context.Context, int64, int) (model.Draft, error) {
+	return model.Draft{}, service.ErrNotFound
+}
+
+func (f *fakeSvc12) UpdateDraft(context.Context, *model.Draft) error { return service.ErrStaleDraft }
+
+func (f *fakeSvc12) EndDraft(context.Context, model.Draft) error { return service.ErrStaleDraft }
+func (f *fakeSvc12) SaveDraft(context.Context, model.Draft, service.Actor, int64, nlparse.Result) (model.Todo, error) {
+	return model.Todo{}, service.ErrStaleDraft
+}
+
+func (f *fakeSvc12) NamedUsers(context.Context, int64) ([]model.User, error) { return nil, nil }
+func (f *fakeSvc12) SetKBVersion(context.Context, int64, int) error          { return nil }
+
 // harness12 wires a Handler to a fakeSvc12 and a FakeSender.
 type harness12 struct {
 	t   *testing.T
