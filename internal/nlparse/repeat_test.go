@@ -3,6 +3,9 @@ package nlparse
 import (
 	"testing"
 	"time"
+
+	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/recur"
 )
 
 // Default now: Saturday 2026-10-10 08:15 (18 Mehr 1405); tomorrow is Sunday.
@@ -67,8 +70,11 @@ func TestDateWithRepeat(t *testing.T) { runRows(t, dateRepeatRows) }
 
 // Every combined row yields a Due that is not in the past and is an
 // occurrence of its own rule.
-func TestDateWithRepeatDueIsAnOccurrence(t *testing.T) {
-	for _, r := range dateRepeatRows {
+func TestDateWithRepeatDueIsAnOccurrence(t *testing.T) { checkDueRows(t, dateRepeatRows) }
+
+func checkDueRows(t *testing.T, rows []row) {
+	t.Helper()
+	for _, r := range rows {
 		cal := r.cal
 		if cal == "" {
 			cal = greg
@@ -103,10 +109,48 @@ func TestParseWhenDateWithRepeat(t *testing.T) {
 	}
 }
 
-// Yearly needs recur.Yearly and Rule.Month from #69. When it lands: match
-// "year"/"سال" in matchRecurrence, add a recur.Yearly case to buildDatedRule
-// and firstOccurrence, then replace the skip with real rows such as
-// "تولد مامان ۱۵ مهر ساعت ۱۰ هر سال" (Jalali, yearly on 07-15 at 10:00).
-func TestDateWithYearlyRepeat(t *testing.T) {
-	t.Skip("needs recur yearly from #69")
+func yearly(cal calendar.Kind, month, day, h, m int) *recur.Rule {
+	return &recur.Rule{Freq: recur.Yearly, Cal: cal, Month: month, MonthDay: day, Hour: h, Minute: m}
 }
+
+// Default now: Saturday 2026-10-10 08:15 (18 Mehr 1405).
+var yearlyRows = []row{
+	// ---- issue #70 table ----
+	{in: "تولد مامان ۱۵ مهر ساعت ۱۰ هر سال", wantText: "تولد مامان", wantDue: "2027-10-07 10:00", wantTime: true, wantRule: yearly(jal, 7, 15, 10, 0)},
+	{in: "تولد مامان ۱۵ مهر ساعت ۱۰ هر سال", cal: jal, wantText: "تولد مامان", wantDue: "2027-10-07 10:00", wantTime: true, wantRule: yearly(jal, 7, 15, 10, 0)},
+	{in: "birthday 15 Oct 10am every year", wantText: "birthday", wantDue: "2026-10-15 10:00", wantTime: true, wantRule: yearly(greg, 10, 15, 10, 0)},
+	{in: "birthday 15 Oct 10am every year", cal: jal, wantText: "birthday", wantDue: "2026-10-15 10:00", wantTime: true, wantRule: yearly(greg, 10, 15, 10, 0)},
+	// ---- phrasings ----
+	{in: "birthday 15 Oct 9am yearly", wantText: "birthday", wantDue: "2026-10-15 09:00", wantTime: true, wantRule: yearly(greg, 10, 15, 9, 0)},
+	{in: "every year 15 Oct birthday", wantText: "birthday", wantDue: "2026-10-15 09:00", wantRule: yearly(greg, 10, 15, 9, 0)},
+	{in: "yearly 15 Oct 10:00 birthday", wantText: "birthday", wantDue: "2026-10-15 10:00", wantTime: true, wantRule: yearly(greg, 10, 15, 10, 0)},
+	{in: "تولد ۱ آبان سالانه", wantText: "تولد", wantDue: "2026-10-23 09:00", wantRule: yearly(jal, 8, 1, 9, 0)},
+	{in: "تولد ۱ آبان سالانه", cal: jal, wantText: "تولد", wantDue: "2026-10-23 09:00", wantRule: yearly(jal, 8, 1, 9, 0)},
+	{in: "هر سال ۱ آبان ۸ صبح تولد", wantText: "تولد", wantDue: "2026-10-23 08:00", wantTime: true, wantRule: yearly(jal, 8, 1, 8, 0)},
+	{in: "x 15 Oct every year @wife", wantText: "x @wife", wantDue: "2026-10-15 09:00", wantRule: yearly(greg, 10, 15, 9, 0)},
+	{in: "x tomorrow 15:00 every year", wantText: "x", wantDue: "2026-10-11 15:00", wantTime: true, wantRule: yearly(greg, 10, 11, 15, 0)},
+	{in: "x tomorrow 15:00 every year", cal: jal, wantText: "x", wantDue: "2026-10-11 15:00", wantTime: true, wantRule: yearly(jal, 7, 19, 15, 0)},
+	// ---- a bare repeat starts today ----
+	{in: "x every year", wantText: "x", wantDue: "2026-10-10 09:00", wantRule: yearly(greg, 10, 10, 9, 0)},
+	{in: "x every year", cal: jal, wantText: "x", wantDue: "2026-10-10 09:00", wantRule: yearly(jal, 7, 18, 9, 0)},
+	{in: "x هر سال", cal: jal, wantText: "x", wantDue: "2026-10-10 09:00", wantRule: yearly(jal, 7, 18, 9, 0)},
+	{in: "x every year at 15:00", wantText: "x", wantDue: "2026-10-10 15:00", wantTime: true, wantRule: yearly(greg, 10, 10, 15, 0)},
+	{in: "x every year", now: "2026-10-10 10:00", wantText: "x", wantDue: "2027-10-10 09:00", wantRule: yearly(greg, 10, 10, 9, 0)},
+	// ---- Due is the first occurrence at or after now ----
+	{in: "x 5 Mar every year", wantText: "x", wantDue: "2027-03-05 09:00", wantRule: yearly(greg, 3, 5, 9, 0)},
+	{in: "x 5 Oct 2026 every year", wantText: "x", wantDue: "2027-10-05 09:00", wantRule: yearly(greg, 10, 5, 9, 0)},
+	{in: "x 10 Oct 9am every year", now: "2026-10-10 10:00", wantText: "x", wantDue: "2027-10-10 09:00", wantTime: true, wantRule: yearly(greg, 10, 10, 9, 0)},
+	{in: "x 25 Dec 2030 every year", wantText: "x", wantDue: "2030-12-25 09:00", wantRule: yearly(greg, 12, 25, 9, 0)},
+	// ---- 29 Feb and 30 Esfand: start on the next real one; the rule clamps in common years ----
+	{in: "x 29 Feb every year", wantText: "x", wantDue: "2028-02-29 09:00", wantRule: yearly(greg, 2, 29, 9, 0)},
+	{in: "x 29 Feb every year", now: "2028-03-01 08:15", wantText: "x", wantDue: "2029-02-28 09:00", wantRule: yearly(greg, 2, 29, 9, 0)},
+	{in: "x 30 Esfand every year", cal: jal, wantText: "x", wantDue: "2030-03-20 09:00", wantRule: yearly(jal, 12, 30, 9, 0)},
+	{in: "x 29 Esfand every year", cal: jal, wantText: "x", wantDue: "2027-03-20 09:00", wantRule: yearly(jal, 12, 29, 9, 0)},
+	// ---- not combined ----
+	{in: "x tomorrow every day", wantText: "x tomorrow", wantDue: "2026-10-10 09:00", wantRule: daily(9, 0)},
+}
+
+func TestDateWithYearlyRepeat(t *testing.T) { runRows(t, yearlyRows) }
+
+// The yearly rows also meet the Due property above.
+func TestYearlyRowsDueIsAnOccurrence(t *testing.T) { checkDueRows(t, yearlyRows) }

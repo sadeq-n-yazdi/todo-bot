@@ -7,7 +7,8 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
-- A date and time combined with a repeat (#70): `call mom tomorrow 15:00 every week` and `گزارش فردا ساعت ۱۵ هر هفته` start on that date and repeat on that weekday at that time. Monthly repeats use the day of the month, and a Jalali month name (`۱ آبان هر ماه`) anchors a Jalali monthly repeat. The first due time is always the rule's next occurrence at or after now. Yearly comes with #68.
+- A date and time combined with a repeat (#70): `call mom tomorrow 15:00 every week` and `گزارش فردا ساعت ۱۵ هر هفته` start on that date and repeat on that weekday at that time. Monthly repeats use the day of the month, and a Jalali month name (`۱ آبان هر ماه`) anchors a Jalali monthly repeat. The first due time is always the rule's next occurrence at or after now.
+- Yearly repeats (#70): `every year`, `yearly`, `هر سال` and `سالانه`. With a date, such as `birthday 15 Oct 9am every year` or `تولد ۱ آبان هر سال`, the item repeats on that month and day in the calendar of the date. A bare `every year` starts today. A date of 29 Feb or 30 Esfand starts on the next real occurrence and falls on the last day of the month in common years.
 
 ## [0.1.1] - 2026-10-10
 
