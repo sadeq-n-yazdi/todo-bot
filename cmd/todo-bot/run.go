@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/url"
 	"runtime/debug"
 	"time"
@@ -19,7 +21,7 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/scheduler"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/service"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
-	_ "github.com/sadeq-n-yazdi/todo-bot/internal/store/sqlite" // registers the "sqlite" scheme
+	"github.com/sadeq-n-yazdi/todo-bot/internal/store/sqlite" // registers the "sqlite" scheme
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg/tgbot"
 )
@@ -44,6 +46,16 @@ var (
 // openStore opens the database; tests wrap it.
 var openStore = store.Open
 
+// openExisting opens a sqlite database that must exist, without migrating it.
+// Only backup uses it; store.Open cannot.
+var openExisting = func(ctx context.Context, raw string) (store.Store, error) {
+	d, err := sqlite.OpenExistingURL(ctx, raw)
+	if err != nil {
+		return nil, err // not a typed nil inside the interface
+	}
+	return d, nil
+}
+
 // tgServerURL points the Telegram client at another server; tests set it.
 var tgServerURL string
 
@@ -51,8 +63,8 @@ var tgServerURL string
 var menu = []string{"help", "new", "add", "list", "done", "del", "edit", "today", "remind", "tz", "digest", "lang", "calendar"}
 
 const usage = "usage: todo-bot [run|version|migrate|backup PATH]\n" +
-	"  backup opens the database like run does: it creates a missing file and applies\n" +
-	"  pending migrations before it copies.\n"
+	"  backup opens an existing database without migrating it. It fails if the\n" +
+	"  database file does not exist.\n"
 
 // run is the whole program: it returns the process exit code. args excludes
 // the program name.
@@ -128,12 +140,18 @@ func loadAdminConfig(env func(string) string) (config.Config, error) {
 }
 
 // openAdmin loads the config and opens the database for migrate and backup.
-func openAdmin(ctx context.Context, env func(string) string) (store.Store, error) {
+// With existing set, a sqlite database must already be there and is not
+// migrated (sqlite.OpenExistingURL); other schemes open as usual.
+func openAdmin(ctx context.Context, env func(string) string, existing bool) (store.Store, error) {
 	cfg, err := loadAdminConfig(env)
 	if err != nil {
 		return nil, err
 	}
-	st, err := openStore(ctx, cfg.DBURL)
+	open := openStore
+	if u, perr := url.Parse(cfg.DBURL); existing && perr == nil && u.Scheme == "sqlite" {
+		open = openExisting
+	}
+	st, err := open(ctx, cfg.DBURL)
 	if err != nil {
 		return nil, fmt.Errorf("open database %s: %w", redactURL(cfg.DBURL), err)
 	}
@@ -141,7 +159,7 @@ func openAdmin(ctx context.Context, env func(string) string) (store.Store, error
 }
 
 func migrate(ctx context.Context, env func(string) string, stdout io.Writer) error {
-	st, err := openAdmin(ctx, env) // opening applies pending migrations
+	st, err := openAdmin(ctx, env, false) // opening applies pending migrations
 	if err != nil {
 		return err
 	}
@@ -158,10 +176,10 @@ func migrate(ctx context.Context, env func(string) string, stdout io.Writer) err
 }
 
 // backup writes a consistent copy of the database to dest. It opens the
-// database through store.Open, so it may create a missing file and apply
-// pending migrations first (a read-only open is a follow-up).
+// database without creating it and without migrating it, so a newer binary
+// never changes the live database before it copies it.
 func backup(ctx context.Context, env func(string) string, dest string, stdout io.Writer) error {
-	st, err := openAdmin(ctx, env)
+	st, err := openAdmin(ctx, env, true)
 	if err != nil {
 		return err
 	}
@@ -298,10 +316,10 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 	return nil
 }
 
-// connectTelegram calls getMe, retrying with a capped backoff on network and
-// server errors, so that a short outage at boot does not fail the service.
-// A rejected token (4xx other than 429) is fatal. It returns (nil, nil) if ctx
-// ended while waiting.
+// connectTelegram calls getMe, retrying with a capped backoff on transient
+// errors, so that a short outage at boot does not fail the service. Any other
+// error, such as a rejected token (4xx other than 429), is fatal. It returns
+// (nil, nil) if ctx ended while waiting.
 func connectTelegram(ctx context.Context, token string, log *slog.Logger) (*tgbot.Bot, error) {
 	delay := startBackoffMin
 	for {
@@ -312,18 +330,43 @@ func connectTelegram(ctx context.Context, token string, log *slog.Logger) (*tgbo
 		if ctx.Err() != nil {
 			return nil, nil
 		}
-		var ae *tg.APIError
-		if errors.As(err, &ae) && ae.Code >= 400 && ae.Code < 500 && ae.Code != 429 {
+		wait, ok := retryWait(err, delay)
+		if !ok {
 			return nil, fmt.Errorf("telegram: %w", err)
 		}
-		log.Warn("telegram unavailable, retrying", "in", delay, "err", err)
+		log.Warn("telegram unavailable, retrying", "in", wait, "err", err)
 		select {
 		case <-ctx.Done():
 			return nil, nil
-		case <-time.After(delay):
+		case <-time.After(wait):
 		}
 		delay = min(delay*2, startBackoffMax)
 	}
+}
+
+// retryWait decides whether a failed getMe is worth retrying and for how
+// long to wait. Only network and transport errors (*url.Error implements
+// net.Error), 5xx, 429 and response-body decode errors are retried. A proxy
+// or gateway that answers 502 with an HTML page gives a decode error. On a
+// 429 the wait is at least the RetryAfter that Telegram sent.
+func retryWait(err error, delay time.Duration) (time.Duration, bool) {
+	var ae *tg.APIError
+	if errors.As(err, &ae) {
+		switch {
+		case ae.Code == 429:
+			return max(delay, ae.RetryAfter), true
+		case ae.Code >= 500:
+			return delay, true
+		}
+		return 0, false
+	}
+	var syn *json.SyntaxError
+	var typ *json.UnmarshalTypeError
+	var ne net.Error
+	if errors.As(err, &syn) || errors.As(err, &typ) || errors.As(err, &ne) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return delay, true
+	}
+	return 0, false
 }
 
 func waitFor(done <-chan struct{}, timeout <-chan time.Time) bool {

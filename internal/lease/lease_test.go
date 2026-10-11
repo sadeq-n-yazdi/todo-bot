@@ -69,6 +69,7 @@ func (f *flakyStore) ReleaseLease(ctx context.Context, name, holder string) erro
 type node struct {
 	st     *flakyStore  // nil unless the node uses a flakyStore
 	next   atomic.Int64 // last idle report, UnixNano
+	exited atomic.Bool  // Run has returned
 	cancel context.CancelFunc
 	done   chan error
 
@@ -103,7 +104,7 @@ func startStore(t *testing.T, clk *clocktest.Fake, tr *tracker, st store.Store, 
 	n.cancel = cancel
 	t.Cleanup(cancel)
 	go func() {
-		n.done <- lease.RunWithIdle(ctx, st, clk, leaseKey, name, ttl, func(lctx context.Context, epoch int64) {
+		err := lease.RunWithIdle(ctx, st, clk, leaseKey, name, ttl, func(lctx context.Context, epoch int64) {
 			tr.enter()
 			n.mu.Lock()
 			n.epochs = append(n.epochs, epoch)
@@ -118,6 +119,8 @@ func startStore(t *testing.T, clk *clocktest.Fake, tr *tracker, st store.Store, 
 			n.mu.Unlock()
 			tr.exit()
 		}, func(next time.Time) { n.next.Store(next.UnixNano()) })
+		n.exited.Store(true)
+		n.done <- err
 	}()
 	return n
 }
@@ -152,6 +155,9 @@ func settle(t *testing.T, clk *clocktest.Fake, nodes ...*node) {
 	eventually(t, "loops to go idle", func() bool {
 		now := clk.Now().UnixNano()
 		for _, n := range nodes {
+			if n.exited.Load() {
+				t.Fatal("settle: a node's Run has returned; it will never go idle")
+			}
 			if n.next.Load() <= now {
 				return false
 			}
@@ -344,17 +350,19 @@ type hangStore struct {
 	passthrough bool // after unblock, perform the real call (a late write)
 	once        sync.Once
 	hung        atomic.Int64 // hanging calls started
-	inflight    atomic.Int64 // hanging calls running now
-	maxIn       atomic.Int64
+	inflight    atomic.Int64 // calls running now, hanging or not
+	maxIn       atomic.Int64 // most calls that ran at once
+	lateWrite   bool         // with honourCtx: a cancelled call still writes when unblocked
+	late        sync.WaitGroup
 }
 
 func (h *hangStore) AcquireLease(ctx context.Context, name, holder string, now time.Time, d time.Duration) (model.Lease, error) {
+	cur := h.inflight.Add(1) // every call counts, so maxIn is the real concurrency
+	defer h.inflight.Add(-1)
+	for m := h.maxIn.Load(); cur > m && !h.maxIn.CompareAndSwap(m, cur); m = h.maxIn.Load() {
+	}
 	if h.hang.Load() {
 		h.hung.Add(1)
-		cur := h.inflight.Add(1)
-		defer h.inflight.Add(-1)
-		for m := h.maxIn.Load(); cur > m && !h.maxIn.CompareAndSwap(m, cur); m = h.maxIn.Load() {
-		}
 		select {
 		case h.entered <- struct{}{}:
 		default:
@@ -363,6 +371,16 @@ func (h *hangStore) AcquireLease(ctx context.Context, name, holder string, now t
 			select {
 			case <-ctx.Done():
 				h.ctxWasDone.Store(true)
+				if h.lateWrite {
+					// The caller gave up, but the write is still queued
+					// in the database and lands when unblocked.
+					h.late.Add(1)
+					go func() {
+						defer h.late.Done()
+						<-h.unblock
+						_, _ = h.Store.AcquireLease(context.WithoutCancel(ctx), name, holder, now, d)
+					}()
+				}
 				return model.Lease{}, ctx.Err()
 			case <-h.unblock:
 			}
@@ -373,9 +391,6 @@ func (h *hangStore) AcquireLease(ctx context.Context, name, holder string, now t
 			return h.Store.AcquireLease(context.WithoutCancel(ctx), name, holder, now, d)
 		}
 		return model.Lease{}, errors.New("timeout")
-	}
-	if h.down.Load() {
-		return model.Lease{}, errors.New("store down")
 	}
 	if h.down.Load() {
 		return model.Lease{}, errors.New("store down")

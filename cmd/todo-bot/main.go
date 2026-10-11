@@ -5,7 +5,7 @@
 //	todo-bot [run]        start the bot (default)
 //	todo-bot version      print the version
 //	todo-bot migrate      apply database migrations and exit
-//	todo-bot backup PATH  write a consistent database copy to PATH
+//	todo-bot backup PATH  write a consistent copy of an existing database to PATH
 package main
 
 import (

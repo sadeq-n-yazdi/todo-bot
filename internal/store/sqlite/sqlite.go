@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -40,6 +41,30 @@ const dsnParams = "?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_tim
 var pathEscaper = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
 
 func dsn(path string) string { return "file:" + pathEscaper.Replace(path) + dsnParams }
+
+// dsnExisting is dsn with mode=rw: SQLite then fails on a missing file
+// instead of creating it.
+func dsnExisting(path string) string {
+	return "file:" + pathEscaper.Replace(path) + dsnParams + "&mode=rw"
+}
+
+// OpenExisting opens the database at path, which must exist, with the same
+// pragmas as Open. It does not create the file and does not apply migrations.
+func OpenExisting(ctx context.Context, path string) (*DB, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("sqlite: database %s: %w", path, err)
+	}
+	sdb, err := sql.Open("sqlite", dsnExisting(path))
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: open %s: %w", path, err)
+	}
+	sdb.SetMaxOpenConns(1)
+	if err := ping(ctx, sdb); err != nil {
+		_ = sdb.Close()
+		return nil, fmt.Errorf("sqlite: ping %s: %w", path, err)
+	}
+	return &DB{DB: sqlstore.New(dialect{}, sdb), raw: sdb}, nil
+}
 
 // Open opens (creating if needed) the database at path with WAL, foreign keys
 // and busy_timeout pragmas, and applies pending migrations.
@@ -90,18 +115,51 @@ func ping(ctx context.Context, db *sql.DB) error {
 	return err
 }
 
-// opener implements store.Opener. An absolute path is u.Path
-// (sqlite:///var/lib/x.db), a relative one u.Opaque (sqlite:todo.db). A host
-// is rejected, and so are credentials, a query and a fragment. Errors never contain the URL.
+// opener implements store.Opener.
 func opener(ctx context.Context, u *url.URL) (store.Store, error) {
+	path, err := urlPath(u)
+	if err != nil {
+		return nil, err
+	}
+	d, err := Open(ctx, path)
+	if err != nil {
+		return nil, err // not "return Open(...)": that would wrap a nil *DB in a non-nil interface
+	}
+	return d, nil
+}
+
+// OpenExistingURL is OpenExisting for a database URL of the sqlite scheme,
+// with the same URL rules as store.Open. It is not reachable through
+// store.Open, so only code that calls it, such as the backup command, can
+// open a database without migrating it.
+func OpenExistingURL(ctx context.Context, raw string) (*DB, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, errors.New("sqlite: invalid database URL")
+	}
+	if u.Scheme != "sqlite" {
+		return nil, errors.New("sqlite: database URL must use the sqlite scheme")
+	}
+	path, err := urlPath(u)
+	if err != nil {
+		return nil, err
+	}
+	return OpenExisting(ctx, path)
+}
+
+// urlPath returns the file path of a sqlite URL. An absolute path is u.Path
+// (sqlite:///var/lib/x.db), a relative one u.Opaque (sqlite:todo.db). A host
+// is rejected, and so are credentials, a query and a fragment. Errors never
+// contain the URL.
+func urlPath(u *url.URL) (string, error) {
 	if u.User != nil {
-		return nil, errors.New("sqlite: database URL must not have credentials")
+		return "", errors.New("sqlite: database URL must not have credentials")
 	}
 	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
-		return nil, errors.New("sqlite: database URL must not have a query or fragment")
+		return "", errors.New("sqlite: database URL must not have a query or fragment")
 	}
 	if u.Host != "" {
-		return nil, errors.New("sqlite: database URL must not have a host (use sqlite:///abs/path or sqlite:rel/path)")
+		return "", errors.New("sqlite: database URL must not have a host (use sqlite:///abs/path or sqlite:rel/path)")
 	}
 	path := u.Path
 	if u.Opaque != "" {
@@ -111,13 +169,9 @@ func opener(ctx context.Context, u *url.URL) (store.Store, error) {
 		}
 	}
 	if path == "" {
-		return nil, errors.New("sqlite: database URL has no path")
+		return "", errors.New("sqlite: database URL has no path")
 	}
-	d, err := Open(ctx, path)
-	if err != nil {
-		return nil, err // not "return Open(...)": that would wrap a nil *DB in a non-nil interface
-	}
-	return d, nil
+	return path, nil
 }
 
 // Backup writes a consistent copy of the database to path using VACUUM INTO.

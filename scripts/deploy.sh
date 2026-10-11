@@ -167,11 +167,37 @@ if [ -x "$bin" ]; then
 		envargs=(STATE_DIRECTORY="$state")
 		if [ -n "$db_path" ]; then envargs+=(TODO_DB_PATH="$db_path"); fi
 		if [ -n "$db_url" ]; then envargs+=(TODO_DB_URL="$db_url"); fi
-		stamp=$(date -u +%Y%m%dT%H%M%SZ)
-		runuser -u "$app" -- mkdir -p -m 0750 "$backups"
-		runuser -u "$app" -- env "${envargs[@]}" "$bin" backup "$backups/todo-$stamp.db"
-		# Keep the newest 10 backups.
-		runuser -u "$app" -- sh -c 'ls -1t "$1"/todo-*.db | tail -n +11 | xargs -r rm -f --' sh "$backups"
+		# The backup command fails if the database file is missing (the state
+		# directory can exist before the bot ever created the database). Find
+		# the sqlite file the same way the bot does and test it as the service
+		# user. A non-sqlite URL, or a path that is not a plain absolute path,
+		# is not checked: the backup command decides.
+		dbfile=
+		if [ -n "$db_url" ]; then
+			case $db_url in
+			sqlite:///*) dbfile=${db_url#sqlite://} ;;
+			esac
+		elif [ -n "$db_path" ]; then
+			dbfile=$db_path
+		else
+			dbfile=$state/todo.db
+		fi
+		case $dbfile in
+		/* | "") ;;
+		*) dbfile= ;;
+		esac
+		case $dbfile in
+		*%*) dbfile= ;;
+		esac
+		if [ -n "$dbfile" ] && ! runuser -u "$app" -- test -e "$dbfile"; then
+			echo "deploy: no database yet ($dbfile); nothing to back up"
+		else
+			stamp=$(date -u +%Y%m%dT%H%M%SZ)
+			runuser -u "$app" -- mkdir -p -m 0750 "$backups"
+			runuser -u "$app" -- env "${envargs[@]}" "$bin" backup "$backups/todo-$stamp.db"
+			# Keep the newest 10 backups.
+			runuser -u "$app" -- sh -c 'ls -1t "$1"/todo-*.db | tail -n +11 | xargs -r rm -f --' sh "$backups"
+		fi
 	else
 		install -d -o "$app" -g "$app" -m 0750 "$state"
 		echo "deploy: $state did not exist; nothing to back up"
