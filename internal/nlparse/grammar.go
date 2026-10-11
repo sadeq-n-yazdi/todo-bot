@@ -74,9 +74,12 @@ func (p *parser) key(k int) string {
 // parseFrom reports whether toks[start:] is, in full, one date phrase.
 func parseFrom(toks []token, start int, cal calendar.Kind, lenient bool) (phrase, bool) {
 	p := &parser{toks: toks, i: start, cal: cal}
+	late := false // the recurrence came after a date or time
 	for p.i < len(toks) {
 		switch {
 		case p.i == start && p.matchRecurrence():
+		case p.i > start && p.ph.rec == nil && (p.ph.date != nil || p.ph.tm != nil) && p.matchRecurrence():
+			late = true // "tomorrow 15:00 every week"
 		case p.matchRel(), p.matchTime(), p.matchPartOfDay(), p.matchDate():
 		case isConnector(p.key(p.i)) && (p.i == start || !isConnector(p.key(p.i-1))) && p.i+1 < len(toks):
 			p.i++
@@ -89,6 +92,11 @@ func parseFrom(toks []token, start int, cal calendar.Kind, lenient bool) (phrase
 		return phrase{}, false
 	}
 	if ph.date == nil && ph.tm == nil && ph.rel == nil && ph.rec == nil {
+		return phrase{}, false
+	}
+	// A date or time may only be combined with a weekly or monthly repeat;
+	// "tomorrow every day" is not one phrase.
+	if r := ph.rec; r != nil && (late || ph.date != nil) && r.freq != recur.Weekly && r.freq != recur.Monthly {
 		return phrase{}, false
 	}
 	if ph.rel != nil && (ph.rel.u == unitMinute || ph.rel.u == unitHour) && (ph.date != nil || ph.tm != nil) {
@@ -276,7 +284,7 @@ func (p *parser) wdAt(j int) (time.Weekday, int, bool) {
 }
 
 func (p *parser) matchDate() bool {
-	if p.ph.date != nil || p.ph.rec != nil || p.ph.rel != nil {
+	if p.ph.date != nil || p.ph.rel != nil {
 		return false
 	}
 	k := p.key(p.i)
@@ -582,7 +590,7 @@ func (p *parser) monthlyTail(j int) bool {
 	if k := p.key(j); k == "day" || k == "روز" {
 		j++
 	}
-	if d, nj, ok := p.numAt(j); ok && d >= 1 && d <= 31 && !p.timeWordAt(nj) {
+	if d, nj, ok := p.numAt(j); ok && d >= 1 && d <= 31 && !p.timeWordAt(nj) && !p.monthWordAt(nj) {
 		return p.setRec(recSpec{freq: recur.Monthly, monthDay: d}, nj)
 	}
 	return p.setRec(recSpec{freq: recur.Monthly}, start)
@@ -593,6 +601,13 @@ func (p *parser) monthlyTail(j int) bool {
 func (p *parser) timeWordAt(j int) bool {
 	k := p.key(j)
 	return k == "am" || k == "pm" || periodWords[k] != 0
+}
+
+// monthWordAt reports whether token j is a month name, meaning the number
+// before it is a day of a date ("every month 1 Nov"), not a day of month rule.
+func (p *parser) monthWordAt(j int) bool {
+	_, ok := monthWords[p.key(j)]
+	return ok
 }
 
 // numAt parses a day-like number at token j, with an ordinal suffix attached

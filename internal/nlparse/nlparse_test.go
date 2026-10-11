@@ -340,7 +340,10 @@ func parseNow(t *testing.T, s, tz string) time.Time {
 	return now
 }
 
-func TestParse(t *testing.T) {
+func TestParse(t *testing.T) { runRows(t, rows) }
+
+func runRows(t *testing.T, rows []row) {
+	t.Helper()
 	for _, r := range rows {
 		cal := r.cal
 		if cal == "" {

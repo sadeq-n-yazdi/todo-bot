@@ -51,6 +51,15 @@
 //     "2026-10-15" always means what it says.
 //   - Daily, weekly and every-N rules are always Gregorian; a monthly rule
 //     takes cal. Rule.Anchor of an every-N rule is the first occurrence.
+//   - A weekly or monthly repeat may be combined with a date and/or time, before
+//     or after it ("call mom tomorrow 15:00 every week", "every month 1 Nov
+//     pay rent"). "every week|month" (and weekly/monthly) take their weekday,
+//     or their day of month in cal, from the date, and Due is that date. When
+//     the repeat names its own days ("next monday every friday", "5 Nov every
+//     month on the 10th") the repeat wins and the date only says where to
+//     start: Due is the first occurrence on or after the date's day. Daily and
+//     every-N repeats are not combined with a date ("tomorrow every day" is
+//     "tomorrow" in the text and a plain daily rule).
 //   - Result.Due is computed here, with calendar arithmetic, and is also set
 //     for recurring phrases (the first occurrence).
 package nlparse

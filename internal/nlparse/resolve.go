@@ -45,7 +45,7 @@ func (p Parser) resolve(ph phrase, now time.Time, cal calendar.Kind) (Result, bo
 	var due time.Time
 	var rule *recur.Rule
 	switch {
-	case ph.rec != nil:
+	case ph.rec != nil && ph.date == nil:
 		r := buildRule(*ph.rec, h, m, now, cal)
 		due = firstOccurrence(&r, now)
 		rule = &r
@@ -74,6 +74,15 @@ func (p Parser) resolve(ph phrase, now time.Time, cal calendar.Kind) (Result, bo
 		// reminder for it. An explicit time is kept as given, even if past.
 		if ph.tm == nil && sameDay(due, now) && !due.After(now) {
 			due, hasTime = at(0, 23, 59), false
+		}
+		if ph.rec != nil {
+			r := buildDatedRule(*ph.rec, h, m, due, cal)
+			if explicit(*ph.rec) {
+				// The repeat names its own days: it wins over the date,
+				// which only says where to start.
+				due = firstOccurrence(&r, notBefore(due, now))
+			}
+			rule = &r
 		}
 	default: // time of day only
 		due = at(0, h, m)
@@ -133,6 +142,46 @@ func buildRule(r recSpec, h, m int, now time.Time, cal calendar.Kind) recur.Rule
 		}
 	}
 	return out
+}
+
+// explicit reports whether a weekly or monthly repeat names its own days
+// ("every friday", "every month on the 10th") rather than taking them from
+// the date it is combined with ("tomorrow every week").
+func explicit(r recSpec) bool {
+	switch r.freq {
+	case recur.Weekly:
+		return len(r.wds) > 0
+	case recur.Monthly:
+		return r.monthDay != 0
+	}
+	return false
+}
+
+// buildDatedRule builds the rule for a repeat combined with a date that
+// resolved to on. Weekly and monthly repeats without days of their own repeat
+// on the weekday or, in cal, the day of month of on. Yearly will be one more
+// case here (month and day of on in cal).
+func buildDatedRule(r recSpec, h, m int, on time.Time, cal calendar.Kind) recur.Rule {
+	if !explicit(r) {
+		switch r.freq {
+		case recur.Weekly:
+			r.wds = []time.Weekday{on.Weekday()}
+		case recur.Monthly:
+			r.monthDay = cal.Split(on).Day
+		}
+	}
+	return buildRule(r, h, m, on, cal)
+}
+
+// notBefore returns the instant just before the start of d's day, or now if
+// that is later: the "after" bound for the first occurrence on or after d.
+func notBefore(d, now time.Time) time.Time {
+	y, mo, day := d.Date()
+	b := time.Date(y, mo, day, 0, 0, 0, 0, d.Location()).Add(-time.Second)
+	if b.Before(now) {
+		return now
+	}
+	return b
 }
 
 // firstOccurrence computes the first time rule r fires strictly after now.
