@@ -14,19 +14,22 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/ui"
 )
 
-// Callback data for the /lang and /calendar buttons. ui.Encode only knows
-// the todo/reminder actions, so settings buttons use their own short
-// prefixes ("sl:fa", "sc:jalali"), which cannot clash with a ui.ActionKind.
-const (
-	settingLang = "sl"
-	settingCal  = "sc"
-)
-
-func settingData(kind, val string) string { return kind + ":" + val }
-
-func parseSetting(data string) (kind, val string, ok bool) {
-	kind, val, ok = strings.Cut(data, ":")
-	return kind, val, ok && (kind == settingLang || kind == settingCal)
+// legacySetting parses the pre-codec settings data "sl:<lang>" and
+// "sc:<calendar>" of buttons in messages that were sent before these
+// buttons used ui.Encode. It returns the equivalent action; the value is
+// not validated here.
+//
+// LEGACY: remove legacySetting, and its use in onCallback, in v0.1.5.
+func legacySetting(data string) (ui.Action, bool) {
+	kind, val, ok := strings.Cut(data, ":")
+	if !ok || val == "" || strings.Contains(val, ":") {
+		return ui.Action{}, false
+	}
+	switch ui.ActionKind(kind) {
+	case ui.ActSetLang, ui.ActSetCal:
+		return ui.Action{Kind: ui.ActionKind(kind), Arg: val}, true
+	}
+	return ui.Action{}, false
 }
 
 // onCallback handles an inline button press from an allowlisted user. It
@@ -38,10 +41,10 @@ func (h *Handler) onCallback(ctx context.Context, cb *tg.Callback, r req) error 
 		note string
 		err  error
 	)
-	if kind, val, ok := parseSetting(cb.Data); ok {
-		note, err = h.settingCallback(ctx, cb, r, kind, val)
-	} else if act, derr := ui.Decode(cb.Data); derr == nil {
+	if act, derr := ui.Decode(cb.Data); derr == nil {
 		note, err = h.actionCallback(ctx, cb, r, act)
+	} else if act, ok := legacySetting(cb.Data); ok { // LEGACY: remove in v0.1.5
+		note, err = h.settingCallback(ctx, cb, r, act)
 	} else {
 		h.Log.Warn("bad callback data", "data", cb.Data)
 	}
@@ -86,6 +89,8 @@ func (h *Handler) actionCallback(ctx context.Context, cb *tg.Callback, r req, ac
 	lc := r.Prefs.Locale
 	gone := lc.T("settings.cb.gone")
 	switch act.Kind {
+	case ui.ActSetLang, ui.ActSetCal:
+		return h.settingCallback(ctx, cb, r, act)
 	case ui.ActWizStart, ui.ActWizDate, ui.ActWizMonth, ui.ActWizTime, ui.ActWizRepeat,
 		ui.ActWizAssign, ui.ActWizNav, ui.ActWizEdit, ui.ActWizNoop:
 		return h.wizardCallback(ctx, cb, r, act)
@@ -192,11 +197,11 @@ func (h *Handler) sendPrompt(ctx context.Context, cb *tg.Callback, kind model.Pr
 }
 
 // settingCallback handles the /lang and /calendar buttons.
-func (h *Handler) settingCallback(ctx context.Context, cb *tg.Callback, r req, kind, val string) (string, error) {
+func (h *Handler) settingCallback(ctx context.Context, cb *tg.Callback, r req, act ui.Action) (string, error) {
 	lc := r.Prefs.Locale
-	switch kind {
-	case settingLang:
-		lang := i18n.Lang(val)
+	switch act.Kind {
+	case ui.ActSetLang:
+		lang := i18n.Lang(act.Arg)
 		if !lang.Valid() {
 			return "", nil
 		}
@@ -212,8 +217,8 @@ func (h *Handler) settingCallback(ctx context.Context, cb *tg.Callback, r req, k
 			}
 		}
 		h.editCallbackMsg(ctx, cb, tg.OutMessage{Text: lc.T("settings.lang.set", langName(lc, lang))})
-	case settingCal:
-		cal := calendar.Kind(val)
+	case ui.ActSetCal:
+		cal := calendar.Kind(act.Arg)
 		if !cal.Valid() {
 			return "", nil
 		}
