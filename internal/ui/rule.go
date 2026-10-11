@@ -16,6 +16,15 @@ import (
 // lc; lc gives the language and digits only. The time of day is left out. A
 // rule that does not parse gives "".
 func DescribeRule(rule string, lc i18n.Locale) string {
+	return describeRule(rule, lc)
+}
+
+// ruleMax is the longest phrase in runes that a list row shows. A longer one
+// is cut with "…", so a list page stays under the 4096-unit message limit.
+// The compact "Assigned to me" rows show no phrase, for the same reason.
+const ruleMax = 40
+
+func describeRule(rule string, lc i18n.Locale) string {
 	r, err := recur.Parse(rule)
 	if err != nil {
 		return ""
@@ -62,11 +71,30 @@ func describeWeekly(days []time.Weekday, lc i18n.Locale) string {
 	case isWorkweek(days):
 		return lc.T("ui.rule.weekdays")
 	}
+	if lc.Lang == i18n.Fa {
+		days = saturdayFirst(days)
+	}
 	names := make([]string, len(days))
 	for i, d := range days {
 		names[i] = lc.WeekdayName(d, true)
 	}
 	return lc.T("ui.rule.weekly", strings.Join(names, lc.T("ui.rule.sep")))
+}
+
+// saturdayFirst orders days Saturday, Sunday, ..., Friday (the Iranian week).
+func saturdayFirst(days []time.Weekday) []time.Weekday {
+	out := make([]time.Weekday, 0, len(days))
+	for _, d := range days {
+		if d == time.Saturday {
+			out = append(out, d)
+		}
+	}
+	for _, d := range days {
+		if d != time.Saturday {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // isWorkweek reports whether days is exactly Monday to Friday.
@@ -103,7 +131,7 @@ func ruleDay(lc i18n.Locale, n int) string {
 
 // ruleSuffix is " <phrase>" for a rule, or "" when the rule has no phrase.
 func ruleSuffix(rule string, lc i18n.Locale) string {
-	if d := DescribeRule(rule, lc); d != "" {
+	if d := clip(DescribeRule(rule, lc), ruleMax); d != "" {
 		return " " + Escape(d)
 	}
 	return ""

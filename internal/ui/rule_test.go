@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
@@ -15,8 +16,9 @@ func TestDescribeRule(t *testing.T) {
 	}{
 		{"daily 09:00", "every day", "هر روز"},
 		{"weekly mon,wed 08:00", "every Mon, Wed", "هر دوشنبه، چهارشنبه"},
-		{"weekly mon,tue,wed,thu,fri 09:30", "every weekday", "هر روز کاری"},
+		{"weekly mon,tue,wed,thu,fri 09:30", "every weekday", "هر دوشنبه تا جمعه"},
 		{"weekly sun,mon,tue,wed,thu,fri,sat 09:30", "every day", "هر روز"},
+		{"weekly sat,sun 08:00", "every Sun, Sat", "هر شنبه، یکشنبه"},
 		{"monthly 5 10:00", "every month on the 5th", "هر ماه روز ۵"},
 		{"monthly 22 10:00", "every month on the 22nd", "هر ماه روز ۲۲"},
 		{"monthly 11 10:00", "every month on the 11th", "هر ماه روز ۱۱"},
@@ -67,5 +69,21 @@ func TestItemLineShowsRule(t *testing.T) {
 	td.Recur = "daily"
 	if got := itemLine(td, locEnG, testLoc, testNow); !strings.HasSuffix(got, " 🔁") {
 		t.Errorf("unparsable: %q", got)
+	}
+}
+
+func TestRuleSuffixLongRowsFit(t *testing.T) {
+	long := "weekly sun,mon,tue,wed,thu,fri 09:00"
+	var own, assigned []model.Todo
+	text := strings.Repeat("ک", 80)
+	for i := 0; i < 10; i++ {
+		own = append(own, model.Todo{ID: int64(i + 1), Num: 100 + i, Text: text, Status: model.TodoOpen, DueAt: at(20, 9, 0), Recur: long})
+	}
+	for i := 0; i < MaxAssigned; i++ {
+		assigned = append(assigned, model.Todo{ID: int64(50 + i), Num: 200 + i, Text: text, Status: model.TodoOpen, DueAt: at(20, 9, 0), Recur: long})
+	}
+	m := TodoListAssigned(own, assigned, locFaJ, testLoc, testNow, 0, 2)
+	if n := len(utf16.Encode([]rune(m.Text))); n > 4096 {
+		t.Errorf("text has %d UTF-16 units", n)
 	}
 }

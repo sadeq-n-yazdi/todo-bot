@@ -20,7 +20,7 @@ func init() {
 	})
 	i18n.Register(i18n.Fa, map[string]string{
 		"ui.rule.daily":          "هر روز",
-		"ui.rule.weekdays":       "هر روز کاری",
+		"ui.rule.weekdays":       "هر دوشنبه تا جمعه",
 		"ui.rule.weekly":         "هر %s",
 		"ui.rule.sep":            "، ",
 		"ui.rule.monthly":        "هر ماه روز %s",

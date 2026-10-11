@@ -142,7 +142,7 @@ func TodoListAssigned(ts, assigned []model.Todo, lc i18n.Locale, loc *time.Locat
 				line += " ⚠️"
 			}
 			if td.Recur != "" {
-				line += " 🔁" + ruleSuffix(td.Recur, lc)
+				line += " 🔁"
 			}
 			sec = append(sec, line)
 			kb = append(kb, []tg.Button{
