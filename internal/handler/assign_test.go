@@ -365,8 +365,8 @@ func TestAssignedSectionCappedWithMore(t *testing.T) {
 	if !strings.Contains(last.Msg.Text, "…و ۵ مورد دیگر") {
 		t.Errorf("no translated 'more' line: %q", last.Msg.Text)
 	}
-	if n := len(last.Msg.Keyboard); n != 20 {
-		t.Errorf("rows %d", n)
+	if n := len(last.Msg.Keyboard); n != 21 {
+		t.Errorf("rows %d (20 items and the New task row)", n)
 	}
 }
 
@@ -429,3 +429,9 @@ func TestDidNoticeSendFailureIsNotFatal(t *testing.T) {
 		t.Fatal("completion lost")
 	}
 }
+
+// Wizard drafts (#68): the fake has none.
+func (f *fakeAssign) Draft(context.Context, int64, int64) (model.Draft, error) {
+	return model.Draft{}, service.ErrNotFound
+}
+func (f *fakeAssign) SetKBVersion(context.Context, int64, int) error { return nil }

@@ -9,6 +9,7 @@ func init() {
 			"/add &lt;text&gt; [when] - add an item, e.g. <code>buy milk tomorrow 18:00</code>, " +
 			"<code>pills every day 9am</code>\n" +
 			"Start the text with @name to assign it to a member: <code>/add @sam call the bank 3pm</code>\n" +
+			"/new - create an item step by step, with buttons\n" +
 			"/list [page] - show open items\n" +
 			"/done &lt;n&gt; - mark item n done\n" +
 			"/del &lt;n&gt; - delete item n\n" +
@@ -42,6 +43,7 @@ func init() {
 			"/add &lt;متن&gt; [زمان] - افزودن کار، مثلاً <code>خرید نان فردا ساعت ۱۸</code>، " +
 			"<code>قرص هر روز ساعت ۹</code>\n" +
 			"برای محول کردن کار به یک عضو، متن را با @name شروع کنید: <code>/add @sam call the bank 3pm</code>\n" +
+			"/new - ساخت کار مرحله\u200cبه\u200cمرحله با دکمه\u200cها\n" +
 			"/list [صفحه] - نمایش کارهای باز\n" +
 			"/done &lt;n&gt; - انجام\u200cشدن کار شماره n\n" +
 			"/del &lt;n&gt; - حذف کار شماره n\n" +

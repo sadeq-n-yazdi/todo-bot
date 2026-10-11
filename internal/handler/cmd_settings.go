@@ -161,7 +161,7 @@ func (h *Handler) cmdLang(ctx context.Context, m *tg.Message, r req, args string
 		return err
 	}
 	lc.Lang = lang // confirm in the new language
-	return h.say(ctx, m, lc.T("settings.lang.set", langName(lc, lang)))
+	return h.sayWithKeyboard(ctx, m, lc, lc.T("settings.lang.set", langName(lc, lang)))
 }
 
 var calAliases = map[string]calendar.Kind{

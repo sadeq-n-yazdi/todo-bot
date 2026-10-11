@@ -6,6 +6,7 @@ import "github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 func init() {
 	i18n.Register(i18n.En, map[string]string{
 		"cmd.menu.help":     "Show help",
+		"cmd.menu.new":      "Create an item step by step",
 		"cmd.menu.add":      "Add an item",
 		"cmd.menu.list":     "Show open items",
 		"cmd.menu.done":     "Mark an item done",
@@ -20,6 +21,7 @@ func init() {
 	})
 	i18n.Register(i18n.Fa, map[string]string{
 		"cmd.menu.help":     "نمایش راهنما",
+		"cmd.menu.new":      "ساخت کار مرحله\u200cبه\u200cمرحله",
 		"cmd.menu.add":      "افزودن کار",
 		"cmd.menu.list":     "نمایش کارهای باز",
 		"cmd.menu.done":     "انجام\u200cشدن کار",

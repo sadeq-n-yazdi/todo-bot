@@ -67,7 +67,9 @@ func (h *Handler) renderList(ctx context.Context, r req, chatID int64, ts []mode
 			assigned = nil
 		}
 	}
-	return ui.TodoListAssigned(ts, assigned, r.Prefs.Locale, tzOf(r), h.Clock.Now(), page, pages)
+	out := ui.TodoListAssigned(ts, assigned, r.Prefs.Locale, tzOf(r), h.Clock.Now(), page, pages)
+	out.Keyboard = append(out.Keyboard, []tg.Button{ui.NewTaskButton(r.Prefs.Locale)})
+	return out
 }
 
 // notifyDid tells the creating chat that its assignee completed done. It
