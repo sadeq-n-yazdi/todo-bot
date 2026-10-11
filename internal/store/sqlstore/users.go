@@ -88,3 +88,25 @@ func (d *DB) UserByUsername(ctx context.Context, name string) (model.User, error
 	}
 	return u, nil
 }
+
+// ListNamedUsers returns the users with a known username, by username.
+func (d *DB) ListNamedUsers(ctx context.Context) ([]model.User, error) {
+	rows, err := d.q.QueryContext(ctx,
+		"SELECT "+userCols+" FROM users WHERE username IS NOT NULL ORDER BY username")
+	if err != nil {
+		return nil, fmt.Errorf("sqlstore: list named users: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []model.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, fmt.Errorf("sqlstore: list named users: %w", err)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlstore: list named users: %w", err)
+	}
+	return out, nil
+}

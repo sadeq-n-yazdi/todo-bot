@@ -2,7 +2,8 @@
 //
 // File ownership (parallel work): router.go and messages_router.go (#1),
 // cmd_todo.go + messages_todo.go (#11), callbacks.go, flows.go,
-// cmd_settings.go + messages_settings.go (#12).
+// cmd_settings.go + messages_settings.go (#12), wizard*.go +
+// messages_wizard.go (#68).
 package handler
 
 import (
@@ -69,6 +70,8 @@ var commands = map[string]cmdFunc{
 	"digest":   (*Handler).cmdDigest,
 	"lang":     (*Handler).cmdLang,
 	"calendar": (*Handler).cmdCalendar,
+	// wizard.go (#68)
+	"new": (*Handler).cmdNew,
 }
 
 // Handle processes one update and implements tg.Handler. It never panics.
@@ -150,6 +153,14 @@ func (h *Handler) handleMessage(ctx context.Context, m *tg.Message) {
 		handled, err := h.onReply(ctx, m, r)
 		if handled {
 			h.replyErr(ctx, m, r, "reply", err)
+			return
+		}
+	}
+	if !isCmd {
+		// The reply-keyboard "➕ New task" label, and text answers to a
+		// wizard step (#68).
+		if handled, err := h.onWizardText(ctx, m, r); handled {
+			h.replyErr(ctx, m, r, "wizard", err)
 			return
 		}
 	}

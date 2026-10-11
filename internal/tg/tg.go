@@ -52,11 +52,23 @@ type Button struct {
 }
 
 // OutMessage is an outgoing message. Text is HTML (parse_mode=HTML).
+//
+// Telegram takes one reply markup per message, so at most one of Keyboard,
+// ForceReply, ReplyKeyboard and RemoveKeyboard takes effect, in that order
+// of precedence. Edit only changes the inline Keyboard: Telegram cannot
+// edit the other kinds, and Edit ignores them.
 type OutMessage struct {
 	Text       string
-	Keyboard   [][]Button
+	Keyboard   [][]Button // inline keyboard
 	ForceReply bool
 	ReplyTo    int
+	// ReplyKeyboard is a persistent, resized keyboard of plain-text
+	// buttons under the input field (#68: "➕ New task" in private chats).
+	// Pressing a button sends its label as an ordinary text message. It
+	// stays until a later message removes or replaces it.
+	ReplyKeyboard [][]string
+	// RemoveKeyboard removes a ReplyKeyboard sent earlier.
+	RemoveKeyboard bool
 }
 
 // Sender sends and edits messages.

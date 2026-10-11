@@ -58,6 +58,10 @@ func Run(t *testing.T, f Factory) {
 		{"Assignee", testAssignee},
 		{"AssigneeMigrateMerge", testAssigneeMigrateMerge},
 		{"ListAssigned", testListAssigned},
+		{"Drafts", testDrafts},
+		{"DraftExpiry", testDraftExpiry},
+		{"DraftConcurrent", testDraftConcurrent},
+		{"ListNamedUsers", testListNamedUsers},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

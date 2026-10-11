@@ -37,6 +37,10 @@ type Store interface {
 	// case-insensitively, a leading "@" ignored). ErrNotFound if none, or
 	// if name is "".
 	UserByUsername(ctx context.Context, name string) (model.User, error)
+	// ListNamedUsers returns every user with a known username, ordered by
+	// username. The wizard's assignee step offers them (the handler
+	// filters by the allowlist and drops the actor).
+	ListNamedUsers(ctx context.Context) ([]model.User, error)
 
 	// EnsureChat inserts the chat if missing, or updates its title.
 	EnsureChat(ctx context.Context, c model.Chat) error
@@ -126,8 +130,40 @@ type Store interface {
 	TakePrompt(ctx context.Context, chatID int64, msgID int, userID int64, now time.Time) (model.Prompt, error)
 	// MarkUpdate records a Telegram update_id; first=false if already seen.
 	MarkUpdate(ctx context.Context, updateID int64, now time.Time) (first bool, err error)
-	// Purge deletes expired prompts and update ids older than 48h.
+	// Purge deletes expired prompts, expired drafts (expires_at <= now)
+	// and update ids older than 48h.
 	Purge(ctx context.Context, now time.Time) error
+
+	// ---- Wizard drafts (#68, ARCHITECTURE §12) ----
+	//
+	// One draft per (chat, user). Version is a compare-and-set token: the
+	// store sets it on every write, and UpdateDraft / DeleteDraft apply
+	// only while it still matches, so two nodes handling two presses of
+	// one card cannot both win. A draft whose ExpiresAt <= now is treated
+	// as missing by every read and conditional write; Purge deletes it.
+
+	// PutDraft inserts d, replacing any draft of (d.ChatID, d.UserID)
+	// whatever its version or expiry (starting the wizard again). It sets
+	// d.Version to a value greater than the replaced draft's, if any.
+	// d.UpdatedAt and d.ExpiresAt are stored as given.
+	PutDraft(ctx context.Context, d *model.Draft) error
+	// GetDraft returns the draft of (chatID, userID); ErrNotFound if none
+	// or expired at now.
+	GetDraft(ctx context.Context, chatID, userID int64, now time.Time) (model.Draft, error)
+	// DraftByMessage returns the draft whose card is (chatID, msgID),
+	// whoever started it; ErrNotFound if none or expired at now.
+	DraftByMessage(ctx context.Context, chatID int64, msgID int, now time.Time) (model.Draft, error)
+	// UpdateDraft writes d's MsgID, AskMsgID, Step, Data, UpdatedAt and
+	// ExpiresAt, only WHERE the stored version equals d.Version and the
+	// stored draft has not expired at now. On success it sets d.Version to
+	// the new version. ok=false means it was changed, replaced, deleted or
+	// expired meanwhile: nothing was written, and exactly one of several
+	// concurrent callers holding the same version gets ok=true.
+	UpdateDraft(ctx context.Context, d *model.Draft, now time.Time) (ok bool, err error)
+	// DeleteDraft deletes the draft of (chatID, userID) only if its version
+	// is version. ok=false if it was missing or had another version; of
+	// several concurrent callers exactly one gets ok=true (Save, Cancel).
+	DeleteDraft(ctx context.Context, chatID, userID, version int64) (ok bool, err error)
 
 	// WithTx runs fn in a transaction. Inside fn use ONLY tx (with SQLite the
 	// pool has a single connection, so using the outer Store deadlocks).

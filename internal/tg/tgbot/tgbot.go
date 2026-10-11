@@ -229,13 +229,27 @@ func validate(m tg.OutMessage) error {
 }
 
 // markup builds the reply markup of a sent message. Telegram accepts a single
-// reply_markup, so an inline keyboard wins over ForceReply.
+// reply_markup, so an inline keyboard wins over ForceReply, which wins over
+// a reply keyboard, which wins over removing one.
 func markup(m tg.OutMessage) models.ReplyMarkup {
 	if kb := editMarkup(m); kb != nil {
 		return kb
 	}
 	if m.ForceReply {
 		return &models.ForceReply{ForceReply: true}
+	}
+	if len(m.ReplyKeyboard) > 0 {
+		rows := make([][]models.KeyboardButton, len(m.ReplyKeyboard))
+		for i, row := range m.ReplyKeyboard {
+			rows[i] = make([]models.KeyboardButton, len(row))
+			for j, label := range row {
+				rows[i][j] = models.KeyboardButton{Text: label}
+			}
+		}
+		return &models.ReplyKeyboardMarkup{Keyboard: rows, IsPersistent: true, ResizeKeyboard: true}
+	}
+	if m.RemoveKeyboard {
+		return &models.ReplyKeyboardRemove{RemoveKeyboard: true}
 	}
 	return nil
 }

@@ -328,6 +328,54 @@ func TestSendForceReplyAndPlain(t *testing.T) {
 	}
 }
 
+func TestSendReplyKeyboard(t *testing.T) {
+	f := newFakeAPI(t)
+	b := f.newBot(t)
+	ctx := context.Background()
+	for _, m := range []tg.OutMessage{
+		{Text: "hi", ReplyKeyboard: [][]string{{"➕ New task"}}},
+		{Text: "bye", RemoveKeyboard: true},
+		// An inline keyboard wins: only one reply_markup is allowed.
+		{Text: "both", Keyboard: [][]tg.Button{{{Text: "Ok", Data: "ok"}}}, ReplyKeyboard: [][]string{{"x"}}},
+	} {
+		if _, err := b.Send(ctx, 5, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cs := f.callsTo("sendMessage")
+	var kb struct {
+		Keyboard [][]struct {
+			Text string `json:"text"`
+		} `json:"keyboard"`
+		IsPersistent   bool `json:"is_persistent"`
+		ResizeKeyboard bool `json:"resize_keyboard"`
+	}
+	if err := json.Unmarshal([]byte(cs[0].Form.Get("reply_markup")), &kb); err != nil {
+		t.Fatal(err)
+	}
+	if len(kb.Keyboard) != 1 || kb.Keyboard[0][0].Text != "➕ New task" || !kb.IsPersistent || !kb.ResizeKeyboard {
+		t.Errorf("reply keyboard = %q", cs[0].Form.Get("reply_markup"))
+	}
+	if got := cs[1].Form.Get("reply_markup"); !strings.Contains(got, `"remove_keyboard":true`) {
+		t.Errorf("remove markup = %q", got)
+	}
+	if got := cs[2].Form.Get("reply_markup"); !strings.Contains(got, `"callback_data":"ok"`) || strings.Contains(got, `"keyboard"`) {
+		t.Errorf("precedence: markup = %q", got)
+	}
+}
+
+func TestEditIgnoresReplyKeyboard(t *testing.T) {
+	f := newFakeAPI(t)
+	f.reply("editMessageText", `{"ok":true,"result":{"message_id":9,"date":1,"chat":{"id":5,"type":"private"}}}`)
+	b := f.newBot(t)
+	if err := b.Edit(context.Background(), 5, 9, tg.OutMessage{Text: "x", ReplyKeyboard: [][]string{{"y"}}, RemoveKeyboard: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.callsTo("editMessageText")[0].Form.Get("reply_markup"); got != "" {
+		t.Errorf("edit carries markup %q", got)
+	}
+}
+
 func TestEdit(t *testing.T) {
 	f := newFakeAPI(t)
 	f.reply("editMessageText", `{"ok":true,"result":{"message_id":9,"date":1,"chat":{"id":5,"type":"private"}}}`)

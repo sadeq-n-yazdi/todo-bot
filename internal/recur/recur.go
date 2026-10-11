@@ -8,9 +8,12 @@
 //	monthly 31 10:00            (clamped to the last day of shorter months)
 //	monthly 1 10:00 jalali      (1st of every Jalali month)
 //	every 3d 2026-10-10 09:00   (every N calendar days from the Gregorian anchor date)
+//	yearly 02-29 09:00          (29 Feb; 28 Feb in common years)
+//	yearly 12-30 09:00 jalali   (30 Esfand; 29 Esfand in common years)
 //
-// Only Monthly depends on the calendar: daily, weekly and every-N rules are
-// calendar-independent (a day is a day), so their Cal is always Gregorian.
+// Only Monthly and Yearly depend on the calendar: daily, weekly and every-N
+// rules are calendar-independent (a day is a day), so their Cal is always
+// Gregorian.
 package recur
 
 import (
@@ -31,6 +34,9 @@ const (
 	Weekly  Freq = "weekly"
 	Monthly Freq = "monthly"
 	EveryN  Freq = "everyN"
+	// Yearly repeats on Month/MonthDay of Cal every year (#68). A day the
+	// month lacks in a given year (29 Feb, 30 Esfand) falls on its last day.
+	Yearly Freq = "yearly"
 )
 
 // Rule describes when a recurring todo repeats.
@@ -38,8 +44,9 @@ type Rule struct {
 	Freq     Freq
 	Interval int            // EveryN only: number of days, >= 1
 	Weekdays []time.Weekday // Weekly only: sorted, unique, non-empty
-	MonthDay int            // Monthly only: 1..31, in Cal's months
-	Cal      calendar.Kind  // Monthly only: Gregorian (default) or Jalali
+	MonthDay int            // Monthly and Yearly: 1..31, in Cal's months
+	Month    int            // Yearly only: 1..12, in Cal
+	Cal      calendar.Kind  // Monthly and Yearly: Gregorian (default) or Jalali
 	Hour     int            // 0..23, local time
 	Minute   int            // 0..59
 	Anchor   calendar.Date  // EveryN only: first occurrence, Gregorian date
@@ -113,6 +120,22 @@ func Parse(s string) (Rule, error) {
 			r.Cal = k
 		}
 		r.Hour, r.Minute, err = parseClock(f[2])
+	case "yearly":
+		if len(f) != 3 && len(f) != 4 {
+			return Rule{}, invalid("want \"yearly MM-DD HH:MM [jalali]\", got %q", s)
+		}
+		r.Freq = Yearly
+		if len(f) == 4 {
+			k := calendar.Kind(f[3])
+			if !k.Valid() || k == calendar.Gregorian {
+				return Rule{}, invalid("unknown calendar %q", f[3])
+			}
+			r.Cal = k
+		}
+		if r.Month, r.MonthDay, err = parseMonthDay(f[1], r.Cal); err != nil {
+			return Rule{}, err
+		}
+		r.Hour, r.Minute, err = parseClock(f[2])
 	case "every":
 		if len(f) != 4 {
 			return Rule{}, invalid("want \"every Nd YYYY-MM-DD HH:MM\", got %q", s)
@@ -143,6 +166,37 @@ func Parse(s string) (Rule, error) {
 		return Rule{}, err
 	}
 	return r, nil
+}
+
+// parseMonthDay parses "MM-DD" of a Yearly rule. The day must exist in
+// that month in some year of cal (so 02-29 and Jalali 12-30 are valid).
+func parseMonthDay(s string, cal calendar.Kind) (month, day int, err error) {
+	if len(s) != 5 || s[2] != '-' {
+		return 0, 0, invalid("month-day %q is not MM-DD", s)
+	}
+	m, e1 := strconv.Atoi(s[:2])
+	d, e2 := strconv.Atoi(s[3:])
+	if e1 != nil || e2 != nil || s[0] == '+' || s[0] == '-' || s[3] == '+' || s[3] == '-' {
+		return 0, 0, invalid("month-day %q is not MM-DD", s)
+	}
+	if m < 1 || m > 12 || d < 1 || d > maxMonthLength(cal, m) {
+		return 0, 0, invalid("month-day %q out of range", s)
+	}
+	return m, d, nil
+}
+
+// maxMonthLength is the longest the month ever is in cal (leap years
+// included).
+func maxMonthLength(cal calendar.Kind, m int) int {
+	y := 2024 // a Gregorian leap year
+	if cal == calendar.Jalali {
+		y = 1403 // a Jalali leap year
+	}
+	n := 0
+	for i := range 4 {
+		n = max(n, cal.MonthLength(y+i, m))
+	}
+	return n
 }
 
 func parseWeekdays(s string) ([]time.Weekday, error) {
@@ -187,6 +241,12 @@ func (r Rule) String() string {
 		return s
 	case EveryN:
 		return fmt.Sprintf("every %dd %s %s", r.Interval, r.Anchor, clock)
+	case Yearly:
+		s := fmt.Sprintf("yearly %02d-%02d %s", r.Month, r.MonthDay, clock)
+		if r.Cal == calendar.Jalali {
+			s += " jalali"
+		}
+		return s
 	}
 	return ""
 }
@@ -265,6 +325,12 @@ func (r Rule) matches(day time.Time, cal calendar.Kind) bool {
 			want = ml
 		}
 		return cd.Day == want
+	case Yearly:
+		cd := cal.Split(day)
+		if cd.Month != r.Month {
+			return false
+		}
+		return cd.Day == min(r.MonthDay, cal.MonthLength(cd.Year, cd.Month))
 	}
 	return false
 }
