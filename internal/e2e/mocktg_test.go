@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sadeq-n-yazdi/todo-bot/internal/ui"
 )
 
 // mockTelegram is an httptest Bot API. It serves queued updates to getUpdates
@@ -37,6 +39,62 @@ type tgCall struct {
 	ChatID        int64
 	Text          string
 	Offset        int64
+
+	// MsgID is the message_id of an edit, or the ID the mock returned for a
+	// send (0 for a send that failed).
+	MsgID int
+	// ReplyTo is the message a send replies to (reply_parameters).
+	ReplyTo int
+	// Buttons is the callback data of the inline keyboard, row by row.
+	Buttons [][]string
+	// ReplyKb is the label rows of a reply keyboard.
+	ReplyKb [][]string
+	// ForceReply and RemoveKb mirror the reply_markup of the same names.
+	ForceReply, RemoveKb bool
+	// CallbackID belongs to answerCallbackQuery (Text is the toast).
+	CallbackID string
+}
+
+// replyMarkup is the part of Telegram's reply_markup the mock records.
+type replyMarkup struct {
+	Inline [][]struct {
+		Data string `json:"callback_data"`
+	} `json:"inline_keyboard"`
+	Keyboard [][]struct {
+		Text string `json:"text"`
+	} `json:"keyboard"`
+	ForceReply     bool `json:"force_reply"`
+	RemoveKeyboard bool `json:"remove_keyboard"`
+}
+
+func (c *tgCall) readMarkup(form func(string) string) {
+	c.MsgID, _ = strconv.Atoi(form("message_id"))
+	c.CallbackID = form("callback_query_id")
+	var rp struct {
+		MessageID int `json:"message_id"`
+	}
+	if json.Unmarshal([]byte(form("reply_parameters")), &rp) == nil {
+		c.ReplyTo = rp.MessageID
+	}
+	var mk replyMarkup
+	if json.Unmarshal([]byte(form("reply_markup")), &mk) != nil {
+		return
+	}
+	for _, row := range mk.Inline {
+		var r []string
+		for _, b := range row {
+			r = append(r, b.Data)
+		}
+		c.Buttons = append(c.Buttons, r)
+	}
+	for _, row := range mk.Keyboard {
+		var r []string
+		for _, b := range row {
+			r = append(r, b.Text)
+		}
+		c.ReplyKb = append(c.ReplyKb, r)
+	}
+	c.ForceReply, c.RemoveKb = mk.ForceReply, mk.RemoveKeyboard
 }
 
 func newMockTelegram(t *testing.T) *mockTelegram {
@@ -52,7 +110,9 @@ func (m *mockTelegram) serve(w http.ResponseWriter, r *http.Request) {
 	c := tgCall{Token: token, Method: method, Text: r.Form.Get("text")}
 	c.ChatID, _ = strconv.ParseInt(r.Form.Get("chat_id"), 10, 64)
 	c.Offset, _ = strconv.ParseInt(r.Form.Get("offset"), 10, 64)
+	c.readMarkup(r.Form.Get)
 	m.mu.Lock()
+	idx := len(m.calls)
 	m.calls = append(m.calls, c)
 	onSend := m.onSend
 	m.mu.Unlock()
@@ -92,6 +152,7 @@ func (m *mockTelegram) serve(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
 		m.nextMsg++
 		id := m.nextMsg
+		m.calls[idx].MsgID = id
 		m.mu.Unlock()
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":` + strconv.Itoa(id) +
 			`,"date":1,"chat":{"id":` + strconv.FormatInt(c.ChatID, 10) + `,"type":"private"}}}`))
@@ -125,20 +186,106 @@ func (m *mockTelegram) pending(offset int64) []string {
 // queueMessage makes a private text message from user available to pollers
 // under the given update id.
 func (m *mockTelegram) queueMessage(updateID, user int64, text string) {
-	b, _ := json.Marshal(map[string]any{
-		"update_id": updateID,
+	m.queueMessageFrom(updateID, user, "", user, text, 0)
+}
+
+func chatKind(chat int64) string {
+	if chat < 0 {
+		return "group"
+	}
+	return "private"
+}
+
+// queueMessageFrom queues a text message from user (with a @username, if not
+// empty) in chat (a group when negative), as a reply to replyTo if not 0.
+func (m *mockTelegram) queueMessageFrom(updateID, user int64, username string, chat int64, text string, replyTo int) {
+	msg := map[string]any{
+		"message_id": updateID,
+		"date":       1,
+		"chat":       map[string]any{"id": chat, "type": chatKind(chat), "title": "Team"},
+		"from":       map[string]any{"id": user, "is_bot": false, "first_name": "U", "username": username},
+		"text":       text,
+	}
+	if replyTo != 0 {
+		msg["reply_to_message"] = map[string]any{
+			"message_id": replyTo, "date": 1,
+			"chat": map[string]any{"id": chat, "type": chatKind(chat)},
+		}
+	}
+	m.queue(updateID, map[string]any{"update_id": updateID, "message": msg})
+}
+
+// queueCallback queues a press of an inline button on message msgID.
+func (m *mockTelegram) queueCallback(updateID, user int64, username string, chat int64, msgID int, data string) {
+	m.queue(updateID, map[string]any{"update_id": updateID, "callback_query": map[string]any{
+		"id":   "cb-" + strconv.FormatInt(updateID, 10),
+		"from": map[string]any{"id": user, "is_bot": false, "first_name": "U", "username": username},
 		"message": map[string]any{
-			"message_id": updateID,
-			"date":       1,
-			"chat":       map[string]any{"id": user, "type": "private"},
-			"from":       map[string]any{"id": user, "is_bot": false, "first_name": "U"},
-			"text":       text,
+			"message_id": msgID, "date": 1,
+			"chat": map[string]any{"id": chat, "type": chatKind(chat)},
 		},
-	})
+		"data": data,
+	}})
+}
+
+func (m *mockTelegram) queue(updateID int64, update map[string]any) {
+	b, _ := json.Marshal(update)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.updates = append(m.updates, b)
 	m.ids = append(m.ids, updateID)
+}
+
+// allCalls returns a copy of the recorded calls.
+func (m *mockTelegram) allCalls() []tgCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]tgCall(nil), m.calls...)
+}
+
+// latestFor returns the last send or edit that shows message msgID in chat.
+func (m *mockTelegram) latestFor(chat int64, msgID int) (tgCall, bool) {
+	calls := m.allCalls()
+	for i := len(calls) - 1; i >= 0; i-- {
+		c := calls[i]
+		if (c.Method == "sendMessage" || c.Method == "editMessageText") && c.ChatID == chat && c.MsgID == msgID {
+			return c, true
+		}
+	}
+	return tgCall{}, false
+}
+
+// button returns the callback data of the button of message msgID (as it
+// shows now) whose action is kind with arg.
+func (m *mockTelegram) button(chat int64, msgID int, kind ui.ActionKind, arg string) (string, bool) {
+	c, ok := m.latestFor(chat, msgID)
+	if !ok {
+		return "", false
+	}
+	for _, row := range c.Buttons {
+		for _, d := range row {
+			if a, err := ui.Decode(d); err == nil && a.Kind == kind && a.Arg == arg {
+				return d, true
+			}
+		}
+	}
+	return "", false
+}
+
+// wizardCard returns the ID of the newest wizard card sent to chat: a send
+// whose keyboard is the wizard's placeholder button. 0 if there is none.
+func (m *mockTelegram) wizardCard(chat int64) int {
+	calls := m.allCalls()
+	for i := len(calls) - 1; i >= 0; i-- {
+		c := calls[i]
+		if c.Method != "sendMessage" || c.ChatID != chat || len(c.Buttons) == 0 || len(c.Buttons[0]) == 0 {
+			continue
+		}
+		if a, err := ui.Decode(c.Buttons[0][0]); err == nil && a.Kind == ui.ActWizNoop {
+			return c.MsgID
+		}
+	}
+	return 0
 }
 
 // count returns how many recorded calls satisfy f.
