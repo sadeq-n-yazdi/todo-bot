@@ -104,32 +104,12 @@ func heldUntil(t *testing.T, st store.Store) time.Time {
 	return l.Until
 }
 
-// requireMonotonicStore skips the test while the store lets a stale renewal
-// move held_until back (the store-side guard is issue #50). The lease loop
-// alone cannot stop a write that is already queued in the database.
-func requireMonotonicStore(t *testing.T) {
-	t.Helper()
-	st := openDB(t, filepath.Join(t.TempDir(), "probe.sqlite"))
-	ctx := context.Background()
-	if _, err := st.AcquireLease(ctx, "probe", "x:1", t0.Add(30*time.Second), ttl); err != nil {
-		t.Fatal(err)
-	}
-	l, err := st.AcquireLease(ctx, "probe", "x:1", t0.Add(10*time.Second), ttl)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if l.Until.Before(t0.Add(30 * time.Second).Add(ttl)) {
-		t.Skip("the store lets a stale renewal shrink held_until (needs #50)")
-	}
-}
-
 // The shrink case: a's cancelled renewal (now=10) is still queued in the
 // database. It lands after a recovered and renewed, and would move held_until
 // back from 60 to 40. Then a fails once at t=40 and b joins. If held_until
 // shrank, b would win at once while a still leads.
 func TestHungRenewalNeverCausesTwoLeadersAfterShrink(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "db.sqlite")
-	requireMonotonicStore(t)
 	clk := clocktest.New(t0)
 	tr := &tracker{}
 	h := newHang(t, path, true)
