@@ -62,6 +62,13 @@ func (p Parser) resolve(ph phrase, now time.Time, cal calendar.Kind) (Result, bo
 		case unitWeek:
 			due = at(7*ph.rel.n, h, m)
 		}
+	case ph.date != nil && ph.rec != nil:
+		var ok bool
+		ds := *ph.date
+		ds.offset += tonightShift
+		if due, rule, ok = resolveDatedRule(*ph.rec, &ds, now, h, m, cal); !ok {
+			return Result{}, false
+		}
 	case ph.date != nil:
 		var ok bool
 		ds := *ph.date
@@ -74,15 +81,6 @@ func (p Parser) resolve(ph phrase, now time.Time, cal calendar.Kind) (Result, bo
 		// reminder for it. An explicit time is kept as given, even if past.
 		if ph.tm == nil && sameDay(due, now) && !due.After(now) {
 			due, hasTime = at(0, 23, 59), false
-		}
-		if ph.rec != nil {
-			r := buildDatedRule(*ph.rec, h, m, due, cal)
-			if explicit(*ph.rec) {
-				// The repeat names its own days: it wins over the date,
-				// which only says where to start.
-				due = firstOccurrence(&r, notBefore(due, now))
-			}
-			rule = &r
 		}
 	default: // time of day only
 		due = at(0, h, m)
@@ -155,6 +153,45 @@ func explicit(r recSpec) bool {
 		return r.monthDay != 0
 	}
 	return false
+}
+
+// resolveDatedRule resolves a repeat combined with a date. The rule is
+// anchored on the date, in the date's own calendar (a Jalali month name is
+// Jalali, a Gregorian one Gregorian, any other date follows cal; weekday rules
+// do not depend on the calendar). A date without a year anchors on its
+// occurrence in the current year of that calendar, so "10 Oct every month"
+// on 11 Oct is the 10th of each month, not 10 Oct next year. Due is the
+// date and time as written if they are not before now, otherwise the first
+// occurrence of the rule at or after now.
+func resolveDatedRule(rec recSpec, ds *dateSpec, now time.Time, h, m int, cal calendar.Kind) (time.Time, *recur.Rule, bool) {
+	loc := now.Location()
+	if ds.kind == dateYMD {
+		cal = ds.cal
+	}
+	anchor, ok := time.Time{}, false
+	if ds.kind == dateYMD && !ds.hasYear {
+		y := cal.Split(now).Year
+		if ds.d <= cal.MonthLength(y, ds.m) {
+			anchor, ok = cal.At(calendar.Date{Year: y, Month: ds.m, Day: ds.d}, h, m, loc), true
+		}
+	}
+	if !ok {
+		if anchor, ok = resolveDate(ds, now, h, m); !ok {
+			return time.Time{}, nil, false
+		}
+	}
+	r := buildDatedRule(rec, h, m, anchor, cal)
+	justBefore := now.Add(-time.Nanosecond)
+	due := anchor
+	switch {
+	case explicit(rec):
+		// The repeat names its own days: it wins over the date, which only
+		// says where to start.
+		due = firstOccurrence(&r, notBefore(anchor, justBefore))
+	case anchor.Before(now):
+		due = firstOccurrence(&r, justBefore)
+	}
+	return due, &r, true
 }
 
 // buildDatedRule builds the rule for a repeat combined with a date that

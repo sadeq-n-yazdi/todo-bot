@@ -57,7 +57,16 @@
 //     or their day of month in cal, from the date, and Due is that date. When
 //     the repeat names its own days ("next monday every friday", "5 Nov every
 //     month on the 10th") the repeat wins and the date only says where to
-//     start: Due is the first occurrence on or after the date's day. Daily and
+//     start: Due is the first occurrence on or after the date's day. Due is
+//     never in the past: if the date and time as written have passed, it is
+//     the first occurrence of the rule at or after now ("today 9am every week"
+//     at 10:00 is next week). A date with no time uses the default time, so
+//     Due is an occurrence of the rule ("today every week" is not 23:59). A
+//     date with no year anchors the rule on its occurrence in the current
+//     year ("10 Oct every month" on 11 Oct is the 10th of each month, due
+//     10 Nov). A monthly rule is anchored in the calendar of the date's month
+//     name (Jalali for آبان, Gregorian for Nov) and otherwise in cal; weekday
+//     rules do not depend on the calendar. Daily and
 //     every-N repeats are not combined with a date ("tomorrow every day" is
 //     "tomorrow" in the text and a plain daily rule).
 //   - Result.Due is computed here, with calendar arithmetic, and is also set
