@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +23,8 @@ import (
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
+	"github.com/sadeq-n-yazdi/todo-bot/migrations"
 )
 
 // syncBuf is a goroutine-safe buffer.
@@ -192,6 +198,7 @@ type mockTelegram struct {
 
 	getMeFails int // the first n getMe calls answer 500
 	getMeCode  int // if non-zero, every getMe answers this status
+	retryAfter int // seconds, sent as parameters.retry_after with a 429
 }
 
 func newMockTelegram(t *testing.T) *mockTelegram {
@@ -215,7 +222,11 @@ func newMockTelegram(t *testing.T) *mockTelegram {
 			m.mu.Unlock()
 			if code != 0 {
 				w.WriteHeader(code)
-				_, _ = w.Write([]byte(`{"ok":false,"error_code":` + strconv.Itoa(code) + `,"description":"x"}`))
+				params := ""
+				if code == http.StatusTooManyRequests && m.retryAfter > 0 {
+					params = `,"parameters":{"retry_after":` + strconv.Itoa(m.retryAfter) + `}`
+				}
+				_, _ = w.Write([]byte(`{"ok":false,"error_code":` + strconv.Itoa(code) + `,"description":"x"` + params + `}`))
 				return
 			}
 			_, _ = w.Write([]byte(`{"ok":true,"result":{"id":42,"is_bot":true,"first_name":"T","username":"TodoBot"}}`))
@@ -398,13 +409,23 @@ func TestStartupUnauthorizedIsFatal(t *testing.T) {
 // hangStore blocks AcquireLease (ignoring its context) and records Close.
 type hangStore struct {
 	store.Store
-	release chan struct{}
-	closed  atomic.Bool
+	release  chan struct{}
+	closed   atomic.Bool
+	acquires atomic.Int64  // AcquireLease calls running now
+	released chan struct{} // closed by the first ReleaseLease call that returns
+	relOnce  sync.Once
 }
 
 func (h *hangStore) AcquireLease(ctx context.Context, name, holder string, now time.Time, ttl time.Duration) (m model.Lease, err error) {
+	h.acquires.Add(1)
+	defer h.acquires.Add(-1)
 	<-h.release
 	return h.Store.AcquireLease(ctx, name, holder, now, ttl)
+}
+
+func (h *hangStore) ReleaseLease(ctx context.Context, name, holder string) error {
+	defer h.relOnce.Do(func() { close(h.released) })
+	return h.Store.ReleaseLease(ctx, name, holder)
 }
 
 func (h *hangStore) Close() error { h.closed.Store(true); return nil }
@@ -417,8 +438,19 @@ func TestShutdownTimeoutSkipsClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = real.Close() })
-	hs := &hangStore{Store: real, release: make(chan struct{})}
-	t.Cleanup(func() { close(hs.release) })
+	hs := &hangStore{Store: real, release: make(chan struct{}), released: make(chan struct{})}
+	// Registered after real.Close, so it runs first: unblock the hanging call,
+	// then wait for the lease loop to finish its release, so that no goroutine
+	// of run still uses the database when the test ends.
+	t.Cleanup(func() {
+		close(hs.release)
+		select {
+		case <-hs.released:
+		case <-time.After(10 * time.Second):
+			t.Error("lease loop did not stop after the hanging call was released")
+		}
+		waitUntil(t, 10*time.Second, "hanging calls to return", func() bool { return hs.acquires.Load() == 0 })
+	})
 	oldOpen, oldTO := openStore, shutdownTimeout
 	openStore = func(context.Context, string) (store.Store, error) { return hs, nil }
 	shutdownTimeout = 300 * time.Millisecond
@@ -449,5 +481,150 @@ func TestShutdownTimeoutSkipsClose(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "timed out") {
 		t.Errorf("stderr %q", errb.String())
+	}
+}
+
+func TestBackupMissingDatabaseFails(t *testing.T) {
+	dir := t.TempDir()
+	env := envOf(map[string]string{"TODO_DB_URL": dbURL(dir)})
+	dest := filepath.Join(dir, "copy.db")
+	var out, errb syncBuf
+	if code := run(context.Background(), []string{"backup", dest}, env, &out, &errb); code != 1 {
+		t.Fatalf("backup exit %d, want 1: %s", code, errb.String())
+	}
+	for _, p := range []string{filepath.Join(dir, "todo.db"), dest} {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("%s was created", p)
+		}
+	}
+}
+
+// Backup of a database at an older schema version must not migrate it.
+func TestBackupDoesNotMigrate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "todo.db")
+	mfs, err := migrations.For("sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := fs.ReadFile(mfs, "0001_init.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(string(body)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec("PRAGMA user_version = 1"); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close()
+
+	dest := filepath.Join(dir, "copy.db")
+	var out, errb syncBuf
+	env := envOf(map[string]string{"TODO_DB_URL": dbURL(dir)})
+	if code := run(context.Background(), []string{"backup", dest}, env, &out, &errb); code != 0 {
+		t.Fatalf("backup exit %d: %s", code, errb.String())
+	}
+	for _, p := range []string{path, dest} {
+		db, err := sql.Open("sqlite", "file:"+p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var uv, tables int
+		if err := db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name = 'schema_migrations'").Scan(&tables); err != nil {
+			t.Fatal(err)
+		}
+		_ = db.Close()
+		if uv != 1 || tables != 0 {
+			t.Errorf("%s: user_version %d, schema_migrations tables %d; want 1 and 0", p, uv, tables)
+		}
+	}
+}
+
+func TestRetryWait(t *testing.T) {
+	const d = 2 * time.Second
+	cases := []struct {
+		name  string
+		err   error
+		wait  time.Duration
+		retry bool
+	}{
+		{"429 longer", &tg.APIError{Code: 429, RetryAfter: 10 * time.Second}, 10 * time.Second, true},
+		{"429 shorter", &tg.APIError{Code: 429, RetryAfter: time.Second}, d, true},
+		{"429 none", &tg.APIError{Code: 429}, d, true},
+		{"500", &tg.APIError{Code: 500}, d, true},
+		{"502 wrapped", fmt.Errorf("x: %w", &tg.APIError{Code: 502}), d, true},
+		{"401", &tg.APIError{Code: 401}, 0, false},
+		{"404", &tg.APIError{Code: 404}, 0, false},
+		{"network", &net.OpError{Op: "dial", Err: errors.New("refused")}, d, true},
+		{"url error", &url.Error{Op: "Get", URL: "x", Err: errors.New("boom")}, d, true},
+		{"eof", io.ErrUnexpectedEOF, d, true},
+		{"other", errors.New("tgbot: ServerURL must be an http(s) URL with a host"), 0, false},
+	}
+	for _, c := range cases {
+		wait, retry := retryWait(c.err, d)
+		if wait != c.wait || retry != c.retry {
+			t.Errorf("%s: retryWait = (%v, %v), want (%v, %v)", c.name, wait, retry, c.wait, c.retry)
+		}
+	}
+}
+
+func TestStartupHonoursRetryAfter(t *testing.T) {
+	mock := newMockTelegram(t)
+	mock.getMeCode, mock.retryAfter = http.StatusTooManyRequests, 1
+	setTelegram(t, mock.srv.URL)
+	oldMin, oldMax := startBackoffMin, startBackoffMax
+	startBackoffMin, startBackoffMax = 10*time.Millisecond, 20*time.Millisecond
+	t.Cleanup(func() { startBackoffMin, startBackoffMax = oldMin, oldMax })
+
+	startNode(t, map[string]string{"TELEGRAM_TOKEN": "tokT", "TODO_ALLOWED_USERS": "1", "TODO_DB_URL": dbURL(t.TempDir()), "TODO_NODE_ID": "t"})
+	waitUntil(t, 5*time.Second, "first getMe", func() bool { _, ok := mock.first("tokT", "getMe"); return ok })
+	first, _ := mock.first("tokT", "getMe")
+	waitUntil(t, 10*time.Second, "second getMe", func() bool {
+		mock.mu.Lock()
+		defer mock.mu.Unlock()
+		n := 0
+		for _, c := range mock.calls {
+			if c.token == "tokT" && c.method == "getMe" {
+				n++
+			}
+		}
+		return n >= 2
+	})
+	mock.mu.Lock()
+	var second time.Time
+	n := 0
+	for _, c := range mock.calls {
+		if c.token == "tokT" && c.method == "getMe" {
+			if n++; n == 2 {
+				second = c.at
+			}
+		}
+	}
+	mock.mu.Unlock()
+	// The backoff alone is 10ms; Telegram asked for 1s.
+	if d := second.Sub(first); d < 900*time.Millisecond {
+		t.Errorf("retried after %v, want at least the 1s RetryAfter", d)
+	}
+}
+
+func TestStartupOtherErrorIsFatal(t *testing.T) {
+	setTelegram(t, "ftp://example.invalid") // tgbot.New rejects it without a network call
+	var out, errb syncBuf
+	env := map[string]string{"TELEGRAM_TOKEN": "tokF", "TODO_ALLOWED_USERS": "1", "TODO_DB_URL": dbURL(t.TempDir())}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if code := run(ctx, nil, envOf(env), &out, &errb); code != 1 {
+		t.Fatalf("exit %d, want 1: %s", code, errb.String())
+	}
+	if strings.Contains(errb.String(), "retrying") {
+		t.Errorf("a non-transient error was retried: %s", errb.String())
 	}
 }

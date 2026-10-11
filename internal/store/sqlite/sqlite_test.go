@@ -333,3 +333,95 @@ func TestUserVersionFollowsMigrations(t *testing.T) {
 		t.Fatalf("user_version = %d, want %d", v, want[len(want)-1])
 	}
 }
+
+func TestExistingURL(t *testing.T) {
+	cases := map[string]string{
+		"sqlite:todo.db":                      "sqlite:todo.db?mode=existing",
+		"sqlite:///var/lib/todo.db":           "sqlite:///var/lib/todo.db?mode=existing",
+		"postgres://u:p@h/db?sslmode=disable": "postgres://u:p@h/db?sslmode=disable",
+	}
+	for in, want := range cases {
+		if got := sqlite.ExistingURL(in); got != want {
+			t.Errorf("ExistingURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestOpenExistingMissingFileFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.db")
+	for name, open := range map[string]func() (store.Store, error){
+		"OpenExisting": func() (store.Store, error) {
+			d, err := sqlite.OpenExisting(context.Background(), path)
+			if err != nil {
+				return nil, err
+			}
+			return d, nil
+		},
+		"URL": func() (store.Store, error) {
+			return store.Open(context.Background(), sqlite.ExistingURL("sqlite:"+path))
+		},
+	} {
+		s, err := open()
+		if err == nil {
+			_ = s.Close()
+			t.Fatalf("%s: want an error for a missing file", name)
+		}
+		for _, p := range []string{path, path + "-wal"} {
+			if _, statErr := os.Stat(p); statErr == nil {
+				t.Fatalf("%s: %s was created", name, p)
+			}
+		}
+	}
+}
+
+// Opening an existing database does not migrate it, and Backup works on it.
+func TestOpenExistingDoesNotMigrate(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "old.db")
+	mfs, err := migrations.For("sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := fs.ReadFile(mfs, "0001_init.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(string(body)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec("PRAGMA user_version = 1"); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close()
+
+	d, err := store.Open(ctx, sqlite.ExistingURL("sqlite:"+path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(t.TempDir(), "b.db")
+	if err := d.(store.Backuper).Backup(ctx, dst); err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Close()
+	for _, p := range []string{path, dst} {
+		db, err := sql.Open("sqlite", "file:"+p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var uv, tables int
+		if err := db.QueryRow("PRAGMA user_version").Scan(&uv); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name = 'schema_migrations'").Scan(&tables); err != nil {
+			t.Fatal(err)
+		}
+		_ = db.Close()
+		if uv != 1 || tables != 0 {
+			t.Errorf("%s: user_version %d, schema_migrations tables %d; want 1 and 0", p, uv, tables)
+		}
+	}
+}

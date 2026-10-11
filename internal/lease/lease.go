@@ -247,6 +247,15 @@ func (l *loop) stopLead() {
 
 // release gives an in-flight call a short time to finish, so that its write
 // cannot land after the release and retake the lease, then releases.
+//
+// Late-write case: an AcquireLease that ignores its context and outlives the
+// releaseTimeout wait can still land after ReleaseLease. It then retakes the
+// released row with a new epoch, and no node is leading under it. The other
+// nodes are locked out until that call's start time plus ttl. This costs
+// availability only. It is not a safety problem, because no leader runs under
+// the retaken row. A monotonic held_until in the store (issue #50) does not
+// change it: the retaking write is newer than the release, which set held_until
+// to 0. The wait is bounded, so shutdown does not hang on a stuck store call.
 func (l *loop) release(ctx context.Context) error {
 	if l.inflight != nil {
 		l.cancelInflight()
