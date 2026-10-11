@@ -64,7 +64,11 @@ type Option func(*Scheduler)
 // WithClaimTTL tells the scheduler how long its claims last (the value given
 // to service.Config.ClaimTTL). A 429 RetryAfter is waited out inline only
 // while it is shorter than ClaimTTL/2; otherwise the reminder is handed back
-// with ReminderFailed(permanent=false). d <= 0 keeps DefaultClaimTTL.
+// with ReminderFailed(permanent=false). Every Send sequence for one claimed
+// item (retries, waits and the assignee fallback) also runs under a context
+// deadline of claim time + ClaimTTL - a margin (a tenth of the TTL, at least
+// 5s, at most a quarter), so a hung send ends before the claim expires.
+// d <= 0 keeps DefaultClaimTTL.
 func WithClaimTTL(d time.Duration) Option {
 	return func(s *Scheduler) {
 		if d > 0 {
