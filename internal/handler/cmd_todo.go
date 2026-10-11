@@ -236,6 +236,9 @@ func (h *Handler) itemSummary(td model.Todo, r req) string {
 	}
 	if td.Recur != "" {
 		s += " 🔁"
+		if d := ui.DescribeRule(td.Recur, r.Prefs.Locale); d != "" {
+			s += " " + ui.Escape(d)
+		}
 	}
 	return s + ui.AssigneeSuffix(td, r.Prefs.Locale)
 }
