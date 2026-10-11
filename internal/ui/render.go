@@ -64,7 +64,7 @@ func itemLine(td model.Todo, lc i18n.Locale, loc *time.Location, now time.Time) 
 		s += " ⚠️"
 	}
 	if td.Recur != "" {
-		s += " 🔁"
+		s += " 🔁" + ruleSuffix(td.Recur, lc)
 	}
 	return s + AssigneeSuffix(td, lc)
 }

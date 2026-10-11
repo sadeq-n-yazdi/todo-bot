@@ -121,9 +121,9 @@ func TestGoldenTodoList(t *testing.T) {
 		lc   i18n.Locale
 		want string
 	}{
-		{locEnG, "📋 Your todos (1/2)\n3. buy &lt;milk&gt; &amp; eggs — today 18:00 🔁\n4. call mom — Mon 12 Oct 09:00 ⚠️\n12. no date"},
-		{locFaJ, "📋 کارهای شما (۱/۲)\n۳. buy &lt;milk&gt; &amp; eggs — امروز ۱۸:۰۰ 🔁\n۴. call mom — دوشنبه ۲۰ مهر ۰۹:۰۰ ⚠️\n۱۲. no date"},
-		{locEnJ, "📋 Your todos (1/2)\n3. buy &lt;milk&gt; &amp; eggs — today 18:00 🔁\n4. call mom — Mon 20 Mehr 09:00 ⚠️\n12. no date"},
+		{locEnG, "📋 Your todos (1/2)\n3. buy &lt;milk&gt; &amp; eggs — today 18:00 🔁 every day\n4. call mom — Mon 12 Oct 09:00 ⚠️\n12. no date"},
+		{locFaJ, "📋 کارهای شما (۱/۲)\n۳. buy &lt;milk&gt; &amp; eggs — امروز ۱۸:۰۰ 🔁 هر روز\n۴. call mom — دوشنبه ۲۰ مهر ۰۹:۰۰ ⚠️\n۱۲. no date"},
+		{locEnJ, "📋 Your todos (1/2)\n3. buy &lt;milk&gt; &amp; eggs — today 18:00 🔁 every day\n4. call mom — Mon 20 Mehr 09:00 ⚠️\n12. no date"},
 	}
 	for _, c := range cases {
 		m := TodoList(sampleTodos(), c.lc, testLoc, testNow, 0, 2)
@@ -216,9 +216,9 @@ func TestGoldenDigest(t *testing.T) {
 		lc          i18n.Locale
 		full, empty string
 	}{
-		{locEnG, "<b>⚠️ Overdue</b>\n4. call mom — Mon 12 Oct 09:00 ⚠️\n\n<b>📅 Today</b>\n3. buy &lt;milk&gt; &amp; eggs — today 18:00 🔁\n\n+12 without date", "Nothing due today 🎉"},
-		{locFaJ, "<b>⚠️ عقب\u200cافتاده</b>\n۴. call mom — دوشنبه ۲۰ مهر ۰۹:۰۰ ⚠️\n\n<b>📅 امروز</b>\n۳. buy &lt;milk&gt; &amp; eggs — امروز ۱۸:۰۰ 🔁\n\n+۱۲ بدون تاریخ", "امروز کاری ندارید 🎉"},
-		{locEnJ, "<b>⚠️ Overdue</b>\n4. call mom — Mon 20 Mehr 09:00 ⚠️\n\n<b>📅 Today</b>\n3. buy &lt;milk&gt; &amp; eggs — today 18:00 🔁\n\n+12 without date", "Nothing due today 🎉"},
+		{locEnG, "<b>⚠️ Overdue</b>\n4. call mom — Mon 12 Oct 09:00 ⚠️\n\n<b>📅 Today</b>\n3. buy &lt;milk&gt; &amp; eggs — today 18:00 🔁 every day\n\n+12 without date", "Nothing due today 🎉"},
+		{locFaJ, "<b>⚠️ عقب\u200cافتاده</b>\n۴. call mom — دوشنبه ۲۰ مهر ۰۹:۰۰ ⚠️\n\n<b>📅 امروز</b>\n۳. buy &lt;milk&gt; &amp; eggs — امروز ۱۸:۰۰ 🔁 هر روز\n\n+۱۲ بدون تاریخ", "امروز کاری ندارید 🎉"},
+		{locEnJ, "<b>⚠️ Overdue</b>\n4. call mom — Mon 20 Mehr 09:00 ⚠️\n\n<b>📅 Today</b>\n3. buy &lt;milk&gt; &amp; eggs — today 18:00 🔁 every day\n\n+12 without date", "Nothing due today 🎉"},
 	}
 	for _, c := range cases {
 		v := model.DigestView{Locale: c.lc, Loc: testLoc, Overdue: td[1:2], Today: td[:1], NoDateCount: 12}

@@ -25,7 +25,7 @@ func at(d, h, m int) *time.Time {
 
 func sampleTodos() []model.Todo {
 	return []model.Todo{
-		{ID: 101, Num: 3, Text: "buy <milk> & eggs", Status: model.TodoOpen, DueAt: at(13, 18, 0), Recur: "daily"},
+		{ID: 101, Num: 3, Text: "buy <milk> & eggs", Status: model.TodoOpen, DueAt: at(13, 18, 0), Recur: "daily 09:00"},
 		{ID: 102, Num: 4, Text: "call mom", Status: model.TodoOpen, DueAt: at(12, 9, 0)},
 		{ID: 103, Num: 12, Text: "no date", Status: model.TodoOpen},
 	}
