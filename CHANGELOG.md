@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- A date and time combined with a repeat (#70): `call mom tomorrow 15:00 every week` and `گزارش فردا ساعت ۱۵ هر هفته` start on that date and repeat on that weekday at that time. Monthly repeats use the day of the month, and a Jalali month name (`۱ آبان هر ماه`) anchors a Jalali monthly repeat. The first due time is always the rule's next occurrence at or after now. Yearly comes with #68.
+
 ## [0.1.1] - 2026-10-10
 
 ### Added
