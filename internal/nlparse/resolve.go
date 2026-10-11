@@ -45,7 +45,7 @@ func (p Parser) resolve(ph phrase, now time.Time, cal calendar.Kind) (Result, bo
 	var due time.Time
 	var rule *recur.Rule
 	switch {
-	case ph.rec != nil:
+	case ph.rec != nil && ph.date == nil:
 		r := buildRule(*ph.rec, h, m, now, cal)
 		due = firstOccurrence(&r, now)
 		rule = &r
@@ -61,6 +61,13 @@ func (p Parser) resolve(ph phrase, now time.Time, cal calendar.Kind) (Result, bo
 			due = at(ph.rel.n, h, m)
 		case unitWeek:
 			due = at(7*ph.rel.n, h, m)
+		}
+	case ph.date != nil && ph.rec != nil:
+		var ok bool
+		ds := *ph.date
+		ds.offset += tonightShift
+		if due, rule, ok = resolveDatedRule(*ph.rec, &ds, now, h, m, cal); !ok {
+			return Result{}, false
 		}
 	case ph.date != nil:
 		var ok bool
@@ -133,6 +140,85 @@ func buildRule(r recSpec, h, m int, now time.Time, cal calendar.Kind) recur.Rule
 		}
 	}
 	return out
+}
+
+// explicit reports whether a weekly or monthly repeat names its own days
+// ("every friday", "every month on the 10th") rather than taking them from
+// the date it is combined with ("tomorrow every week").
+func explicit(r recSpec) bool {
+	switch r.freq {
+	case recur.Weekly:
+		return len(r.wds) > 0
+	case recur.Monthly:
+		return r.monthDay != 0
+	}
+	return false
+}
+
+// resolveDatedRule resolves a repeat combined with a date. The rule is
+// anchored on the date, in the date's own calendar (a Jalali month name is
+// Jalali, a Gregorian one Gregorian, any other date follows cal; weekday rules
+// do not depend on the calendar). A date without a year anchors on its
+// occurrence in the current year of that calendar, so "10 Oct every month"
+// on 11 Oct is the 10th of each month, not 10 Oct next year. Due is the
+// date and time as written if they are not before now, otherwise the first
+// occurrence of the rule at or after now.
+func resolveDatedRule(rec recSpec, ds *dateSpec, now time.Time, h, m int, cal calendar.Kind) (time.Time, *recur.Rule, bool) {
+	loc := now.Location()
+	if ds.kind == dateYMD {
+		cal = ds.cal
+	}
+	anchor, ok := time.Time{}, false
+	if ds.kind == dateYMD && !ds.hasYear {
+		y := cal.Split(now).Year
+		if ds.d <= cal.MonthLength(y, ds.m) {
+			anchor, ok = cal.At(calendar.Date{Year: y, Month: ds.m, Day: ds.d}, h, m, loc), true
+		}
+	}
+	if !ok {
+		if anchor, ok = resolveDate(ds, now, h, m); !ok {
+			return time.Time{}, nil, false
+		}
+	}
+	r := buildDatedRule(rec, h, m, anchor, cal)
+	justBefore := now.Add(-time.Nanosecond)
+	due := anchor
+	switch {
+	case explicit(rec):
+		// The repeat names its own days: it wins over the date, which only
+		// says where to start.
+		due = firstOccurrence(&r, notBefore(anchor, justBefore))
+	case anchor.Before(now):
+		due = firstOccurrence(&r, justBefore)
+	}
+	return due, &r, true
+}
+
+// buildDatedRule builds the rule for a repeat combined with a date that
+// resolved to on. Weekly and monthly repeats without days of their own repeat
+// on the weekday or, in cal, the day of month of on. Yearly will be one more
+// case here (month and day of on in cal).
+func buildDatedRule(r recSpec, h, m int, on time.Time, cal calendar.Kind) recur.Rule {
+	if !explicit(r) {
+		switch r.freq {
+		case recur.Weekly:
+			r.wds = []time.Weekday{on.Weekday()}
+		case recur.Monthly:
+			r.monthDay = cal.Split(on).Day
+		}
+	}
+	return buildRule(r, h, m, on, cal)
+}
+
+// notBefore returns the instant just before the start of d's day, or now if
+// that is later: the "after" bound for the first occurrence on or after d.
+func notBefore(d, now time.Time) time.Time {
+	y, mo, day := d.Date()
+	b := time.Date(y, mo, day, 0, 0, 0, 0, d.Location()).Add(-time.Second)
+	if b.Before(now) {
+		return now
+	}
+	return b
 }
 
 // firstOccurrence computes the first time rule r fires strictly after now.
