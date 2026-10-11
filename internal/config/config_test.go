@@ -136,6 +136,14 @@ func TestWebhookValid(t *testing.T) {
 	}
 }
 
+func TestClaimTTLMinimumIsAccepted(t *testing.T) {
+	fakeHost(t, "vps00", nil)
+	c, err := Load(env(base(map[string]string{"TODO_CLAIM_TTL": "20s"})))
+	if err != nil || c.ClaimTTL != 20*time.Second {
+		t.Fatalf("20s: %v, %v", c.ClaimTTL, err)
+	}
+}
+
 func TestLoadErrors(t *testing.T) {
 	fakeHost(t, "h", nil)
 	wh := func(k, v string) map[string]string {
@@ -164,6 +172,7 @@ func TestLoadErrors(t *testing.T) {
 		{"bad mode", map[string]string{"TODO_MODE": "carrier-pigeon"}, []string{"TODO_MODE"}},
 		{"bad duration", map[string]string{"TODO_LEASE_TTL": "soon"}, []string{"TODO_LEASE_TTL"}},
 		{"zero duration", map[string]string{"TODO_CLAIM_TTL": "0s"}, []string{"TODO_CLAIM_TTL"}},
+		{"claim ttl below minimum", map[string]string{"TODO_CLAIM_TTL": "19s"}, []string{"TODO_CLAIM_TTL", "at least 20s"}},
 		{"negative duration", map[string]string{"TODO_SCHED_MAX_SLEEP": "-1m"}, []string{"TODO_SCHED_MAX_SLEEP"}},
 		{"zero user", map[string]string{"TODO_ALLOWED_USERS": "0"}, []string{"TODO_ALLOWED_USERS"}},
 		{"negative user", map[string]string{"TODO_ALLOWED_USERS": "-5"}, []string{"TODO_ALLOWED_USERS"}},

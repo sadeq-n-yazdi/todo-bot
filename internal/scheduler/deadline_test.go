@@ -101,7 +101,7 @@ func TestHangingReminderSendIsCutOffBeforeClaimExpires(t *testing.T) {
 
 func TestHangingDigestSendIsCutOffAndKeepsClaim(t *testing.T) {
 	const ttl = 800 * time.Millisecond
-	e, _ := newHangEnv(ttl)
+	e, h := newHangEnv(ttl)
 	e.b.chats = []model.Chat{digestChat(500, t0)}
 	e.b.views[500] = model.DigestView{ChatID: 500, Loc: time.UTC, NoDateCount: 1}
 	if took := tickWithin(t, e, 5*time.Second); took >= ttl {
@@ -109,6 +109,9 @@ func TestHangingDigestSendIsCutOffAndKeepsClaim(t *testing.T) {
 	}
 	if len(e.b.digestsDone) != 0 {
 		t.Errorf("DigestDone after a cut-off send: %v", e.b.digestsDone)
+	}
+	if len(h.chats) != 1 {
+		t.Errorf("sends = %v, want exactly one", h.chats)
 	}
 }
 

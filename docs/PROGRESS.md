@@ -54,7 +54,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 51 | Lease loop: test and doc follow-ups | 🚧 in progress | |
 | 53 | Open the store without migrations for backup | 🚧 in progress | |
 | 54 | Startup getMe retry: honour RetryAfter | 🚧 in progress | |
-| 82 | Minimum claim TTL; tighten the digest hang test | 📋 open | |
+| 82 | Minimum claim TTL; tighten the digest hang test | ✅ merged | #83 |
 
 ## Log
 - **2026-10-10**
