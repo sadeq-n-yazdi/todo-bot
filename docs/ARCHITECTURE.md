@@ -539,9 +539,15 @@ Views (grid, month change, back to quick picks, edit menu, its ◀ Back) do step
 **Starting** sends the card first with no keyboard. It then calls `Svc.StartDraft` with that `MsgID` (and the `AskMsgID`, if any), and edits the card to the first step's keyboard, which carries the new `Version`. The version cannot be known before `StartDraft`, and the buttons must carry it. The old card of a replaced draft no longer finds a draft, so its buttons say "expired".
 
 ### Save
-Save maps the draft onto the same service call as `/add`:
-1. `Svc.EndDraft(draft)`. `ErrStaleDraft` is handled as above, so a double press or two nodes create the item **at most once**. If step 3 then fails, the draft is gone and the user gets the generic error. That trade-off is chosen over a possible duplicate.
-2. Build an `nlparse.Result`:
+Save maps the draft onto the same service call as `/add`. The order matters: everything that can send the user back to a step happens **before** the draft is ended.
+1. Build an `nlparse.Result` (below) and validate it, still holding the draft:
+   - If `Data.AssigneeID` is no longer in `Deps.Allowed`, set it to 0, show the `assignee` step again with a note (`UpdateDraft`), and stop.
+   - If the item is once (no rule) and its due time is no longer in the future (the draft sat on `confirm`), go back with a note: to `time` for a picked date, or to `date` with the `Found*` fields cleared for a found date. A recurring item is fine: `AddTodoFor` advances it, as for `/add`.
+2. `Svc.EndDraft(draft)`. `ErrStaleDraft` is handled like a stale press, so a double press or two nodes create the item **at most once**.
+3. `Svc.AddTodoFor(actor, Data.AssigneeID, result)`. An assignee of 0 is exactly `AddTodo`. If this fails, the draft is already gone and the user gets the generic error. That trade-off is chosen over a possible duplicate.
+4. Edit the card into the same "added" confirmation `/add` sends, including `→ @name`.
+
+The `Result`:
    - `Text` is `Data.Text`.
    - **Found date used:** `Due = FoundDue`, `Rule = recur.Parse(FoundRule)` (nil if ""), `HasTime = FoundTime`.
    - **No date:** `Due = nil`, `Rule = nil`, `HasTime = false`.
@@ -553,12 +559,12 @@ Save maps the draft onto the same service call as `/add`:
      - yearly: `{Freq: Yearly, Month and MonthDay of the date in the user's calendar, Cal: user's calendar, Hour: H, Minute: M}`.
 
      These are the rules `nlparse` builds for the same phrases: `Cal` is Gregorian except for monthly and yearly rules.
-3. Call `Svc.AddTodoFor(actor, Data.AssigneeID, result)`. An assignee of 0 is exactly `AddTodo`. Re-check `Deps.Allowed[AssigneeID]` first; if the assignee was removed meanwhile, show the confirm step again with a note.
-4. Edit the card into the same "added" confirmation `/add` sends, including `→ @name`.
 
-A once item whose due time has passed while the draft sat on `confirm` goes back to the `time` step with a note. A recurring one is advanced by `AddTodoFor`, as for `/add`.
+**Equivalence (acceptance test) — open question for the owner.** The issue says text → Tomorrow → 15:00 → Weekly → @member → Save must create the same item as `/add @member text tomorrow 15:00 every week`. Today `nlparse` parses that command differently: it takes only the trailing `every week` as the date phrase, and stores the text `text tomorrow 15:00` with `weekly <today's weekday> 09:00`. The wizard path stores text `text`, `due_at` tomorrow 15:00 and `weekly <tomorrow's weekday> 15:00`, which is what `/add @member text every week on <tomorrow's weekday> 15:00` produces. Either
+- (a) a small extra PR fixes `nlparse` (a trailing `<date> <time> every week` means weekly on that date's weekday, at that time), owning `internal/nlparse/grammar.go`, `resolve.go` and a new test file, so that the criterion holds as written; or
+- (b) the owner accepts the rephrased command as the e2e reference.
 
-**Equivalence (acceptance test).** text → Tomorrow → 15:00 → Weekly → @member → Save stores the same row as `/add @member text every week on <tomorrow's weekday> 15:00`: text `text`, `due_at` tomorrow 15:00, `recur` `weekly <day> 15:00`, the same assignee and a `due` reminder. The literal `/add @member text tomorrow 15:00 every week` does **not** produce that today. `nlparse` takes only the trailing `every week` as the date phrase, so it stores the text `text tomorrow 15:00` and `weekly <today> 09:00`. The e2e test compares against the phrasing that parses. Fixing the parser is a separate issue.
+Until that is decided, PR 4 compares against the rephrased command.
 
 ### Groups
 - Only the user who started a wizard can press its buttons. Anyone else gets a toast (check 4 above).
@@ -588,7 +594,7 @@ A once item whose due time has passed while the draft sat on `confirm` goes back
   UpdateDraft(ctx, d *model.Draft, now time.Time) (ok bool, err error)      // CAS on d.Version; bumps it
   DeleteDraft(ctx, chatID, userID, version int64) (ok bool, err error)      // CAS on version
   ```
-  `Purge` also deletes expired drafts. These are implemented in `sqlstore` and covered by the conformance cases `Drafts`, `DraftExpiry`, `DraftConcurrent` and `ListNamedUsers`.
+  `Purge` also deletes expired drafts. These are implemented in `sqlstore` and covered by the conformance cases `Drafts`, `DraftExpiry`, `DraftConcurrent`, `PutDraftConcurrent` and `ListNamedUsers`. `PutDraft` replaces with an in-place `UPDATE … version = version + 1` (and inserts only a missing row), so it stays monotonic under read committed too.
 - `service.Service`:
   ```go
   StartDraft(ctx, d *model.Draft) error                       // sets UpdatedAt, ExpiresAt (now+DraftTTL), Version

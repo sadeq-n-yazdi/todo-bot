@@ -61,6 +61,7 @@ func Run(t *testing.T, f Factory) {
 		{"Drafts", testDrafts},
 		{"DraftExpiry", testDraftExpiry},
 		{"DraftConcurrent", testDraftConcurrent},
+		{"PutDraftConcurrent", testPutDraftConcurrent},
 		{"ListNamedUsers", testListNamedUsers},
 	}
 	for _, c := range cases {

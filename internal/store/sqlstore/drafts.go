@@ -40,30 +40,48 @@ func encodeDraftData(v model.DraftData) (string, error) {
 }
 
 // PutDraft inserts or replaces the draft of (ChatID, UserID) with a version
-// one greater than the replaced one's.
+// greater than the replaced one's. The replacement is an in-place UPDATE
+// that increments the stored version (it takes the row lock on databases
+// that run read committed, so a concurrent UpdateDraft cannot make two
+// drafts share a version); only a missing row is inserted, with version 1.
 func (d *DB) PutDraft(ctx context.Context, dr *model.Draft) error {
 	data, err := encodeDraftData(dr.Data)
 	if err != nil {
 		return err
 	}
+	upd := unixOrNow(dr.UpdatedAt)
 	var ver int64
 	err = d.WithTx(ctx, func(tx store.Store) error {
 		q := tx.(*DB).q
-		var old int64
-		err := q.QueryRowContext(ctx, "SELECT version FROM drafts WHERE chat_id = ? AND user_id = ?",
-			dr.ChatID, dr.UserID).Scan(&old)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		replace := func() (int64, error) {
+			res, err := q.ExecContext(ctx, `
+UPDATE drafts SET msg_id = ?, ask_msg_id = ?, step = ?, data = ?, version = version + 1,
+  updated_at = ?, expires_at = ?
+WHERE chat_id = ? AND user_id = ?`,
+				dr.MsgID, dr.AskMsgID, string(dr.Step), data, upd, dr.ExpiresAt.Unix(), dr.ChatID, dr.UserID)
+			return affected(res, err, "replace draft")
+		}
+		n, err := replace()
+		if err != nil {
 			return err
 		}
-		ver = old + 1
-		_, err = q.ExecContext(ctx,
-			d.d.Upsert("drafts",
-				[]string{"chat_id", "user_id", "msg_id", "ask_msg_id", "step", "data", "version", "updated_at", "expires_at"},
-				[]string{"chat_id", "user_id"},
-				[]string{"msg_id", "ask_msg_id", "step", "data", "version", "updated_at", "expires_at"}),
-			dr.ChatID, dr.UserID, dr.MsgID, dr.AskMsgID, string(dr.Step), data, ver,
-			unixOrNow(dr.UpdatedAt), dr.ExpiresAt.Unix())
-		return err
+		if n == 0 {
+			res, err := q.ExecContext(ctx,
+				d.d.InsertIgnore("drafts",
+					[]string{"chat_id", "user_id", "msg_id", "ask_msg_id", "step", "data", "version", "updated_at", "expires_at"},
+					[]string{"chat_id", "user_id"}),
+				dr.ChatID, dr.UserID, dr.MsgID, dr.AskMsgID, string(dr.Step), data, 1, upd, dr.ExpiresAt.Unix())
+			if n, err = affected(res, err, "insert draft"); err != nil {
+				return err
+			}
+			if n == 0 { // a concurrent PutDraft inserted it first
+				if _, err := replace(); err != nil {
+					return err
+				}
+			}
+		}
+		return q.QueryRowContext(ctx, "SELECT version FROM drafts WHERE chat_id = ? AND user_id = ?",
+			dr.ChatID, dr.UserID).Scan(&ver)
 	})
 	if err != nil {
 		return fmt.Errorf("sqlstore: put draft %d/%d: %w", dr.ChatID, dr.UserID, err)

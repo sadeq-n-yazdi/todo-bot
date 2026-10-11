@@ -232,6 +232,28 @@ func testDraftConcurrent(t *testing.T, open func() store.Store) {
 	}
 }
 
+// Concurrent starts of one (chat, user) never fail and never hand out the
+// same version twice, so a stale card can never match a replacement.
+func testPutDraftConcurrent(t *testing.T, open func() store.Store) {
+	ctx := context.Background()
+	hs := handles(open, 4)
+	var mu sync.Mutex
+	seen := map[int64]int{}
+	parallel(8, func(i int) {
+		d := draft(100 + i)
+		if err := hs[i%len(hs)].PutDraft(ctx, &d); err != nil {
+			t.Error(err)
+			return
+		}
+		mu.Lock()
+		seen[d.Version]++
+		mu.Unlock()
+	})
+	if len(seen) != 8 {
+		t.Fatalf("versions handed out: %v, want 8 distinct", seen)
+	}
+}
+
 func testListNamedUsers(t *testing.T, open func() store.Store) {
 	ctx := context.Background()
 	d := open()
