@@ -334,16 +334,32 @@ func TestUserVersionFollowsMigrations(t *testing.T) {
 	}
 }
 
-func TestExistingURL(t *testing.T) {
-	cases := map[string]string{
-		"sqlite:todo.db":                      "sqlite:todo.db?mode=existing",
-		"sqlite:///var/lib/todo.db":           "sqlite:///var/lib/todo.db?mode=existing",
-		"postgres://u:p@h/db?sslmode=disable": "postgres://u:p@h/db?sslmode=disable",
-	}
-	for in, want := range cases {
-		if got := sqlite.ExistingURL(in); got != want {
-			t.Errorf("ExistingURL(%q) = %q, want %q", in, got, want)
+func TestOpenExistingURLRules(t *testing.T) {
+	for _, raw := range []string{
+		"sqlite:todo.db?mode=existing", "sqlite:todo.db?", "sqlite:todo.db#f", "sqlite://h/x.db",
+		"sqlite://u:secret@/x.db", "sqlite:", "postgres://h/db", "://bad",
+	} {
+		d, err := sqlite.OpenExistingURL(context.Background(), raw)
+		if err == nil {
+			_ = d.Close()
+			t.Errorf("%q: want an error", raw)
+		} else if strings.Contains(err.Error(), "secret") {
+			t.Errorf("%q: error leaks: %v", raw, err)
 		}
+	}
+}
+
+// The registered opener, which store.Open and so run and migrate use, must
+// not accept the no-migrate mode.
+func TestStoreOpenRejectsExistingMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.db")
+	s, err := store.Open(context.Background(), "sqlite:"+path+"?mode=existing")
+	if err == nil {
+		_ = s.Close()
+		t.Fatal("store.Open accepted mode=existing")
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("the file was created")
 	}
 }
 
@@ -358,7 +374,11 @@ func TestOpenExistingMissingFileFails(t *testing.T) {
 			return d, nil
 		},
 		"URL": func() (store.Store, error) {
-			return store.Open(context.Background(), sqlite.ExistingURL("sqlite:"+path))
+			d, err := sqlite.OpenExistingURL(context.Background(), "sqlite:"+path)
+			if err != nil {
+				return nil, err
+			}
+			return d, nil
 		},
 	} {
 		s, err := open()
@@ -398,12 +418,12 @@ func TestOpenExistingDoesNotMigrate(t *testing.T) {
 	}
 	_ = raw.Close()
 
-	d, err := store.Open(ctx, sqlite.ExistingURL("sqlite:"+path))
+	d, err := sqlite.OpenExistingURL(ctx, "sqlite:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(t.TempDir(), "b.db")
-	if err := d.(store.Backuper).Backup(ctx, dst); err != nil {
+	if err := d.Backup(ctx, dst); err != nil {
 		t.Fatal(err)
 	}
 	_ = d.Close()

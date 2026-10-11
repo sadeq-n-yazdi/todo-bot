@@ -48,24 +48,6 @@ func dsnExisting(path string) string {
 	return "file:" + pathEscaper.Replace(path) + dsnParams + "&mode=rw"
 }
 
-// existingQuery is the only query a database URL may carry. With it the
-// provider opens a database that must already exist and applies no
-// migrations, so a maintenance command such as backup never changes the file
-// it reads. Use ExistingURL to add it.
-const existingQuery = "mode=existing"
-
-// ExistingURL returns raw with the query that makes the sqlite provider open
-// an existing database without migrating it. A URL of another scheme is
-// returned unchanged, and so is one that does not parse.
-func ExistingURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "sqlite" {
-		return raw
-	}
-	u.RawQuery = existingQuery
-	return u.String()
-}
-
 // OpenExisting opens the database at path, which must exist, with the same
 // pragmas as Open. It does not create the file and does not apply migrations.
 func OpenExisting(ctx context.Context, path string) (*DB, error) {
@@ -133,20 +115,51 @@ func ping(ctx context.Context, db *sql.DB) error {
 	return err
 }
 
-// opener implements store.Opener. An absolute path is u.Path
-// (sqlite:///var/lib/x.db), a relative one u.Opaque (sqlite:todo.db). A host
-// is rejected, and so are credentials and a fragment. The only query allowed is
-// mode=existing (see ExistingURL). Errors never contain the URL.
+// opener implements store.Opener.
 func opener(ctx context.Context, u *url.URL) (store.Store, error) {
-	if u.User != nil {
-		return nil, errors.New("sqlite: database URL must not have credentials")
+	path, err := urlPath(u)
+	if err != nil {
+		return nil, err
 	}
-	existing := u.RawQuery == existingQuery
-	if (u.RawQuery != "" && !existing) || u.ForceQuery || u.Fragment != "" {
-		return nil, errors.New("sqlite: database URL must not have a query or fragment")
+	d, err := Open(ctx, path)
+	if err != nil {
+		return nil, err // not "return Open(...)": that would wrap a nil *DB in a non-nil interface
+	}
+	return d, nil
+}
+
+// OpenExistingURL is OpenExisting for a database URL of the sqlite scheme,
+// with the same URL rules as store.Open. It is not reachable through
+// store.Open, so only code that calls it, such as the backup command, can
+// open a database without migrating it.
+func OpenExistingURL(ctx context.Context, raw string) (*DB, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, errors.New("sqlite: invalid database URL")
+	}
+	if u.Scheme != "sqlite" {
+		return nil, errors.New("sqlite: database URL must use the sqlite scheme")
+	}
+	path, err := urlPath(u)
+	if err != nil {
+		return nil, err
+	}
+	return OpenExisting(ctx, path)
+}
+
+// urlPath returns the file path of a sqlite URL. An absolute path is u.Path
+// (sqlite:///var/lib/x.db), a relative one u.Opaque (sqlite:todo.db). A host
+// is rejected, and so are credentials, a query and a fragment. Errors never
+// contain the URL.
+func urlPath(u *url.URL) (string, error) {
+	if u.User != nil {
+		return "", errors.New("sqlite: database URL must not have credentials")
+	}
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return "", errors.New("sqlite: database URL must not have a query or fragment")
 	}
 	if u.Host != "" {
-		return nil, errors.New("sqlite: database URL must not have a host (use sqlite:///abs/path or sqlite:rel/path)")
+		return "", errors.New("sqlite: database URL must not have a host (use sqlite:///abs/path or sqlite:rel/path)")
 	}
 	path := u.Path
 	if u.Opaque != "" {
@@ -156,17 +169,9 @@ func opener(ctx context.Context, u *url.URL) (store.Store, error) {
 		}
 	}
 	if path == "" {
-		return nil, errors.New("sqlite: database URL has no path")
+		return "", errors.New("sqlite: database URL has no path")
 	}
-	open := Open
-	if existing {
-		open = OpenExisting
-	}
-	d, err := open(ctx, path)
-	if err != nil {
-		return nil, err // not "return Open(...)": that would wrap a nil *DB in a non-nil interface
-	}
-	return d, nil
+	return path, nil
 }
 
 // Backup writes a consistent copy of the database to path using VACUUM INTO.

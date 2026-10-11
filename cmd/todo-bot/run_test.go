@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -198,6 +199,7 @@ type mockTelegram struct {
 
 	getMeFails int // the first n getMe calls answer 500
 	getMeCode  int // if non-zero, every getMe answers this status
+	htmlFails  int // the first n getMe calls answer 502 with an HTML page
 	retryAfter int // seconds, sent as parameters.retry_after with a 429
 }
 
@@ -215,6 +217,14 @@ func newMockTelegram(t *testing.T) *mockTelegram {
 		case "getMe":
 			m.mu.Lock()
 			code := m.getMeCode
+			if m.htmlFails > 0 {
+				m.htmlFails--
+				m.mu.Unlock()
+				w.Header().Set("Content-Type", "text/html")
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte("<html><body>502 Bad Gateway</body></html>"))
+				return
+			}
 			if m.getMeFails > 0 {
 				m.getMeFails--
 				code = http.StatusInternalServerError
@@ -566,6 +576,8 @@ func TestRetryWait(t *testing.T) {
 		{"network", &net.OpError{Op: "dial", Err: errors.New("refused")}, d, true},
 		{"url error", &url.Error{Op: "Get", URL: "x", Err: errors.New("boom")}, d, true},
 		{"eof", io.ErrUnexpectedEOF, d, true},
+		{"html body", fmt.Errorf("error decode response body for method getMe, <html>: %w", &json.SyntaxError{}), d, true},
+		{"empty body", fmt.Errorf("x: %w", &json.UnmarshalTypeError{}), d, true},
 		{"other", errors.New("tgbot: ServerURL must be an http(s) URL with a host"), 0, false},
 	}
 	for _, c := range cases {
@@ -626,5 +638,45 @@ func TestStartupOtherErrorIsFatal(t *testing.T) {
 	}
 	if strings.Contains(errb.String(), "retrying") {
 		t.Errorf("a non-transient error was retried: %s", errb.String())
+	}
+}
+
+func TestStartupRetriesHTMLGatewayError(t *testing.T) {
+	mock := newMockTelegram(t)
+	mock.htmlFails = 2
+	setTelegram(t, mock.srv.URL)
+	oldMin, oldMax := startBackoffMin, startBackoffMax
+	startBackoffMin, startBackoffMax = 10*time.Millisecond, 20*time.Millisecond
+	t.Cleanup(func() { startBackoffMin, startBackoffMax = oldMin, oldMax })
+
+	n := startNode(t, map[string]string{"TELEGRAM_TOKEN": "tokG", "TODO_ALLOWED_USERS": "1", "TODO_DB_URL": dbURL(t.TempDir()), "TODO_NODE_ID": "g"})
+	waitUntil(t, 5*time.Second, "polling after HTML 502s", func() bool { _, ok := mock.first("tokG", "getUpdates"); return ok })
+	if !strings.Contains(n.stderr.String(), "retrying") {
+		t.Errorf("no retry logged: %s", n.stderr.String())
+	}
+}
+
+// mode=existing is for backup only: run and migrate must refuse it.
+func TestExistingModeRefusedOutsideBackup(t *testing.T) {
+	dir := t.TempDir()
+	env := envOf(map[string]string{
+		"TODO_DB_URL":    dbURL(dir) + "?mode=existing",
+		"TELEGRAM_TOKEN": "tokE", "TODO_ALLOWED_USERS": "1",
+	})
+	for _, sub := range []string{"run", "migrate", "backup"} {
+		var out, errb syncBuf
+		args := []string{sub}
+		if sub == "backup" {
+			args = append(args, filepath.Join(dir, "copy.db"))
+		}
+		if code := run(context.Background(), args, env, &out, &errb); code != 1 {
+			t.Errorf("%s: exit %d, want 1", sub, code)
+		}
+		if !strings.Contains(errb.String(), "query") {
+			t.Errorf("%s: stderr %q does not say the query is refused", sub, errb.String())
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "todo.db")); err == nil {
+		t.Error("a database file was created")
 	}
 }

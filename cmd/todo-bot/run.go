@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -44,6 +45,16 @@ var (
 
 // openStore opens the database; tests wrap it.
 var openStore = store.Open
+
+// openExisting opens a sqlite database that must exist, without migrating it.
+// Only backup uses it; store.Open cannot.
+var openExisting = func(ctx context.Context, raw string) (store.Store, error) {
+	d, err := sqlite.OpenExistingURL(ctx, raw)
+	if err != nil {
+		return nil, err // not a typed nil inside the interface
+	}
+	return d, nil
+}
 
 // tgServerURL points the Telegram client at another server; tests set it.
 var tgServerURL string
@@ -129,18 +140,18 @@ func loadAdminConfig(env func(string) string) (config.Config, error) {
 }
 
 // openAdmin loads the config and opens the database for migrate and backup.
-// With existing set, the provider must open a database that is already there
-// and must not migrate it (sqlite.ExistingURL; other schemes are unchanged).
+// With existing set, a sqlite database must already be there and is not
+// migrated (sqlite.OpenExistingURL); other schemes open as usual.
 func openAdmin(ctx context.Context, env func(string) string, existing bool) (store.Store, error) {
 	cfg, err := loadAdminConfig(env)
 	if err != nil {
 		return nil, err
 	}
-	dbURL := cfg.DBURL
-	if existing {
-		dbURL = sqlite.ExistingURL(dbURL)
+	open := openStore
+	if u, perr := url.Parse(cfg.DBURL); existing && perr == nil && u.Scheme == "sqlite" {
+		open = openExisting
 	}
-	st, err := openStore(ctx, dbURL)
+	st, err := open(ctx, cfg.DBURL)
 	if err != nil {
 		return nil, fmt.Errorf("open database %s: %w", redactURL(cfg.DBURL), err)
 	}
@@ -334,8 +345,10 @@ func connectTelegram(ctx context.Context, token string, log *slog.Logger) (*tgbo
 }
 
 // retryWait decides whether a failed getMe is worth retrying and for how
-// long to wait. Only network errors, 5xx and 429 are retried. On a 429 the
-// wait is at least the RetryAfter that Telegram sent.
+// long to wait. Only network and transport errors (*url.Error implements
+// net.Error), 5xx, 429 and response-body decode errors are retried. A proxy
+// or gateway that answers 502 with an HTML page gives a decode error. On a
+// 429 the wait is at least the RetryAfter that Telegram sent.
 func retryWait(err error, delay time.Duration) (time.Duration, bool) {
 	var ae *tg.APIError
 	if errors.As(err, &ae) {
@@ -347,8 +360,10 @@ func retryWait(err error, delay time.Duration) (time.Duration, bool) {
 		}
 		return 0, false
 	}
+	var syn *json.SyntaxError
+	var typ *json.UnmarshalTypeError
 	var ne net.Error
-	if errors.As(err, &ne) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+	if errors.As(err, &syn) || errors.As(err, &typ) || errors.As(err, &ne) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return delay, true
 	}
 	return 0, false
