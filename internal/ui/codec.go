@@ -4,6 +4,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 )
 
 // Encode returns callback data of at most 64 bytes: "kind:id" or
@@ -14,7 +17,7 @@ func Encode(a Action) string {
 		return ""
 	}
 	rule := argRule(a.Kind)
-	if a.Kind == ActPage || a.Kind == ActWizStart {
+	if a.Kind == ActPage || a.Kind == ActWizStart || isSetting(a.Kind) {
 		a.ID = 0
 	}
 	s := string(a.Kind) + ":" + strconv.FormatInt(a.ID, 10)
@@ -34,7 +37,7 @@ const (
 
 func argRule(k ActionKind) argKind {
 	switch k {
-	case ActSnooze, ActPage, ActWizDate, ActWizMonth, ActWizTime, ActWizRepeat, ActWizAssign, ActWizNav, ActWizEdit:
+	case ActSnooze, ActPage, ActSetLang, ActSetCal, ActWizDate, ActWizMonth, ActWizTime, ActWizRepeat, ActWizAssign, ActWizNav, ActWizEdit:
 		return argRequired
 	case ActWizNoop:
 		return argOptional
@@ -46,6 +49,10 @@ func validArg(k ActionKind, arg string) bool {
 	switch k {
 	case ActSnooze:
 		return arg == Snooze10m || arg == Snooze1h || arg == SnoozeTomorrow
+	case ActSetLang:
+		return i18n.Lang(arg).Valid()
+	case ActSetCal:
+		return calendar.Kind(arg).Valid()
 	case ActPage:
 		return len(arg) <= 9 && isDigits(arg)
 	case ActWizDate:
@@ -136,7 +143,7 @@ func Decode(s string) (Action, error) {
 	if err != nil || strconv.FormatInt(id, 10) != parts[1] {
 		return Action{}, ErrBadAction
 	}
-	if (k == ActPage || k == ActWizStart) && id != 0 {
+	if (k == ActPage || k == ActWizStart || isSetting(k)) && id != 0 {
 		return Action{}, ErrBadAction
 	}
 	if isWizardChoice(k) && id <= 0 {
@@ -166,6 +173,9 @@ func Decode(s string) (Action, error) {
 	return Action{Kind: k, ID: id, Arg: arg}, nil
 }
 
+// isSetting reports whether k is a /lang or /calendar button (ID is 0).
+func isSetting(k ActionKind) bool { return k == ActSetLang || k == ActSetCal }
+
 // isWizardChoice reports whether k is a wizard button whose ID is a draft
 // version.
 func isWizardChoice(k ActionKind) bool {
@@ -183,7 +193,7 @@ func Escape(s string) string {
 
 func knownKind(k ActionKind) bool {
 	switch k {
-	case ActDone, ActDelete, ActDeleteConfirm, ActEdit, ActRemind, ActPage, ActReminderDone, ActSnooze, ActCancel,
+	case ActDone, ActDelete, ActDeleteConfirm, ActEdit, ActRemind, ActPage, ActReminderDone, ActSnooze, ActCancel, ActSetLang, ActSetCal,
 		ActWizStart, ActWizDate, ActWizMonth, ActWizTime, ActWizRepeat, ActWizAssign, ActWizNav, ActWizEdit, ActWizNoop:
 		return true
 	}
