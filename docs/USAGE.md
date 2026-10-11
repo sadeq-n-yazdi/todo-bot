@@ -49,7 +49,7 @@ Add a recurrence phrase to `/add`. The item stays open. When you mark it done, i
 | `run every week on tue 8:00` | `ورزش هر هفته سه‌شنبه ساعت ۸` | Weekly on that day. `run every friday` also works. |
 | `rent every month on the 1st at 10:00` | `اجاره هر ماه ۱ام ساعت ۱۰` | Monthly at 10:00. The day follows **your calendar**: the 1st of each Jalali month for a Jalali user. A day the month does not have (31st in a 30-day month) falls on the last day. |
 | `water plants every 3 days` | `آب دادن هر ۳ روز` | Every 3 days at 9:00 (`TODO_DEFAULT_TIME`). |
-| `tax 25 Mehr every year`, `birthday tomorrow 09:00 yearly` | `مالیات ۲۵ مهر هر سال`, `تولد فردا ساعت ۹ سالانه` | Every year on that month and day. The month and day follow **your calendar**. A bare `every year` starts today. |
+| `tax 25 Mehr every year`, `birthday tomorrow 09:00 yearly` | `مالیات ۲۵ مهر هر سال`, `تولد فردا ساعت ۹ سالانه` | Every year on that month and day. The month and day follow **your calendar**. A bare `every year` starts on today's date. |
 
 A recurring item shows 🔁 in lists.
 
@@ -59,7 +59,7 @@ Recurring phrases work in `/add` and plain text. `/remind` does not accept them.
 
 ### `/start`, `/help`
 
-Shows the introduction and the list of commands. They are the same command. In a private chat, the reply also adds the `➕ New task` keyboard, if you do not have it yet.
+Shows the introduction and the list of commands. They are the same command. In a private chat, the reply also carries the `➕ New task` keyboard. `/lang` sends it again in the new language.
 
 ### `/whoami`
 
@@ -140,10 +140,11 @@ Use the wizard when you do not want to write the date in a sentence. The bot ask
 | Step | What you do |
 | --- | --- |
 | Text | Send the text of the task. The bot accepts Persian digits. If the text has a date, such as `buy milk tomorrow 09:00`, the bot asks "Found: … — use it?". Press **Yes** to use it. Press **No** to choose a date yourself. |
-| Date | Press **Today**, **Tomorrow** or one of the next five weekdays. Press **📅 Other date** for a month grid in your calendar (Jalali or Gregorian). Use ◀ and ▶ to change the month. You cannot choose a day in the past. Press **No date** for an item with no date. |
+| Date | Press **Today**, **Tomorrow** or one of the next five weekdays. Press **No date** for an item with no date. |
+| Other date | Press **📅 Other date** for a month grid in your calendar (Jalali or Gregorian). Use ◀ and ▶ to change the month. You cannot choose a day in the past. |
 | Time | Press a quick time (09:00, 12:00, 15:00, 18:00 or 20:00), or **Default** for `TODO_DEFAULT_TIME`. Press **⌨️ Type a time**, then send `15:30`, `3pm` or `۱۵:۳۰`. The bot skips this step if you chose no date. |
 | Repeat | Press **Once**, **Daily**, **Weekly**, **Monthly** or **Yearly**. Weekly repeats on the weekday of the date. Monthly and yearly repeat on the day of the date in your calendar. The bot skips this step if you chose no date. |
-| Assignee | Press **Me** or **Nobody**, or press the name of a member. The list has the members that the bot knows by username. The bot skips this step in a private chat when it knows no other member. |
+| Assignee | Press **Me** or the name of a member. The list has the members that the bot knows by username. In a group, **Nobody** is also there. In a private chat, the bot skips this step when it knows no other member. |
 | Confirm | Read the summary. Press **✅ Save** to create the item. Press **✏️ Edit** to change one part. Press **✖ Cancel** to stop. |
 
 **Skip, Back, Cancel and Edit.**
@@ -159,7 +160,7 @@ Use the wizard when you do not want to write the date in a sentence. The bot ask
 /add @sara_home buy milk tomorrow 15:00 every week
 ```
 
-gives the same item as the wizard with the text `buy milk`, **Tomorrow**, **15:00**, **Weekly** and **@sara_home**. If the time is already in the past when you press **✅ Save**, the bot asks you to choose again.
+gives the same item as the wizard with the text `buy milk`, **Tomorrow**, **15:00**, **Weekly** and **@sara_home**. If the time is already in the past when you press **✅ Save**, the bot sends you back to choose again. This is only for an item that does not repeat. A repeating item starts at its next occurrence. If you chose today with the default time and that time has passed, the item is due today at 23:59 and has no reminder, as with `/add`.
 
 **Groups.**
 
@@ -169,7 +170,7 @@ gives the same item as the wizard with the text `buy milk`, **Tomorrow**, **15:0
 - The item goes to the list of the group, as with `/add`.
 - Several members can use the wizard in the same group at the same time. Each member has one draft.
 
-**Expiry.** A draft expires after 30 minutes with no answer. Each answer starts the 30 minutes again. When you press a button on an expired card, the bot shows a message that the wizard has expired. Send `/new` to start again. If you send `/new` while a draft exists, the new draft replaces the old one.
+**Expiry.** A draft expires after 30 minutes with no answer. Each answer starts the 30 minutes again. When you press a button on an old card, the bot shows a short message: "This card is closed. To add a new item, use /new." The bot does not change the card. Send `/new` to start again. If you send `/new` while a draft exists, the new draft replaces the old one.
 
 **More than one bot process.** The draft is in the database. If one process stops, another process can continue the wizard.
 

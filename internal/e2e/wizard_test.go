@@ -690,7 +690,6 @@ func TestWizardStartedOnNodeAFinishedOnNodeB(t *testing.T) {
 		t.Errorf("node B made %d edits, want its steps", n)
 	}
 	b.noDraft(alice, alice)
-	_ = lc
 	// The wizard card was the only message with the placeholder; a replayed
 	// "/new" must not have started a second wizard.
 	if got := len(m.sent(lc.T("wizard.starting"))); got != 1 {
