@@ -94,9 +94,9 @@ func parseFrom(toks []token, start int, cal calendar.Kind, lenient bool) (phrase
 	if ph.date == nil && ph.tm == nil && ph.rel == nil && ph.rec == nil {
 		return phrase{}, false
 	}
-	// A date or time may only be combined with a weekly or monthly repeat;
+	// A date or time may only be combined with a weekly, monthly or yearly repeat;
 	// "tomorrow every day" is not one phrase.
-	if r := ph.rec; r != nil && (late || ph.date != nil) && r.freq != recur.Weekly && r.freq != recur.Monthly {
+	if r := ph.rec; r != nil && (late || ph.date != nil) && r.freq != recur.Weekly && r.freq != recur.Monthly && r.freq != recur.Yearly {
 		return phrase{}, false
 	}
 	if ph.rel != nil && (ph.rel.u == unitMinute || ph.rel.u == unitHour) && (ph.date != nil || ph.tm != nil) {
@@ -522,6 +522,9 @@ func (p *parser) matchRecurrence() bool {
 		ok := p.weeklyTail(j + 1)
 		p.ph.ambig = p.key(j) == "weekly" && p.i == j+1
 		return ok
+	case "yearly", "سالانه":
+		p.ph.ambig = p.key(j) == "yearly"
+		return p.setRec(recSpec{freq: recur.Yearly}, j+1)
 	case "monthly", "ماهانه":
 		ok := p.monthlyTail(j + 1)
 		p.ph.ambig = p.key(j) == "monthly" && p.i == j+1
@@ -545,6 +548,8 @@ func (p *parser) matchRecurrence() bool {
 		return p.weeklyTail(j + 1)
 	case "month", "ماه":
 		return p.monthlyTail(j + 1)
+	case "year", "سال":
+		return p.setRec(recSpec{freq: recur.Yearly}, j+1)
 	}
 	if n, ok := parsePlainNum(p.key(j)); ok && n >= 1 {
 		switch unitWords[p.key(j+1)] {

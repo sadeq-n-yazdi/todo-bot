@@ -138,6 +138,11 @@ func buildRule(r recSpec, h, m int, now time.Time, cal calendar.Kind) recur.Rule
 		if out.MonthDay == 0 {
 			out.MonthDay = cal.Split(now).Day
 		}
+	case recur.Yearly:
+		// Month and day of now (the combined date, for a dated repeat).
+		d := cal.Split(now)
+		out.Cal = cal
+		out.Month, out.MonthDay = d.Month, d.Day
 	}
 	return out
 }
@@ -196,8 +201,8 @@ func resolveDatedRule(rec recSpec, ds *dateSpec, now time.Time, h, m int, cal ca
 
 // buildDatedRule builds the rule for a repeat combined with a date that
 // resolved to on. Weekly and monthly repeats without days of their own repeat
-// on the weekday or, in cal, the day of month of on. Yearly will be one more
-// case here (month and day of on in cal).
+// on the weekday or, in cal, the day of month of on. A yearly repeat repeats
+// on the month and day of on in cal (buildRule takes them from on).
 func buildDatedRule(r recSpec, h, m int, on time.Time, cal calendar.Kind) recur.Rule {
 	if !explicit(r) {
 		switch r.freq {
@@ -243,6 +248,17 @@ func firstOccurrence(r *recur.Rule, now time.Time) time.Time {
 			y, mo := calendar.AddMonths(cur.Year, cur.Month, k)
 			day := min(r.MonthDay, r.Cal.MonthLength(y, mo))
 			if t := r.Cal.At(calendar.Date{Year: y, Month: mo, Day: day}, r.Hour, r.Minute, loc); t.After(now) {
+				due = t
+				break
+			}
+		}
+	case recur.Yearly:
+		// A day the month lacks in a year (29 Feb, 30 Esfand) falls on the
+		// last day of that month, as in recur.
+		cur := r.Cal.Split(now).Year
+		for y := cur; y <= cur+1; y++ {
+			day := min(r.MonthDay, r.Cal.MonthLength(y, r.Month))
+			if t := r.Cal.At(calendar.Date{Year: y, Month: r.Month, Day: day}, r.Hour, r.Minute, loc); t.After(now) {
 				due = t
 				break
 			}
