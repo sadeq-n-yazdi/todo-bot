@@ -76,3 +76,5 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - #58 e2e tests merged (#67), closing #58. They found no bugs.
   - #65 merged (#66). The review compared old and new results over about 300 inputs and found false positives from a bare hour at the start (`at 9 lives`), which are fixed. Part-of-day words were added.
   - v0.1.1 tagged.
+- **2026-10-11**
+  - v0.1.1 deployed to vps00. Migration 0003 was applied at startup and the database was backed up first. The service is active with 0 restarts and about 19MB of memory.
