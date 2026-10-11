@@ -45,6 +45,7 @@ type recSpec struct {
 	interval int
 	wds      []time.Weekday
 	monthDay int // 0 = day of month of "now"
+	nth      int // MonthlyWeekday: 1..4 or recur.Last; wds holds the one weekday
 }
 
 // phrase is the structured meaning of a matched date phrase.
@@ -96,7 +97,7 @@ func parseFrom(toks []token, start int, cal calendar.Kind, lenient bool) (phrase
 	}
 	// A date or time may only be combined with a weekly, monthly or yearly repeat;
 	// "tomorrow every day" is not one phrase.
-	if r := ph.rec; r != nil && (late || ph.date != nil) && r.freq != recur.Weekly && r.freq != recur.Monthly && r.freq != recur.Yearly {
+	if r := ph.rec; r != nil && (late || ph.date != nil) && r.freq != recur.Weekly && r.freq != recur.Monthly && r.freq != recur.Yearly && r.freq != recur.MonthlyWeekday {
 		return phrase{}, false
 	}
 	if ph.rel != nil && (ph.rel.u == unitMinute || ph.rel.u == unitHour) && (ph.date != nil || ph.tm != nil) {
@@ -512,6 +513,9 @@ func (p *parser) setRec(r recSpec, next int) bool {
 
 func (p *parser) matchRecurrence() bool {
 	j := p.i
+	if p.matchNthWeekday(j) {
+		return true
+	}
 	switch p.key(j) {
 	case "daily", "everyday", "روزانه":
 		p.ph.ambig = p.key(j) == "daily"
@@ -599,6 +603,132 @@ func (p *parser) monthlyTail(j int) bool {
 		return p.setRec(recSpec{freq: recur.Monthly, monthDay: d}, nj)
 	}
 	return p.setRec(recSpec{freq: recur.Monthly}, start)
+}
+
+// ordinalWords are the English and Farsi words for "1st".."4th" and "last".
+var ordinalWords = map[string]int{
+	"first": 1, "second": 2, "third": 3, "fourth": 4, "last": recur.Last,
+	"اولین": 1, "دومین": 2, "سومین": 3, "چهارمین": 4, "آخرین": recur.Last,
+	"اول": 1, "دوم": 2, "سوم": 3, "چهارم": 4, "آخر": recur.Last,
+}
+
+// ordAt matches an ordinal at token j: a word ("last", "آخرین"), or a number
+// with an ordinal suffix ("2nd", "۲ام", "۲ مین"), limited to 1..4. A bare
+// number is not an ordinal.
+func (p *parser) ordAt(j int) (int, int, bool) {
+	if n, ok := ordinalWords[p.key(j)]; ok {
+		return n, j + 1, true
+	}
+	if _, plain := parsePlainNum(p.key(j)); plain {
+		if k := p.key(j + 1); k != "ام" && k != "م" && k != "مین" {
+			return 0, 0, false
+		}
+	}
+	n, next, ok := p.numAt(j)
+	if !ok || n < 1 || n > 4 {
+		return 0, 0, false
+	}
+	return n, next, true
+}
+
+func (p *parser) monthAt(j int) bool { k := p.key(j); return k == "month" || k == "ماه" }
+
+// matchNthWeekday matches the Nth or last weekday of every month:
+//
+//	every last friday of the month, last friday of every month,
+//	on the first monday of each month, every month on the last friday,
+//	monthly on the 2nd tuesday, every friday of last week of month,
+//	آخرین جمعه هر ماه, جمعه آخر هر ماه, هر ماه اولین دوشنبه
+//
+// A repeat word (every, each, monthly, هر) must be present: "last friday of
+// the month" and "last friday" keep their other meanings.
+func (p *parser) matchNthWeekday(j int) bool {
+	rep, monthHead := false, false
+	switch p.key(j) {
+	case "every", "each", "هر":
+		rep = true
+		j++
+		if p.monthAt(j) {
+			monthHead = true
+			j++
+		}
+	case "monthly", "ماهانه":
+		rep, monthHead = true, true
+		j++
+	}
+	if p.key(j) == "on" {
+		j++
+	}
+	if p.key(j) == "the" {
+		j++
+	}
+	// "every friday of last week of month"
+	if rep && !monthHead {
+		if wd, n, ok := p.wdAt(j); ok && (p.key(j+n) == "of" || p.key(j+n) == "in") {
+			o := j + n + 1
+			if p.key(o) == "the" {
+				o++
+			}
+			if nth, k, ok := p.ordAt(o); ok && p.key(k) == "week" && (p.key(k+1) == "of" || p.key(k+1) == "in") {
+				k += 2
+				if d := p.key(k); d == "the" || d == "every" || d == "each" {
+					k++
+				}
+				if p.monthAt(k) {
+					return p.setRec(recSpec{freq: recur.MonthlyWeekday, wds: []time.Weekday{wd}, nth: nth}, k+1)
+				}
+			}
+		}
+	}
+	var wd time.Weekday
+	nth, ok := 0, false
+	if n, k, found := p.ordAt(j); found { // "last friday", "آخرین جمعه"
+		w, wn, found := p.wdAt(k)
+		if !found {
+			return false
+		}
+		nth, wd, ok, j = n, w, true, k+wn
+	} else if w, wn, found := p.wdAt(j); found { // "جمعه آخر"
+		if n, found := ordinalWords[p.key(j+wn)]; found && !isEnglishOrdinal(p.key(j+wn)) {
+			nth, wd, ok, j = n, w, true, j+wn+1
+		}
+	}
+	if !ok {
+		return false
+	}
+	if !monthHead { // the month comes after: "of the month", "of every month", "هر ماه"
+		if k := p.key(j); k == "of" || k == "in" || k == "در" || k == "از" {
+			j++
+		}
+		switch d := p.key(j); {
+		case d == "هر" && p.monthAt(j+1):
+			rep = true
+			j += 2
+		case d == "the" || d == "every" || d == "each":
+			rep = rep || d != "the"
+			j++
+			if !p.monthAt(j) {
+				return false
+			}
+			j++
+		case p.monthAt(j):
+			j++
+		default:
+			return false
+		}
+		if !rep {
+			return false
+		}
+	}
+	return p.setRec(recSpec{freq: recur.MonthlyWeekday, wds: []time.Weekday{wd}, nth: nth}, j)
+}
+
+func isEnglishOrdinal(k string) bool {
+	switch k {
+	case "first", "second", "third", "fourth", "last":
+		return true
+	}
+	return false
 }
 
 // timeWordAt reports whether token j is an am/pm or Farsi day-period word,
