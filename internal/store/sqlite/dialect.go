@@ -49,6 +49,8 @@ func (dialect) InsertIgnore(table string, cols, keys []string) string {
 	return insertInto(table, cols) + " ON CONFLICT (" + strings.Join(keys, ", ") + ") DO NOTHING"
 }
 
+func (dialect) Greatest(a, b string) string { return "max(" + a + ", " + b + ")" }
+
 func (dialect) ClaimSubquery(sub string) string { return sub }
 
 // LockMigrations is a no-op: every migration runs in an IMMEDIATE transaction

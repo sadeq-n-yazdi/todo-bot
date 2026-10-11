@@ -32,6 +32,9 @@ type Dialect interface {
 	// ClaimSubquery adapts the "SELECT id ... ORDER BY ... LIMIT ?" subquery
 	// used by the claim UPDATE (MySQL needs it wrapped in a derived table).
 	ClaimSubquery(sub string) string
+	// Greatest returns an expression for the larger of two scalar SQL
+	// expressions (SQLite max(a, b); Postgres and MySQL GREATEST(a, b)).
+	Greatest(a, b string) string
 	// LockMigrations serialises migration runners on one database and
 	// returns the release function. SQLite needs no lock: every migration
 	// runs in an IMMEDIATE transaction.

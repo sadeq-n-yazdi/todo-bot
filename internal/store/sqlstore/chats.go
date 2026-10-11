@@ -87,7 +87,8 @@ func (d *DB) ListChatsByDigestUser(ctx context.Context, userID int64) ([]model.C
 // MigrateChat moves a chat and all its todos and reminders to newID in one
 // transaction. If newID already exists, the todos and reminders are merged
 // into it and the old chat row is deleted; todo numbers that clash with the
-// target get fresh numbers from the target's next_num.
+// target get fresh numbers from the target's next_num. The digest state
+// follows mergeDigest's precedence.
 func (d *DB) MigrateChat(ctx context.Context, oldID, newID int64) error {
 	if oldID == newID {
 		return nil
@@ -139,8 +140,47 @@ func (d *DB) migrateChat(ctx context.Context, oldID, newID int64) error {
 	if err := d.moveReminders(ctx, oldID, newID); err != nil {
 		return err
 	}
+	if err := d.mergeDigest(ctx, oldID, newID); err != nil {
+		return err
+	}
 	if _, err := d.q.ExecContext(ctx, "DELETE FROM chats WHERE id = ?", oldID); err != nil {
 		return fmt.Errorf("sqlstore: delete chat %d: %w", oldID, err)
+	}
+	return nil
+}
+
+// mergeDigest carries the old chat's digest state over to the target. The
+// digest state is one unit: digest_time, digest_by, digest_next_at and the
+// claim (digest_claim_token, digest_claim_until). Precedence:
+//   - the target has a digest (digest_time not NULL): the target keeps its
+//     whole state, and the old chat's settings and claim are dropped;
+//   - the target has none and the old chat has one: the target takes all of
+//     the old chat's state, including a live claim, so the scheduler's
+//     AdvanceDigest with the original token still succeeds;
+//   - neither has one: nothing changes.
+func (d *DB) mergeDigest(ctx context.Context, oldID, newID int64) error {
+	var targetTime sql.NullString
+	if err := d.q.QueryRowContext(ctx, "SELECT digest_time FROM chats WHERE id = ?", newID).Scan(&targetTime); err != nil {
+		return fmt.Errorf("sqlstore: read digest of chat %d: %w", newID, err)
+	}
+	if targetTime.Valid {
+		return nil
+	}
+	var dtime, token sql.NullString
+	var by, next sql.NullInt64
+	var until int64
+	if err := d.q.QueryRowContext(ctx,
+		"SELECT digest_time, digest_by, digest_next_at, digest_claim_token, digest_claim_until FROM chats WHERE id = ?",
+		oldID).Scan(&dtime, &by, &next, &token, &until); err != nil {
+		return fmt.Errorf("sqlstore: read digest of chat %d: %w", oldID, err)
+	}
+	if !dtime.Valid {
+		return nil
+	}
+	if _, err := d.q.ExecContext(ctx,
+		"UPDATE chats SET digest_time = ?, digest_by = ?, digest_next_at = ?, digest_claim_token = ?, digest_claim_until = ? WHERE id = ?",
+		dtime, by, next, token, until, newID); err != nil {
+		return fmt.Errorf("sqlstore: carry digest to chat %d: %w", newID, err)
 	}
 	return nil
 }

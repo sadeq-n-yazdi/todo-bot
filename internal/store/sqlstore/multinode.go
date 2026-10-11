@@ -147,7 +147,8 @@ FROM chats WHERE digest_next_at IS NOT NULL`)
 // AcquireLease takes or renews the named lease; see store.Store. The epoch
 // is bumped by the same statement that changes the holder, so it is atomic
 // without a prior read. epoch is assigned before holder: MySQL evaluates SET
-// assignments left to right.
+// assignments left to right. held_until never moves backwards: a stale
+// renewal by the holder (older now, landing late) keeps the later value.
 func (d *DB) AcquireLease(ctx context.Context, name, holder string, now time.Time, ttl time.Duration) (model.Lease, error) {
 	var l model.Lease
 	err := d.WithTx(ctx, func(tx store.Store) error {
@@ -160,7 +161,7 @@ func (d *DB) AcquireLease(ctx context.Context, name, holder string, now time.Tim
 		if _, err := t.q.ExecContext(ctx, `
 UPDATE leases SET
   epoch = epoch + CASE WHEN holder = ? AND held_until > ? THEN 0 ELSE 1 END,
-  holder = ?, held_until = ?
+  holder = ?, held_until = `+d.d.Greatest("held_until", "?")+`
 WHERE name = ? AND (held_until <= ? OR holder = ?)`,
 			holder, now.Unix(), holder, now.Add(ttl).Unix(), name, now.Unix(), holder); err != nil {
 			return fmt.Errorf("update: %w", err)
