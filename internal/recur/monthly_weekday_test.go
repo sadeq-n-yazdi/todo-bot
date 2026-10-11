@@ -186,7 +186,7 @@ func civil(t time.Time) time.Time {
 
 func TestMonthlyWeekdayDSTTehran(t *testing.T) {
 	tehran := mustLoc(t, "Asia/Tehran")
-	// Until 2022 Iran moved its clocks forward at 00:00 on 1 Farvardin
+	// Until 2022 Iran moved its clocks forward at 00:00 on 2 Farvardin
 	// (22 Mar 2019, a Friday), so 00:30 did not exist that day.
 	r, _ := Parse("monthly fri#1 00:30 jalali")
 	got := r.Next(time.Date(2019, 3, 1, 0, 0, 0, 0, tehran), tehran)
