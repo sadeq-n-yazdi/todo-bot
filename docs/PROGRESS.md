@@ -40,7 +40,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 
 | # | Issue | Status | PR |
 |---|---|---|---|
-| 68 | Step-by-step task creation (wizard) | 🚧 contracts merged; ui, handler and e2e in progress | #69 |
+| 68 | Step-by-step task creation (wizard) | 🚧 contracts and ui merged; handler and e2e in progress | #69, #73 |
 | 70 | nlparse: combine a date/time with every week, month or year | ✅ done | #71, #72 |
 
 ## Log
@@ -89,3 +89,4 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - #70 weekly and monthly merged (#71). The review found first due times in the past, a first due that wasn't a real occurrence of the rule, and dates jumping a year; all three are fixed. A property check over every combined test row now guards this.
   - #68 contracts merged (#69). The review found that Save could lose the item, so Save now deletes the draft and adds the item in one transaction. It also found that the reply keyboard could be attached to a message that is edited later; the wizard card now always has an inline keyboard. The ui, handler and yearly-parser PRs started in parallel.
   - #70 yearly merged (#72), closing #70. The review compared old and new results over about 8,000 inputs and found no false positives (`happy new year card` and `سال نو` stay plain text).
+  - #68 ui merged (#73): the wizard card and the month grid. The review found a blank button label that Telegram rejects, no cap on member buttons (Telegram allows 100), and a card that could pass 4096 characters; all three are fixed.
