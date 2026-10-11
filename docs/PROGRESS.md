@@ -2,7 +2,7 @@
 
 This page is updated on `main` after every merged PR.
 
-Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released and deployed**) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
+Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released**) · [v0.1.5](https://github.com/sadeq-n-yazdi/todo-bot/milestone/6) (Nth and last weekday of the month, **released**) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
 
 | # | Wave | Issue | Status | PR |
 |---|---|---|---|---|
@@ -56,6 +56,14 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 54 | Startup getMe retry: honour RetryAfter | ✅ merged | #81 |
 | 82 | Minimum claim TTL; tighten the digest hang test | ✅ merged | #83 |
 | 84 | Backup and startup follow-ups from the #81 review | 📋 open | |
+
+### v0.1.5
+
+| # | Issue | Status | PR |
+|---|---|---|---|
+| 85 | recur: Nth and last weekday of the month | ✅ merged | #88 |
+| 86 | nlparse: every last/Nth weekday of the month (en + fa) | ✅ merged | #90 |
+| 87 | Wizard: monthly on the Nth/last weekday; docs and e2e | ✅ merged | #89 |
 
 ## Log
 - **2026-10-10**
@@ -113,3 +121,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - #45 merged (#78). #46 merged (#80): each send now ends before its claim expires. #49 and #50 merged (#79): a stale lease renewal can no longer move the expiry back, and a chat merge keeps the digest claim. The reviews filed #82.
   - #82 merged (#83). #51, #53 and #54 merged (#81). Its review found that a 502 HTML page from a gateway made startup fatal, which would stop the unit after five restarts; this is fixed and tested. The review also ran the new backup against a database under heavy writes. Filed #84 for the remaining notes. v0.1.4 tagged.
   - v0.1.4 deployed to vps00. It has no schema change. The database was backed up first. The service is active with 0 restarts and about 20MB of memory. v0.1.3 is kept as `todo-bot.prev` for rollback.
+  - The owner asked for "every Friday of the last week of the month at 4pm". Planned v0.1.5 (#85–#87). The owner decided: the last such weekday inside the month, also the 1st to 4th, in the user's calendar, from text and from the wizard.
+  - #85 merged (#88). The review checked every rule against listed month dates for 2016–2034 and Jalali 1394–1414 in six zones, and ran a fuzz test. It asked for a Tehran DST test.
+  - #86 merged (#90). The review compared old and new results over about 1,000 inputs. Every changed result was the new rule, and each had a repeat word and a month word. It found that "of the last week of the month" was not read; this is fixed.
+  - #87 merged (#89). The review found that the docs and the PR text did not match the code; these are fixed. A date edit never saves a choice that does not fit. v0.1.5 tagged.

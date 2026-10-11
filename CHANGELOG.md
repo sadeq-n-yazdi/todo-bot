@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-11
+
+### Added
+- Repeat on the 1st, 2nd, 3rd, 4th or last weekday of every month, in your calendar (Gregorian or Jalali) (#85). The last Friday is the last Friday in the month, so in a Jalali calendar it follows the Jalali month.
+- The bot reads this repeat from text (#86). Examples: `every last friday of the month 4pm`, `every friday of the last week of the month at 4pm`, `every 2nd tuesday of the month`, `آخرین جمعه هر ماه ساعت ۴ عصر`, `اولین دوشنبه هر ماه`. A repeat word (every, each, monthly, هر) and a month word must be in the text. Thus `last friday` alone keeps its old meaning.
+- The wizard offers "Monthly, 4th Friday" and "Monthly, last Friday" on the repeat step when they fit the date (#87). If you edit the date and the choice does not fit the new date, the bot asks for the repeat again.
+
+### Notes
+- A rollback to v0.1.4 cannot read the new repeat. Such an item sends its next reminder once, then stops repeating.
+
 ## [0.1.4] - 2026-10-11
 
 ### Fixed
@@ -131,7 +141,8 @@ All notable changes to this project are documented here. The format follows
   - Times follow wall-clock time across DST changes.
   - A time that falls in the spring-forward gap fires at the shifted time, never earlier.
 
-[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.1...v0.1.2
