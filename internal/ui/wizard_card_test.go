@@ -109,6 +109,7 @@ func wizardCases() []struct {
 		{name: "repeat", v: wview(model.StepRepeat, model.DraftData{Date: "2026-10-14", Time: "15:00"}), skip: true, back: true, cancel: true},
 		{name: "repeat_last", v: wview(model.StepRepeat, model.DraftData{Date: "2026-10-30", Time: "16:00"}), skip: true, back: true, cancel: true},
 		{name: "repeat_both", v: wview(model.StepRepeat, model.DraftData{Date: "2027-02-26", Time: "16:00"}), skip: true, back: true, cancel: true},
+		{name: "repeat_both_jalali", v: wview(model.StepRepeat, model.DraftData{Date: "2026-03-19", Time: "16:00"}), skip: true, back: true, cancel: true},
 		{name: "confirm_nth", v: wview(model.StepConfirm, model.DraftData{Text: "x", Date: "2026-10-23", Time: "16:00", Repeat: model.RepeatNthWeekday}), save: true, edit: true, cancel: true},
 		{name: "assignee_private", v: wview(model.StepAssignee, withDate), skip: true, back: true, cancel: true},
 		{name: "assignee_group", v: grp, skip: true, back: true, cancel: true},
