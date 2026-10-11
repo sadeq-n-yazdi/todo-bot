@@ -107,6 +107,9 @@ func wizardCases() []struct {
 		{name: "time", v: wview(model.StepTime, model.DraftData{Date: "2026-10-14"}), skip: true, back: true, cancel: true},
 		{name: "time_text", v: wview(model.StepTimeText, model.DraftData{Date: "2026-10-14"}), back: true, cancel: true},
 		{name: "repeat", v: wview(model.StepRepeat, model.DraftData{Date: "2026-10-14", Time: "15:00"}), skip: true, back: true, cancel: true},
+		{name: "repeat_last", v: wview(model.StepRepeat, model.DraftData{Date: "2026-10-30", Time: "16:00"}), skip: true, back: true, cancel: true},
+		{name: "repeat_both", v: wview(model.StepRepeat, model.DraftData{Date: "2027-02-26", Time: "16:00"}), skip: true, back: true, cancel: true},
+		{name: "confirm_nth", v: wview(model.StepConfirm, model.DraftData{Text: "x", Date: "2026-10-23", Time: "16:00", Repeat: model.RepeatNthWeekday}), save: true, edit: true, cancel: true},
 		{name: "assignee_private", v: wview(model.StepAssignee, withDate), skip: true, back: true, cancel: true},
 		{name: "assignee_group", v: grp, skip: true, back: true, cancel: true},
 		{name: "confirm", v: wview(model.StepConfirm, withDate), save: true, edit: true, cancel: true},
@@ -412,5 +415,75 @@ func TestLongTextStaysUnderLimit(t *testing.T) {
 	}
 	if !strings.Contains(m.Text, "…") {
 		t.Error("no ellipsis")
+	}
+}
+
+func TestNthWeekdayChoices(t *testing.T) {
+	d := func(y int, m time.Month, day int) time.Time { return time.Date(y, m, day, 0, 0, 0, 0, time.UTC) }
+	cases := []struct {
+		name         string
+		cal          calendar.Kind
+		t            time.Time
+		nth          int
+		hasNth, last bool
+	}{
+		{"greg 1st", calendar.Gregorian, d(2026, 10, 2), 1, true, false},
+		{"greg 4th", calendar.Gregorian, d(2026, 10, 23), 4, true, false},
+		{"greg 5th is last", calendar.Gregorian, d(2026, 10, 30), 5, false, true},
+		{"greg day 28 of 31 is 4th and last", calendar.Gregorian, d(2026, 10, 28), 4, true, true},
+		{"greg 28-day month: 4th and last", calendar.Gregorian, d(2027, 2, 26), 4, true, true},
+		{"greg leap Feb 29 is 5th and last", calendar.Gregorian, d(2028, 2, 29), 5, false, true},
+		// 1 Aban 1405 = 2026-10-23 (Friday); 29 Aban 1405 = 2026-11-20.
+		{"jalali 1 Aban", calendar.Jalali, d(2026, 10, 23), 1, true, false},
+		{"jalali 29 Aban is last", calendar.Jalali, d(2026, 11, 20), 5, false, true},
+	}
+	for _, c := range cases {
+		nth, hasNth, last := NthWeekdayChoices(c.cal, c.t)
+		if nth != c.nth || hasNth != c.hasNth || last != c.last {
+			t.Errorf("%s: got %d %v %v, want %d %v %v", c.name, nth, hasNth, last, c.nth, c.hasNth, c.last)
+		}
+	}
+}
+
+func TestNthRepeatLabels(t *testing.T) {
+	// 2026-10-30 is the last Friday; 2026-10-23 is the 4th Friday.
+	last := dump(WizardCard(wview(model.StepRepeat, model.DraftData{Date: "2026-10-30"}), locEnG, testLoc, testNow))
+	if !strings.Contains(last, "[Monthly, last Friday|wr:4242:l]") || strings.Contains(last, "wr:4242:n") {
+		t.Errorf("last: %s", last)
+	}
+	fourth := dump(WizardCard(wview(model.StepRepeat, model.DraftData{Date: "2026-10-23"}), locEnG, testLoc, testNow))
+	if !strings.Contains(fourth, "[Monthly, 4th Friday|wr:4242:n]") || strings.Contains(fourth, "wr:4242:l") {
+		t.Errorf("4th: %s", fourth)
+	}
+	// 1 Aban 1405 (2026-10-23) in Farsi; 29 Aban 1405 (2026-11-20) is the last.
+	fa := dump(WizardCard(wview(model.StepRepeat, model.DraftData{Date: "2026-11-20"}), locFaJ, testLoc, testNow))
+	if !strings.Contains(fa, "[ماهانه، آخرین جمعه|wr:4242:l]") {
+		t.Errorf("fa last: %s", fa)
+	}
+	fa = dump(WizardCard(wview(model.StepRepeat, model.DraftData{Date: "2026-10-23"}), locFaJ, testLoc, testNow))
+	if !strings.Contains(fa, "[ماهانه، اولین جمعه|wr:4242:n]") {
+		t.Errorf("fa 1st: %s", fa)
+	}
+	// Summary shows the label; no date -> no extra buttons.
+	sum := WizardCard(wview(model.StepConfirm, model.DraftData{Text: "x", Date: "2026-10-30", Repeat: model.RepeatLastWeekday}), locEnG, testLoc, testNow)
+	if !strings.Contains(sum.Text, "Monthly, last Friday") {
+		t.Errorf("summary: %s", sum.Text)
+	}
+	none := dump(WizardCard(wview(model.StepRepeat, model.DraftData{}), locEnG, testLoc, testNow))
+	if strings.Contains(none, "wr:4242:n") || strings.Contains(none, "wr:4242:l") {
+		t.Errorf("no date: %s", none)
+	}
+}
+
+func TestNthRepeatLabelsFitButtons(t *testing.T) {
+	for _, lc := range []i18n.Locale{locEnG, locFaJ} {
+		for day := 1; day <= 31; day++ {
+			v := wview(model.StepRepeat, model.DraftData{Date: time.Date(2026, 10, day, 0, 0, 0, 0, time.UTC).Format("2006-01-02")})
+			for _, b := range buttonsOf(WizardCard(v, lc, testLoc, testNow)) {
+				if b.Text == "" || len([]rune(b.Text)) > 40 {
+					t.Errorf("%s day %d: label %q", lc.Lang, day, b.Text)
+				}
+			}
+		}
 	}
 }

@@ -72,6 +72,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
     - `weekly mon,wed 08:00`
     - `monthly 31 10:00`
     - `every 3d 2026-10-10 09:00`
+    - `monthly fri#4 16:00` and `monthly fri#last 16:00 jalali`: the Nth (1..4) or last weekday of the month, in the rule's calendar (`Freq` `MonthlyWeekday`, `Rule.Nth`).
     - `yearly 02-29 09:00` and `yearly 12-30 09:00 jalali` (§12). A day the month lacks in a given year falls on its last day.
 - **nlparse**:
   - `Parser{DefaultHour, DefaultMinute}`.
@@ -501,7 +502,7 @@ The draft (`model.Draft`) holds the step and the answers (`model.DraftData`). Ea
 | `date`, grid view | month grid in the user's calendar | ◀ ▶ `wm:v:j140507`, day `wd:v:YYYYMMDD`, past day and padding `wz`, back to quick picks `wd:v:q` | as `date` |
 | `time` | 09:00, 12:00, 15:00, 18:00, 20:00 (`ui.WizardTimes`); ⌨️ Type a time; Default | `wt:v:HHMM`, `wt:v:k`, `wt:v:d`; ⏭ Skip (= Default), ◀ Back, ✖ Cancel | `repeat`; Type: `time_text` |
 | `time_text` | "Reply with a time: 15:30, 3pm, ۱۵:۳۰" | ◀ Back, ✖ Cancel | `repeat` |
-| `repeat` | Once, Daily, Weekly (on the chosen weekday), Monthly (in the user's calendar), Yearly | `wr:v:o\|d\|w\|m\|y`; ⏭ Skip (= Once), ◀ Back, ✖ Cancel | `assignee` |
+| `repeat` | Once, Daily, Weekly (on the chosen weekday), Monthly (in the user's calendar), Yearly, and from the chosen date in the user's calendar: Monthly on the Nth weekday (shown when `(day-1)/7+1 <= 4`) and Monthly on the last weekday (shown when `day+7 > month length`) | `wr:v:o\|d\|w\|m\|y\|n\|l`; ⏭ Skip (= Once), ◀ Back, ✖ Cancel | `assignee` |
 | `assignee` | group: Nobody, Me, then one button per member; private: Me, then one button per member | `wa:v:n` (Nobody, group only), `wa:v:m` (Me), `wa:v:<userID>`; ⏭ Skip (= Nobody in a group, Me in a private chat), ◀ Back, ✖ Cancel | `confirm` |
 | `confirm` | summary in the user's language and calendar | ✅ Save `wn:v:v`, ✏️ Edit `wn:v:e`, ✖ Cancel | Save: done |
 | `confirm`, edit menu | "What do you want to change?" | `we:v:text\|date\|time\|repeat\|assignee`, ◀ Back (to the summary) | the chosen step |
@@ -603,7 +604,11 @@ The `Result`:
      - daily: `{Freq: Daily, Cal: Gregorian, Hour: H, Minute: M}`;
      - weekly: `{Freq: Weekly, Weekdays: [weekday of the date], Cal: Gregorian, Hour: H, Minute: M}`;
      - monthly: `{Freq: Monthly, MonthDay: day of the date in the user's calendar, Cal: user's calendar, Hour: H, Minute: M}`;
-     - yearly: `{Freq: Yearly, Month and MonthDay of the date in the user's calendar, Cal: user's calendar, Hour: H, Minute: M}`.
+     - yearly: `{Freq: Yearly, Month and MonthDay of the date in the user's calendar, Cal: user's calendar, Hour: H, Minute: M}`;
+     - Nth weekday (`model.RepeatNthWeekday`, `wr:v:n`): `{Freq: MonthlyWeekday, Nth: (day-1)/7+1, Weekdays: [weekday of the date], Cal: user's calendar, ...}`;
+     - last weekday (`model.RepeatLastWeekday`, `wr:v:l`): the same with `Nth: recur.Last`.
+
+     A new date clears an Nth or last choice unless the weekday is the same and the choice still fits. Save sends a draft whose date no longer fits back to the repeat step. A found `monthly fri#…` rule is offered again as Nth or last only under the same test.
 
      These are the rules `nlparse` builds for the same phrases: `Cal` is Gregorian except for monthly and yearly rules.
 

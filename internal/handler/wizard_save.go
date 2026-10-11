@@ -26,6 +26,7 @@ const (
 	saveTimePast              // a picked date's time has passed: back to time
 	saveDatePast              // a picked date is before today: back to date
 	saveFoundPast             // a found date has passed: back to date
+	saveRepeatBad             // the repeat does not fit the date: back to repeat
 )
 
 // wizardTime parses "HH:MM" or returns the default time.
@@ -62,6 +63,15 @@ func repeatRule(repeat string, y int, m time.Month, d, hh, mm int, cal calendar.
 		rule.Freq, rule.MonthDay, rule.Cal = recur.Monthly, cd.Day, cal
 	case model.RepeatYearly:
 		rule.Freq, rule.Month, rule.MonthDay, rule.Cal = recur.Yearly, cd.Month, cd.Day, cal
+	case model.RepeatNthWeekday, model.RepeatLastWeekday:
+		if !nthRepeatValid(repeat, civil.Format("2006-01-02"), cal) {
+			return recur.Rule{}, fmt.Errorf("handler: repeat %q does not fit %s", repeat, civil.Format("2006-01-02"))
+		}
+		rule.Freq, rule.Weekdays, rule.Cal = recur.MonthlyWeekday, []time.Weekday{civil.Weekday()}, cal
+		rule.Nth = (cd.Day-1)/7 + 1
+		if repeat == model.RepeatLastWeekday {
+			rule.Nth = recur.Last
+		}
 	default:
 		return recur.Rule{}, fmt.Errorf("handler: unknown repeat %q", repeat)
 	}
@@ -107,6 +117,10 @@ func (h *Handler) buildResult(d model.Draft, lc i18n.Locale, loc *time.Location,
 	hh, mm := h.wizardTime(dd.Time)
 	due := time.Date(day.Year(), day.Month(), day.Day(), hh, mm, 0, 0, loc)
 	res.Due, res.HasTime = &due, dd.Time != ""
+	if (dd.Repeat == model.RepeatNthWeekday || dd.Repeat == model.RepeatLastWeekday) &&
+		!nthRepeatValid(dd.Repeat, dd.Date, calOf(lc)) {
+		return res, saveRepeatBad, nil
+	}
 	if dd.Repeat != model.RepeatOnce {
 		rule, err := repeatRule(dd.Repeat, day.Year(), day.Month(), day.Day(), hh, mm, calOf(lc))
 		if err != nil {
@@ -165,6 +179,11 @@ func (h *Handler) save(ctx context.Context, r req, d model.Draft) (string, error
 		nd := d
 		nd.Step = model.StepDate
 		return redo(nd, "wizard.note.passed")
+	case saveRepeatBad:
+		nd := d
+		nd.Data.Repeat = model.RepeatOnce
+		nd.Step = model.StepRepeat
+		return redo(nd, "wizard.note.repeat")
 	case saveFoundPast:
 		nd := d
 		clearFound(&nd)
