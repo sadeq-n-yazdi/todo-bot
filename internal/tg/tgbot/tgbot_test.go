@@ -31,11 +31,12 @@ type fakeAPI struct {
 	calls   []call
 	replies map[string]string // method -> raw JSON body; default {"ok":true,"result":true}
 	updates []string          // raw update JSON queued for getUpdates
+	wake    chan struct{}     // signalled (cap 1) by queue to release a waiting getUpdates
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
 	t.Helper()
-	f := &fakeAPI{t: t, replies: map[string]string{}}
+	f := &fakeAPI{t: t, replies: map[string]string{}, wake: make(chan struct{}, 1)}
 	f.replies["getMe"] = `{"ok":true,"result":{"id":42,"is_bot":true,"first_name":"Todo","username":"TodoBot"}}`
 	f.replies["sendMessage"] = `{"ok":true,"result":{"message_id":77,"date":1,"chat":{"id":5,"type":"private"}}}`
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
@@ -56,16 +57,26 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if method == "getUpdates" {
-		f.mu.Lock()
-		batch := f.updates
-		f.updates = nil
-		f.mu.Unlock()
-		if len(batch) == 0 { // emulate a long poll that outlives the test
-			select {
-			case <-r.Context().Done():
-			case <-time.After(30 * time.Second):
+		// Emulate a real long poll: block until updates are queued (or the
+		// client goes away) instead of answering empty at once. Otherwise a
+		// getUpdates that arrives just before queue() would hang and lose them.
+		var batch []string
+		timeout := time.After(30 * time.Second) // outlives the test
+		for len(batch) == 0 {
+			f.mu.Lock()
+			batch = f.updates
+			f.updates = nil
+			f.mu.Unlock()
+			if len(batch) > 0 {
+				break
 			}
-			return
+			select {
+			case <-f.wake:
+			case <-r.Context().Done():
+				return
+			case <-timeout:
+				return
+			}
 		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":[` + strings.Join(batch, ",") + `]}`))
 		return
@@ -89,6 +100,10 @@ func (f *fakeAPI) queue(upd ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updates = append(f.updates, upd...)
+	select {
+	case f.wake <- struct{}{}:
+	default:
+	}
 }
 
 func (f *fakeAPI) callsTo(method string) []call {
@@ -169,7 +184,7 @@ func collect(t *testing.T, b *Bot, want int, h func(tg.Update) error) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(60 * time.Second): // hang guard only; delivery is event-driven
 		t.Fatal("poller did not deliver the expected updates")
 	}
 }
