@@ -41,7 +41,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | # | Issue | Status | PR |
 |---|---|---|---|
 | 68 | Step-by-step task creation (wizard) | 🚧 contracts merged; ui, handler and e2e in progress | #69 |
-| 70 | nlparse: combine a date/time with every week, month or year | 🚧 weekly and monthly merged; yearly in progress | #71 |
+| 70 | nlparse: combine a date/time with every week, month or year | ✅ done | #71, #72 |
 
 ## Log
 - **2026-10-10**
@@ -88,3 +88,4 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - Planned v0.1.2: the step-by-step wizard (#68), filed after the owner decided where it starts, which steps it has, the date grid and group rules. Contracts PR #69 is open.
   - #70 weekly and monthly merged (#71). The review found first due times in the past, a first due that wasn't a real occurrence of the rule, and dates jumping a year; all three are fixed. A property check over every combined test row now guards this.
   - #68 contracts merged (#69). The review found that Save could lose the item, so Save now deletes the draft and adds the item in one transaction. It also found that the reply keyboard could be attached to a message that is edited later; the wizard card now always has an inline keyboard. The ui, handler and yearly-parser PRs started in parallel.
+  - #70 yearly merged (#72), closing #70. The review compared old and new results over about 8,000 inputs and found no false positives (`happy new year card` and `سال نو` stay plain text).
