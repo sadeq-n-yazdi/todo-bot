@@ -2,7 +2,7 @@
 
 This page is updated on `main` after every merged PR.
 
-Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
+Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released and deployed**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
 
 | # | Wave | Issue | Status | PR |
 |---|---|---|---|---|
@@ -42,6 +42,18 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 |---|---|---|---|
 | 68 | Step-by-step task creation (wizard) | ✅ done | #69, #73, #74, #75, #76 |
 | 70 | nlparse: combine a date/time with every week, month or year | ✅ done | #71, #72 |
+
+### v0.1.4
+
+| # | Issue | Status | PR |
+|---|---|---|---|
+| 45 | Language and calendar buttons through the ui codec | 🚧 in progress | |
+| 46 | Bound each scheduler send by the claim deadline | 🚧 in progress | |
+| 49 | Keep the digest claim when MigrateChat merges into an existing chat | 🚧 in progress | |
+| 50 | Never move a lease's held_until backwards | 🚧 in progress | |
+| 51 | Lease loop: test and doc follow-ups | 🚧 in progress | |
+| 53 | Open the store without migrations for backup | 🚧 in progress | |
+| 54 | Startup getMe retry: honour RetryAfter | 🚧 in progress | |
 
 ## Log
 - **2026-10-10**
@@ -95,3 +107,4 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - v0.1.2 tagged.
   - The owner wrote the retry policy for reminders (#77): 5 s, 30 s, 2 min, 10 min, 30 min, then give up. The window is short because a retried reminder is not marked late. v0.1.3 tagged.
   - v0.1.3 deployed to vps00 (it includes v0.1.2). Migration 0004 was applied at startup and the database was backed up first. The service is active with 0 restarts and about 24MB of memory. v0.1.1 is kept as `todo-bot.prev` for rollback.
+  - Planned v0.1.4: the seven open follow-ups from earlier reviews (#45, #46, #49, #50, #51, #53, #54). Four PRs started in parallel.
