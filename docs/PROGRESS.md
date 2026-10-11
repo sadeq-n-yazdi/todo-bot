@@ -47,7 +47,7 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 
 | # | Issue | Status | PR |
 |---|---|---|---|
-| 45 | Language and calendar buttons through the ui codec | 🚧 in progress | |
+| 45 | Language and calendar buttons through the ui codec | ✅ merged | #78 |
 | 46 | Bound each scheduler send by the claim deadline | 🚧 in progress | |
 | 49 | Keep the digest claim when MigrateChat merges into an existing chat | 🚧 in progress | |
 | 50 | Never move a lease's held_until backwards | 🚧 in progress | |
