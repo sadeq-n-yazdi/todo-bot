@@ -27,6 +27,8 @@ func TestWizardEncodeDecode(t *testing.T) {
 		{Action{Kind: ActWizTime, ID: 3, Arg: WizTimeDefault}, "wt:3:d"},
 		{Action{Kind: ActWizTime, ID: 3, Arg: WizTimeType}, "wt:3:k"},
 		{Action{Kind: ActWizRepeat, ID: 3, Arg: WizRepeatYearly}, "wr:3:y"},
+		{Action{Kind: ActWizRepeat, ID: 3, Arg: WizRepeatNth}, "wr:3:n"},
+		{Action{Kind: ActWizRepeat, ID: 3, Arg: WizRepeatLast}, "wr:3:l"},
 		{Action{Kind: ActWizAssign, ID: 3, Arg: WizAssignNone}, "wa:3:n"},
 		{Action{Kind: ActWizAssign, ID: 3, Arg: WizAssignMe}, "wa:3:m"},
 		{Action{Kind: ActWizAssign, ID: 3, Arg: "123456789"}, "wa:3:123456789"},

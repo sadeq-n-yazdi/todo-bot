@@ -62,7 +62,7 @@ func validArg(k ActionKind, arg string) bool {
 	case ActWizTime:
 		return arg == WizTimeDefault || arg == WizTimeType || validHHMM(arg)
 	case ActWizRepeat:
-		return oneOf(arg, WizRepeatOnce, WizRepeatDaily, WizRepeatWeekly, WizRepeatMonthly, WizRepeatYearly)
+		return oneOf(arg, WizRepeatOnce, WizRepeatDaily, WizRepeatWeekly, WizRepeatMonthly, WizRepeatYearly, WizRepeatNth, WizRepeatLast)
 	case ActWizAssign:
 		if arg == WizAssignNone || arg == WizAssignMe {
 			return true

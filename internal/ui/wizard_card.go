@@ -74,7 +74,7 @@ func wizardCard(v WizardView, lc i18n.Locale, loc *time.Location, now time.Time)
 			text = lc.T("ui.wizard.q.edit")
 			kb = editKeyboard(v, lc)
 		} else {
-			text = lc.T("ui.wizard.q.confirm") + "\n\n" + summary(v, lc, loc, now)
+			text = lc.T("ui.wizard.q.confirm") + "\n\n" + summary(v, lc, cal, loc, now)
 			kb = [][]tg.Button{{
 				nav("ui.wizard.btn.save", WizNavSave),
 				nav("ui.wizard.btn.edit", WizNavEdit),
@@ -175,11 +175,44 @@ func repeatKeyboard(v WizardView, lc i18n.Locale, cal calendar.Kind) [][]tg.Butt
 		monthly = lc.T("ui.wizard.repeat.m.on", lc.Num(cal.Split(t).Day))
 	}
 	b := func(label, arg string) tg.Button { return button(label, Action{Kind: ActWizRepeat, ID: ver, Arg: arg}) }
-	return [][]tg.Button{
+	kb := [][]tg.Button{
 		{b(lc.T("ui.wizard.repeat.once"), WizRepeatOnce), b(lc.T("ui.wizard.repeat.d"), WizRepeatDaily)},
 		{b(weekly, WizRepeatWeekly), b(monthly, WizRepeatMonthly)},
 		{b(lc.T("ui.wizard.repeat.y"), WizRepeatYearly)},
 	}
+	if t, ok := dateOf(v.Draft.Data.Date); ok {
+		nth, hasNth, hasLast := NthWeekdayChoices(cal, t)
+		var row []tg.Button
+		if hasNth {
+			row = append(row, b(nthLabel(lc, nth, t.Weekday()), WizRepeatNth))
+		}
+		if hasLast {
+			row = append(row, b(lastLabel(lc, t.Weekday()), WizRepeatLast))
+		}
+		if len(row) > 0 {
+			kb = append(kb, row)
+		}
+	}
+	return kb
+}
+
+// NthWeekdayChoices says which "monthly on a weekday" choices the date t
+// (a civil date) allows in calendar cal: the Nth weekday of the month,
+// where nth is 1..4 and hasNth is false for the 5th, and the last such
+// weekday of the month. A date can allow both (for example day 28 of a
+// 28-day month) or one of them. Every date allows at least one.
+func NthWeekdayChoices(cal calendar.Kind, t time.Time) (nth int, hasNth, hasLast bool) {
+	cd := cal.Split(t)
+	nth = (cd.Day-1)/7 + 1
+	return nth, nth <= 4, cd.Day+7 > cal.MonthLength(cd.Year, cd.Month)
+}
+
+func nthLabel(lc i18n.Locale, nth int, w time.Weekday) string {
+	return lc.T("ui.wizard.repeat.nth."+strconv.Itoa(nth), lc.WeekdayName(w, false))
+}
+
+func lastLabel(lc i18n.Locale, w time.Weekday) string {
+	return lc.T("ui.wizard.repeat.last", lc.WeekdayName(w, false))
 }
 
 // Limits that keep a card under Telegram's 4096 characters and 100 buttons
@@ -227,7 +260,7 @@ func editKeyboard(v WizardView, lc i18n.Locale) [][]tg.Button {
 }
 
 // summary is the confirm step's text: the item, when, repeat and assignee.
-func summary(v WizardView, lc i18n.Locale, loc *time.Location, now time.Time) string {
+func summary(v WizardView, lc i18n.Locale, cal calendar.Kind, loc *time.Location, now time.Time) string {
 	d := v.Draft.Data
 	lines := []string{lc.T("ui.wizard.sum.text", Escape(clip(d.Text, wizardTextMax)))}
 	switch t, ok := dateOf(d.Date); {
@@ -247,14 +280,14 @@ func summary(v WizardView, lc i18n.Locale, loc *time.Location, now time.Time) st
 	default:
 		lines = append(lines, lc.T("ui.wizard.sum.nodate"))
 	}
-	if r := repeatLabel(v, lc); r != "" {
+	if r := repeatLabel(v, lc, cal); r != "" {
 		lines = append(lines, lc.T("ui.wizard.sum.repeat", r))
 	}
 	lines = append(lines, lc.T("ui.wizard.sum.who", assigneeLabel(v, lc)))
 	return strings.Join(lines, "\n")
 }
 
-func repeatLabel(v WizardView, lc i18n.Locale) string {
+func repeatLabel(v WizardView, lc i18n.Locale, cal calendar.Kind) string {
 	d := v.Draft.Data
 	if d.Date == "" {
 		if d.FoundDue != nil && d.FoundRule != "" {
@@ -271,6 +304,16 @@ func repeatLabel(v WizardView, lc i18n.Locale) string {
 		return lc.T("ui.wizard.repeat.m")
 	case model.RepeatYearly:
 		return lc.T("ui.wizard.repeat.y")
+	case model.RepeatNthWeekday, model.RepeatLastWeekday:
+		t, ok := dateOf(d.Date)
+		if !ok {
+			return lc.T("ui.wizard.repeat.m")
+		}
+		if d.Repeat == model.RepeatLastWeekday {
+			return lastLabel(lc, t.Weekday())
+		}
+		nth, _, _ := NthWeekdayChoices(cal, t)
+		return nthLabel(lc, min(max(nth, 1), 4), t.Weekday())
 	}
 	return lc.T("ui.wizard.repeat.once")
 }

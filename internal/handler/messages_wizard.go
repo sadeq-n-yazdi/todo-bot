@@ -16,6 +16,7 @@ func init() {
 		"wizard.note.toolong":  "That text is too long (%s characters). The limit is %s.",
 		"wizard.note.badtime":  "I could not read that time. Try 15:30 or 3pm.",
 		"wizard.note.passed":   "That time has passed. Please choose again.",
+		"wizard.note.repeat":   "That repeat does not fit the date. Please choose again.",
 		"wizard.note.assignee": "That person can't be assigned items any more. Please choose again.",
 	})
 	i18n.Register(i18n.Fa, map[string]string{
@@ -29,6 +30,7 @@ func init() {
 		"wizard.note.toolong":  "این متن خیلی طولانی است (%s نویسه). حداکثر مجاز %s نویسه است.",
 		"wizard.note.badtime":  "این زمان را نفهمیدم. مثلاً ۱۵:۳۰ یا 3pm بنویسید.",
 		"wizard.note.passed":   "این زمان گذشته است. لطفاً دوباره انتخاب کنید.",
+		"wizard.note.repeat":   "این تکرار با تاریخ سازگار نیست. لطفاً دوباره انتخاب کنید.",
 		"wizard.note.assignee": "دیگر نمی\u200cتوان کار را به این فرد محول کرد. لطفاً دوباره انتخاب کنید.",
 	})
 }

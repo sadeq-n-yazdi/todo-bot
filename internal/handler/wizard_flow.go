@@ -12,6 +12,7 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/recur"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/service"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/ui"
@@ -384,7 +385,14 @@ func (h *Handler) pressFound(ctx context.Context, r req, d model.Draft, use bool
 // repeatKind maps a canonical rule string to the wizard's repeat choice
 // ("" = once, or a rule the wizard cannot express).
 func repeatKind(rule string) string {
-	switch kind, _, _ := strings.Cut(rule, " "); kind {
+	kind, rest, _ := strings.Cut(rule, " ")
+	if _, nth, ok := strings.Cut(rest, "#"); ok && kind == "monthly" {
+		if strings.HasPrefix(nth, "last") {
+			return model.RepeatLastWeekday
+		}
+		return model.RepeatNthWeekday
+	}
+	switch kind {
 	case "daily":
 		return model.RepeatDaily
 	case "weekly":
@@ -395,6 +403,38 @@ func repeatKind(rule string) string {
 		return model.RepeatYearly
 	}
 	return model.RepeatOnce
+}
+
+// nthRepeatValid says whether repeat (RepeatNthWeekday or RepeatLastWeekday)
+// is one of the choices offered for the date "YYYY-MM-DD" in calendar cal.
+func nthRepeatValid(repeat, date string, cal calendar.Kind) bool {
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return false
+	}
+	_, hasNth, hasLast := ui.NthWeekdayChoices(cal, t)
+	switch repeat {
+	case model.RepeatNthWeekday:
+		return hasNth
+	case model.RepeatLastWeekday:
+		return hasLast
+	}
+	return false
+}
+
+// nthRepeatKept says whether the draft's "Nth/last weekday" repeat may stay
+// when the date changes to newDate: only when the weekday is the same and
+// the choice is still offered. Any other repeat is kept.
+func nthRepeatKept(old model.DraftData, newDate string, cal calendar.Kind) bool {
+	if old.Repeat != model.RepeatNthWeekday && old.Repeat != model.RepeatLastWeekday {
+		return true
+	}
+	o, err1 := time.Parse("2006-01-02", old.Date)
+	n, err2 := time.Parse("2006-01-02", newDate)
+	if err1 != nil || err2 != nil || o.Weekday() != n.Weekday() {
+		return false
+	}
+	return nthRepeatValid(old.Repeat, newDate, cal)
 }
 
 // clearFound drops the found date: an explicit date choice replaces it.
@@ -438,10 +478,19 @@ func (h *Handler) pressDate(ctx context.Context, r req, d model.Draft, arg strin
 		return d, ignore, "", nil
 	}
 	nd.Data.Date = date.String()
+	old := d.Data
 	if hasFound(d) {
 		// The found rule is dropped for an explicit date: offer its kind as
-		// the current repeat choice, so it is not lost silently.
+		// the current repeat choice, so it is not lost silently. A found
+		// "monthly fri#last" is judged like an earlier choice on its weekday.
 		nd.Data.Repeat = repeatKind(d.Data.FoundRule)
+		if rule, err := recur.Parse(d.Data.FoundRule); err == nil && len(rule.Weekdays) == 1 {
+			old.Date = time.Date(2000, 1, 2+int(rule.Weekdays[0]), 0, 0, 0, 0, time.UTC).Format("2006-01-02") // 2000-01-02 is a Sunday
+		}
+		old.Repeat = nd.Data.Repeat
+	}
+	if !nthRepeatKept(old, nd.Data.Date, calOf(lc)) {
+		nd.Data.Repeat = model.RepeatOnce // "Nth Friday" must not outlive its date
 	}
 	clearFound(&nd)
 	// A new date walks on through time and repeat, even during an edit.
@@ -505,6 +554,16 @@ func (h *Handler) pressRepeat(ctx context.Context, r req, d model.Draft, arg str
 		nd.Data.Repeat = model.RepeatMonthly
 	case ui.WizRepeatYearly:
 		nd.Data.Repeat = model.RepeatYearly
+	case ui.WizRepeatNth, ui.WizRepeatLast:
+		want := model.RepeatNthWeekday
+		if arg == ui.WizRepeatLast {
+			want = model.RepeatLastWeekday
+		}
+		// Only a choice that the card offered for this date is taken.
+		if !nthRepeatValid(want, d.Data.Date, calOf(r.Prefs.Locale)) {
+			return d, cardOpts{view: true}, nil
+		}
+		nd.Data.Repeat = want
 	default:
 		return d, cardOpts{view: true}, nil
 	}

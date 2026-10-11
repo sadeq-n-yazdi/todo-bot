@@ -54,6 +54,8 @@ const (
 	WizRepeatWeekly  = "w"
 	WizRepeatMonthly = "m"
 	WizRepeatYearly  = "y"
+	WizRepeatNth     = "n" // monthly on the Nth weekday of the chosen date
+	WizRepeatLast    = "l" // monthly on the last such weekday
 
 	// ActWizAssign. In a group, Nobody keeps the reminders in the group
 	// and Me assigns the item to the actor (reminders by DM). A private

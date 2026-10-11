@@ -48,8 +48,12 @@ Add a recurrence phrase to `/add`. The item stays open. When you mark it done, i
 | `run every monday and wednesday 8:00` | `ورزش هر دوشنبه و چهارشنبه ساعت ۸` | Those weekdays at 8:00. |
 | `run every week on tue 8:00` | `ورزش هر هفته سه‌شنبه ساعت ۸` | Weekly on that day. `run every friday` also works. |
 | `rent every month on the 1st at 10:00` | `اجاره هر ماه ۱ام ساعت ۱۰` | Monthly at 10:00. The day follows **your calendar**: the 1st of each Jalali month for a Jalali user. A day the month does not have (31st in a 30-day month) falls on the last day. |
+| `report every last friday of the month 4pm` | `گزارش آخرین جمعه هر ماه ساعت ۴ عصر` | Every month on the last Friday at 16:00. The month follows **your calendar**. |
+| `sync every 2nd tuesday of the month` | `جلسه دومین سه‌شنبه هر ماه` | Every month on the 2nd Tuesday at 9:00 (`TODO_DEFAULT_TIME`). You can write 1st, 2nd, 3rd or 4th. |
 | `water plants every 3 days` | `آب دادن هر ۳ روز` | Every 3 days at 9:00 (`TODO_DEFAULT_TIME`). |
 | `tax 25 Mehr every year`, `birthday tomorrow 09:00 yearly` | `مالیات ۲۵ مهر هر سال`, `تولد فردا ساعت ۹ سالانه` | Every year on that month and day. The month and day follow **your calendar**. A bare `every year` starts on today's date. |
+
+The 5th weekday of a month has no "Nth" form. Use `last` for it. In a month with only four of that weekday, `4th` and `last` give the same day.
 
 A recurring item shows 🔁 in lists.
 
@@ -143,7 +147,7 @@ Use the wizard when you do not want to write the date in a sentence. The bot ask
 | Date | Press **Today**, **Tomorrow** or one of the next five weekdays. Press **No date** for an item with no date. |
 | Other date | Press **📅 Other date** for a month grid in your calendar (Jalali or Gregorian). Use ◀ and ▶ to change the month. You cannot choose a day in the past. |
 | Time | Press a quick time (09:00, 12:00, 15:00, 18:00 or 20:00), or **Default** for `TODO_DEFAULT_TIME`. Press **⌨️ Type a time**, then send `15:30`, `3pm` or `۱۵:۳۰`. The bot skips this step if you chose no date. |
-| Repeat | Press **Once**, **Daily**, **Weekly**, **Monthly** or **Yearly**. Weekly repeats on the weekday of the date. Monthly and yearly repeat on the day of the date in your calendar. The bot skips this step if you chose no date. |
+| Repeat | Press **Once**, **Daily**, **Weekly**, **Monthly** or **Yearly**. Weekly repeats on the weekday of the date. Monthly and yearly repeat on the day of the date in your calendar. The bot also shows up to two more buttons for the date that you chose. They are in your calendar. Examples are **Monthly, 4th Friday** and **Monthly, last Friday**. The bot shows the Nth weekday button when the date is in the first four weeks of its month. The bot shows the last weekday button when no later day of that weekday is in the month. Press one of them to repeat on that weekday each month. The bot skips this step if you chose no date. |
 | Assignee | Press **Me** or the name of a member. The list has the members that the bot knows by username. In a group, **Nobody** is also there. In a private chat, the bot skips this step when it knows no other member. |
 | Confirm | Read the summary. Press **✅ Save** to create the item. Press **✏️ Edit** to change one part. Press **✖ Cancel** to stop. |
 
@@ -152,7 +156,7 @@ Use the wizard when you do not want to write the date in a sentence. The bot ask
 - **⏭ Skip** accepts the default of the step. At the date step, the default is no date. At the time step, it is the default time. At the repeat step, it is **Once**. At the assignee step, it is **Me** in a private chat and **Nobody** in a group.
 - **◀ Back** goes to the step before.
 - **✖ Cancel** deletes the draft. The card shows "Cancelled". The bot does not create an item.
-- **✏️ Edit** shows a menu on the confirm step: text, date, time, repeat or assignee. After you change a part, the bot comes back to the summary. If you change the date, the bot asks for the time and the repeat again.
+- **✏️ Edit** shows a menu on the confirm step: text, date, time, repeat or assignee. After you change a part, the bot comes back to the summary. If you change the date, the bot asks for the time and the repeat again. If the new date is a different weekday, the bot removes an Nth weekday or last weekday choice. If the new date does not fit the choice, the bot also removes it. Choose the repeat again.
 
 **Save.** **✅ Save** uses the same code as `/add`, so the item is the same. This command:
 

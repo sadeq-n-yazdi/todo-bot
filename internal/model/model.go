@@ -208,6 +208,12 @@ const (
 	RepeatWeekly  = "weekly"  // on the chosen date's weekday
 	RepeatMonthly = "monthly" // on the chosen day of the month, in the user's calendar
 	RepeatYearly  = "yearly"  // on the chosen month and day, in the user's calendar
+	// RepeatNthWeekday: monthly on the Nth (1..4) weekday of the chosen
+	// date, in the user's calendar. N and the weekday come from Date.
+	RepeatNthWeekday = "nthWeekday"
+	// RepeatLastWeekday: monthly on the last such weekday of the month, in
+	// the user's calendar. The weekday comes from Date.
+	RepeatLastWeekday = "lastWeekday"
 )
 
 // DraftData is what a wizard has collected so far. The store keeps it as a
