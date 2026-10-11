@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/ui"
 )
 
 func TestCmdTZ(t *testing.T) {
@@ -146,8 +148,66 @@ func TestLangAndCalendarButtons(t *testing.T) {
 	}
 
 	hh.press(1, 1, 33, "sl:xx")
-	if len(hh.svc.prefs) != 1 || hh.svc.called("SetLang") != 1 {
+	hh.press(1, 1, 34, "sl:0:xx")
+	hh.press(1, 1, 35, "sc:0:mayan")
+	if len(hh.svc.prefs) != 1 || hh.svc.called("SetLang") != 1 || hh.svc.called("SetCalendar") != 1 {
 		t.Fatal("invalid setting button must not reach the service")
+	}
+}
+
+// The buttons carry ui.Encode data.
+func TestSettingsButtonsUseUICodec(t *testing.T) {
+	hh := newHarness12(t)
+	hh.private("/lang")
+	row := hh.last().Msg.Keyboard[0]
+	want := []string{ui.Encode(ui.Action{Kind: ui.ActSetLang, Arg: "en"}), ui.Encode(ui.Action{Kind: ui.ActSetLang, Arg: "fa"})}
+	if len(row) != 2 || row[0].Data != want[0] || row[1].Data != want[1] {
+		t.Fatalf("lang buttons %+v, want %v", row, want)
+	}
+	hh.private("/calendar")
+	row = hh.last().Msg.Keyboard[0]
+	want = []string{ui.Encode(ui.Action{Kind: ui.ActSetCal, Arg: "gregorian"}), ui.Encode(ui.Action{Kind: ui.ActSetCal, Arg: "jalali"})}
+	if len(row) != 2 || row[0].Data != want[0] || row[1].Data != want[1] {
+		t.Fatalf("calendar buttons %+v, want %v", row, want)
+	}
+	for _, b := range row {
+		if _, err := ui.Decode(b.Data); err != nil || len(b.Data) > 64 {
+			t.Fatalf("button data %q: %v", b.Data, err)
+		}
+	}
+}
+
+// Legacy "sl:<lang>" / "sc:<calendar>" data from messages sent before the
+// ui codec is still accepted. Remove with legacySetting in v0.1.5.
+func TestLegacySettingButtons(t *testing.T) {
+	hh := newHarness12(t)
+	hh.press(1, 1, 41, "sl:fa")
+	if hh.svc.prefs[1].Locale.Lang != i18n.Fa {
+		t.Fatalf("legacy lang button ignored: %+v", hh.svc.prefs[1])
+	}
+	hh.press(1, 1, 42, "sc:jalali")
+	if hh.svc.prefs[1].Locale.Cal != calendar.Jalali {
+		t.Fatalf("legacy calendar button ignored: %+v", hh.svc.prefs[1])
+	}
+	for _, d := range []string{"sl:", "sc:", "sx:fa", "sl:0:fa", "td:1"} {
+		if a, ok := legacySetting(d); ok {
+			t.Errorf("legacySetting(%q) = %+v, want no match", d, a)
+		}
+	}
+}
+
+// A private chat's language button resets the reply-keyboard version.
+func TestLangButtonResetsKBVersion(t *testing.T) {
+	e := newWz(t)
+	e.msg(wzAlice, wzAlice, "/tz", 0)
+	e.press(wzAlice, wzAlice, 5, ui.Encode(ui.Action{Kind: ui.ActSetLang, Arg: "fa"}))
+	if p, _ := e.svc.Prefs(context.Background(), wzAlice, ""); p.Locale.Lang != i18n.Fa || p.KBVersion != 0 {
+		t.Fatalf("prefs %+v after the private language button", p)
+	}
+	e.msg(wzAlice, wzAlice, "/tz", 0)
+	e.press(wzAlice, wzGrp, 6, ui.Encode(ui.Action{Kind: ui.ActSetLang, Arg: "en"}))
+	if p, _ := e.svc.Prefs(context.Background(), wzAlice, ""); p.KBVersion != ui.NewTaskKeyboardVersion {
+		t.Fatalf("KBVersion %d after a group button", p.KBVersion)
 	}
 }
 

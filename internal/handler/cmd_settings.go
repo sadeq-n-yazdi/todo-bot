@@ -143,7 +143,7 @@ func (h *Handler) cmdLang(ctx context.Context, m *tg.Message, r req, args string
 	if arg == "" {
 		row := []tg.Button{}
 		for _, l := range []i18n.Lang{i18n.En, i18n.Fa} {
-			row = append(row, tg.Button{Text: langName(lc, l), Data: settingData(settingLang, string(l))})
+			row = append(row, tg.Button{Text: langName(lc, l), Data: ui.Encode(ui.Action{Kind: ui.ActSetLang, Arg: string(l)})})
 		}
 		return h.reply(ctx, m, tg.OutMessage{
 			Text:     lc.T("settings.lang.show", langName(lc, lc.Lang)),
@@ -176,7 +176,7 @@ func (h *Handler) cmdCalendar(ctx context.Context, m *tg.Message, r req, args st
 	if arg == "" {
 		row := []tg.Button{}
 		for _, k := range []calendar.Kind{calendar.Gregorian, calendar.Jalali} {
-			row = append(row, tg.Button{Text: calName(lc, k), Data: settingData(settingCal, string(k))})
+			row = append(row, tg.Button{Text: calName(lc, k), Data: ui.Encode(ui.Action{Kind: ui.ActSetCal, Arg: string(k)})})
 		}
 		cur := lc.Cal
 		if !cur.Valid() {
