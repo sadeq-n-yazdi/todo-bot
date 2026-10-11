@@ -2,7 +2,7 @@
 
 This page is updated on `main` after every merged PR.
 
-Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released**) · [v0.1.5](https://github.com/sadeq-n-yazdi/todo-bot/milestone/6) (Nth and last weekday of the month, **released**) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
+Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released**) · [v0.1.5](https://github.com/sadeq-n-yazdi/todo-bot/milestone/6) (Nth and last weekday of the month, **released and deployed**) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
 
 | # | Wave | Issue | Status | PR |
 |---|---|---|---|---|
@@ -125,3 +125,4 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - #85 merged (#88). The review checked every rule against listed month dates for 2016–2034 and Jalali 1394–1414 in six zones, and ran a fuzz test. It asked for a Tehran DST test.
   - #86 merged (#90). The review compared old and new results over about 1,000 inputs. Every changed result was the new rule, and each had a repeat word and a month word. It found that "of the last week of the month" was not read; this is fixed.
   - #87 merged (#89). The review found that the docs and the PR text did not match the code; these are fixed. A date edit never saves a choice that does not fit. v0.1.5 tagged.
+  - v0.1.5 deployed to vps00. It has no schema change. The database was backed up first. v0.1.4 is kept as `todo-bot.prev` for rollback.
