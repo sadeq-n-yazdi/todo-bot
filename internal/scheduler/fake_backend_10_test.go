@@ -252,6 +252,19 @@ func (f *fakeBackend) MigrateChat(_ context.Context, oldID, newID int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.migrated = append(f.migrated, [2]int64{oldID, newID})
+	// Like the real store, the chat row (and so its digest claim) moves to
+	// the new id: the claim token follows it.
+	if tok, ok := f.digestTok[oldID]; ok {
+		f.digestTok[newID] = tok
+		delete(f.digestTok, oldID)
+		f.digestClaim[newID] = f.digestClaim[oldID]
+		delete(f.digestClaim, oldID)
+	}
+	for i := range f.chats {
+		if f.chats[i].ID == oldID {
+			f.chats[i].ID = newID
+		}
+	}
 	return nil
 }
 

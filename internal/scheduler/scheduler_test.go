@@ -430,6 +430,10 @@ func TestDigestMigrateRetriesWithNewID(t *testing.T) {
 	if len(msgs) != 1 || msgs[0].ChatID != -900 || len(e.b.migrated) != 1 {
 		t.Errorf("messages=%+v migrated=%v", msgs, e.b.migrated)
 	}
+	// The claim moved with the chat, so DigestDone under the new id wins.
+	if len(e.b.digestsDone) != 1 || e.b.digestsDone[0] != -900 {
+		t.Errorf("DigestDone calls = %v, want [-900]", e.b.digestsDone)
+	}
 }
 
 func TestDigestRateLimitWithinBudgetWaits(t *testing.T) {
