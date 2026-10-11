@@ -49,7 +49,7 @@ func validArg(k ActionKind, arg string) bool {
 	case ActPage:
 		return len(arg) <= 9 && isDigits(arg)
 	case ActWizDate:
-		return arg == WizDateNone || arg == WizDateGrid || validDate(arg)
+		return arg == WizDateNone || arg == WizDateGrid || arg == WizDateQuick || validDate(arg)
 	case ActWizMonth:
 		return validMonth(arg)
 	case ActWizTime:
@@ -63,7 +63,7 @@ func validArg(k ActionKind, arg string) bool {
 		n, err := strconv.ParseInt(arg, 10, 64)
 		return err == nil && n > 0 && strconv.FormatInt(n, 10) == arg
 	case ActWizNav:
-		return oneOf(arg, WizNavSkip, WizNavBack, WizNavCancel, WizNavSave, WizNavUseFound, WizNavNoFound)
+		return oneOf(arg, WizNavSkip, WizNavBack, WizNavCancel, WizNavSave, WizNavEdit, WizNavUseFound, WizNavNoFound)
 	case ActWizEdit:
 		return oneOf(arg, WizEditText, WizEditDate, WizEditTime, WizEditRepeat, WizEditAssignee)
 	case ActWizNoop:

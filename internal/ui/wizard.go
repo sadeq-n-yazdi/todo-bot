@@ -27,6 +27,10 @@ type WizardView struct {
 	// Grid.Month) in the locale's calendar instead of the quick picks.
 	// Grid.Day is ignored. nil = quick picks.
 	Grid *calendar.Date
+	// EditMenu, on the confirm step, shows the step chooser (one
+	// ActWizEdit button per step, and ◀ Back to the summary) instead of
+	// Save / Edit / Cancel.
+	EditMenu bool
 	// Note is an optional status line shown above the question, already
 	// translated (e.g. "That time has passed").
 	Note string
@@ -117,7 +121,7 @@ func NewTaskButton(lc i18n.Locale) tg.Button {
 func DateArg(d calendar.Date) string { return fmt.Sprintf("%04d%02d%02d", d.Year, d.Month, d.Day) }
 
 // ParseDateArg parses a DateArg; ok=false for anything else (including
-// WizDateNone and WizDateGrid).
+// WizDateNone, WizDateGrid and WizDateQuick).
 func ParseDateArg(arg string) (calendar.Date, bool) {
 	if !validDate(arg) {
 		return calendar.Date{}, false

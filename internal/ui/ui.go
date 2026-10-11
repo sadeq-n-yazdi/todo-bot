@@ -26,7 +26,7 @@ const (
 	// found by the card the button is on. Arg values are listed by each
 	// kind and never contain ":".
 	ActWizStart  ActionKind = "ws" // ➕ under /list: start the wizard (ID 0, no Arg)
-	ActWizDate   ActionKind = "wd" // Arg: WizDateNone, WizDateGrid, or a date "YYYYMMDD" (Gregorian)
+	ActWizDate   ActionKind = "wd" // Arg: WizDateNone, WizDateGrid, WizDateQuick, or a date "YYYYMMDD" (Gregorian)
 	ActWizMonth  ActionKind = "wm" // show the month grid of Arg: "g202610" / "j140507" (calendar letter, year, month)
 	ActWizTime   ActionKind = "wt" // Arg: "HHMM", WizTimeDefault or WizTimeType
 	ActWizRepeat ActionKind = "wr" // Arg: one of WizRepeat*
@@ -38,8 +38,9 @@ const (
 
 // Arguments of the wizard actions.
 const (
-	WizDateNone = "n" // ActWizDate: no date
-	WizDateGrid = "o" // ActWizDate: open the month grid at the current month
+	WizDateNone  = "n" // ActWizDate: no date
+	WizDateGrid  = "o" // ActWizDate: open the month grid at the current month (view only)
+	WizDateQuick = "q" // ActWizDate: from the grid, back to the quick picks (view only)
 
 	WizTimeDefault = "d" // ActWizTime: the default time (TODO_DEFAULT_TIME)
 	WizTimeType    = "k" // ActWizTime: type a time (asks for a reply)
@@ -54,6 +55,7 @@ const (
 	WizNavBack     = "b" // ◀ Back
 	WizNavCancel   = "x" // ✖ Cancel
 	WizNavSave     = "v" // ✅ Save
+	WizNavEdit     = "e" // ✏️ Edit: show the step chooser (ActWizEdit buttons)
 	WizNavUseFound = "y" // "Found: tomorrow 09:00 — use it?" yes
 	WizNavNoFound  = "n" // ... no
 
