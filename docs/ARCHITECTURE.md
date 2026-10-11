@@ -240,7 +240,7 @@ TODO_DB_URL=sqlite:///var/lib/todo-bot/todo.db  # default sqlite://$STATE_DIRECT
 TODO_LOG_LEVEL=info                    # debug|info|warn|error; slog text to stderr
 TODO_NODE_ID=vps00                     # default hostname; names this node in leases and claims
 TODO_LEASE_TTL=30s                     # poller lease
-TODO_CLAIM_TTL=2m                      # how long a node reserves a due reminder
+TODO_CLAIM_TTL=2m                      # how long a node reserves a due reminder (minimum 20s)
 TODO_SCHED_MAX_SLEEP=5m                # use ~30s with several nodes
 TODO_MODE=polling                      # webhook from v0.2, with TODO_HTTP_ADDR, TODO_WEBHOOK_URL, TODO_WEBHOOK_SECRET
 ```

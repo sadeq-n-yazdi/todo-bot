@@ -112,7 +112,7 @@ The bot reads environment variables, normally from `/etc/todo-bot/env` (lines of
 | `TODO_WEBHOOK_URL` | webhook only | | Public `https` URL that Telegram posts to. Reserved for v0.2. |
 | `TODO_WEBHOOK_SECRET` | webhook only | | 16 to 256 characters from `A-Za-z0-9_-`. Telegram sends it back in a header so the bot can check the sender. Reserved for v0.2. |
 | `TODO_LEASE_TTL` | no | `30s` | How long the node that polls Telegram holds its lease. Only matters with several nodes. |
-| `TODO_CLAIM_TTL` | no | `2m` | How long a node reserves a due reminder or digest while it sends it. |
+| `TODO_CLAIM_TTL` | no | `2m` | How long a node reserves a due reminder or digest while it sends it. The minimum is `20s`. |
 | `TODO_SCHED_MAX_SLEEP` | no | `5m` | Longest time the scheduler sleeps between checks. About `30s` is recommended with several nodes. |
 | `GOMEMLIMIT` | no | | Go memory limit. The systemd unit in `deploy/` sets `40MiB`. |
 
