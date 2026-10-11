@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-11
+
+### Fixed
+- A reminder or digest send that hangs is now stopped before its claim expires, so a second node cannot send it again at the same time (#46).
+- A late lease renewal can no longer move the lease end time back, so two nodes cannot both lead (#50).
+- When a group becomes a supergroup and the new chat already exists, the digest settings and the live digest claim move to it, so the digest is not sent twice (#49).
+- `todo-bot backup` no longer creates or migrates the database. It fails if the file is missing (#53). `deploy.sh` skips the backup, with a message, when the bot never created its database.
+- At startup, the bot waits as long as Telegram asks on a 429. It retries network errors, 5xx errors and replies it cannot read, such as an HTML 502 page from a gateway. Other errors stop it with exit code 1 (#54).
+
+### Changed
+- The language and calendar buttons use the same button format as the other buttons. Buttons on older messages still work until v0.1.5 (#45).
+- `TODO_CLAIM_TTL` must be at least `20s` (#82).
+
 ## [0.1.3] - 2026-10-11
 
 ### Changed
@@ -118,7 +131,8 @@ All notable changes to this project are documented here. The format follows
   - Times follow wall-clock time across DST changes.
   - A time that falls in the spring-forward gap fires at the shifted time, never earlier.
 
-[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.0...v0.1.1
