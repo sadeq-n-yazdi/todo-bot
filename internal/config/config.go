@@ -49,7 +49,7 @@ type Config struct {
 	// LeaseTTL is the leader lease duration (TODO_LEASE_TTL, default 30s).
 	LeaseTTL time.Duration
 	// ClaimTTL is how long a node reserves a due reminder (TODO_CLAIM_TTL,
-	// default 2m).
+	// default 2m, at least MinClaimTTL).
 	ClaimTTL time.Duration
 	// SchedMaxSleep caps the scheduler's sleep (TODO_SCHED_MAX_SLEEP,
 	// default 5m; ~30s recommended with several nodes).
@@ -171,6 +171,9 @@ func Load(getenv func(string) string) (Config, error) {
 
 	c.LeaseTTL = duration(get, "TODO_LEASE_TTL", 30*time.Second, bad)
 	c.ClaimTTL = duration(get, "TODO_CLAIM_TTL", 2*time.Minute, bad)
+	if c.ClaimTTL > 0 && c.ClaimTTL < MinClaimTTL {
+		bad("TODO_CLAIM_TTL: %q is too short; it must be at least %s", get("TODO_CLAIM_TTL"), MinClaimTTL)
+	}
 	c.SchedMaxSleep = duration(get, "TODO_SCHED_MAX_SLEEP", 5*time.Minute, bad)
 
 	if err := errors.Join(errs...); err != nil {
@@ -178,6 +181,12 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	return c, nil
 }
+
+// MinClaimTTL is the smallest accepted TODO_CLAIM_TTL. A shorter claim leaves
+// the scheduler's send deadline margin too small to cover the claim expiry
+// (rounded down to the second) plus the 1 s clock skew that ARCHITECTURE §9
+// allows.
+const MinClaimTTL = 20 * time.Second
 
 // dbURL applies the TODO_DB_URL fallback chain.
 func dbURL(get func(string) string) (string, error) {
