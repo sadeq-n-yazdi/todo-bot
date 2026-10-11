@@ -43,13 +43,16 @@ func encodeDraftData(v model.DraftData) (string, error) {
 // greater than the replaced one's. The replacement is an in-place UPDATE
 // that increments the stored version (it takes the row lock on databases
 // that run read committed, so a concurrent UpdateDraft cannot make two
-// drafts share a version); only a missing row is inserted, with version 1.
+// drafts share a version); only a missing row is inserted, with its version
+// seeded from dr.UpdatedAt in Unix milliseconds (draftSeed), so a draft
+// started after a delete or a purge does not reuse an earlier version.
 func (d *DB) PutDraft(ctx context.Context, dr *model.Draft) error {
 	data, err := encodeDraftData(dr.Data)
 	if err != nil {
 		return err
 	}
 	upd := unixOrNow(dr.UpdatedAt)
+	seed := draftSeed(dr.UpdatedAt)
 	var ver int64
 	err = d.WithTx(ctx, func(tx store.Store) error {
 		q := tx.(*DB).q
@@ -70,7 +73,7 @@ WHERE chat_id = ? AND user_id = ?`,
 				d.d.InsertIgnore("drafts",
 					[]string{"chat_id", "user_id", "msg_id", "ask_msg_id", "step", "data", "version", "updated_at", "expires_at"},
 					[]string{"chat_id", "user_id"}),
-				dr.ChatID, dr.UserID, dr.MsgID, dr.AskMsgID, string(dr.Step), data, 1, upd, dr.ExpiresAt.Unix())
+				dr.ChatID, dr.UserID, dr.MsgID, dr.AskMsgID, string(dr.Step), data, seed, upd, dr.ExpiresAt.Unix())
 			if n, err = affected(res, err, "insert draft"); err != nil {
 				return err
 			}
@@ -88,6 +91,16 @@ WHERE chat_id = ? AND user_id = ?`,
 	}
 	dr.Version = ver
 	return nil
+}
+
+// draftSeed is the version of a newly inserted draft: t (now, if zero) in
+// Unix milliseconds, at least 1. A draft's version then grows by one per
+// write, and nobody presses a thousand buttons a second.
+func draftSeed(t time.Time) int64 {
+	if t.IsZero() {
+		t = time.Now()
+	}
+	return max(t.UnixMilli(), 1)
 }
 
 func (d *DB) getDraft(ctx context.Context, key string, query string, args ...any) (model.Draft, error) {
@@ -134,10 +147,11 @@ WHERE chat_id = ? AND user_id = ? AND version = ? AND expires_at > ?`,
 	return true, nil
 }
 
-// DeleteDraft deletes the draft only if it still has version.
-func (d *DB) DeleteDraft(ctx context.Context, chatID, userID, version int64) (bool, error) {
+// DeleteDraft deletes the draft only if it still has version and is live.
+func (d *DB) DeleteDraft(ctx context.Context, chatID, userID, version int64, now time.Time) (bool, error) {
 	res, err := d.q.ExecContext(ctx,
-		"DELETE FROM drafts WHERE chat_id = ? AND user_id = ? AND version = ?", chatID, userID, version)
+		"DELETE FROM drafts WHERE chat_id = ? AND user_id = ? AND version = ? AND expires_at > ?",
+		chatID, userID, version, now.Unix())
 	n, err := affected(res, err, fmt.Sprintf("delete draft %d/%d", chatID, userID))
 	return n > 0, err
 }

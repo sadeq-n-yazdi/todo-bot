@@ -108,13 +108,13 @@ func testDrafts(t *testing.T, open func() store.Store) {
 	}
 
 	// DeleteDraft: wrong version loses, current one wins once.
-	if ok, err := a.DeleteDraft(ctx, -5, 7, r.Version+1); err != nil || ok {
+	if ok, err := a.DeleteDraft(ctx, -5, 7, r.Version+1, now); err != nil || ok {
 		t.Fatalf("DeleteDraft(wrong version) = %v, %v", ok, err)
 	}
-	if ok, err := a.DeleteDraft(ctx, -5, 7, r.Version); err != nil || !ok {
+	if ok, err := a.DeleteDraft(ctx, -5, 7, r.Version, now); err != nil || !ok {
 		t.Fatalf("DeleteDraft = %v, %v", ok, err)
 	}
-	if ok, err := b.DeleteDraft(ctx, -5, 7, r.Version); err != nil || ok {
+	if ok, err := b.DeleteDraft(ctx, -5, 7, r.Version, now); err != nil || ok {
 		t.Fatalf("second DeleteDraft = %v, %v", ok, err)
 	}
 	if _, err := a.GetDraft(ctx, -5, 7, now); !errors.Is(err, store.ErrNotFound) {
@@ -122,6 +122,17 @@ func testDrafts(t *testing.T, open func() store.Store) {
 	}
 	if _, err := a.GetDraft(ctx, -5, 8, now); err != nil {
 		t.Fatalf("other user's draft: %v", err)
+	}
+
+	// A draft started after the delete does not reuse a version: a new
+	// row's version is seeded from UpdatedAt (Unix milliseconds).
+	n := draft(40)
+	n.UpdatedAt = now
+	if err := a.PutDraft(ctx, &n); err != nil {
+		t.Fatal(err)
+	}
+	if n.Version <= r.Version {
+		t.Fatalf("version %d after delete and start, want > %d", n.Version, r.Version)
 	}
 }
 
@@ -150,6 +161,9 @@ func testDraftExpiry(t *testing.T, open func() store.Store) {
 	if ok, err := a.UpdateDraft(ctx, &upd, at); err != nil || ok {
 		t.Fatalf("UpdateDraft of an expired draft = %v, %v; want false", ok, err)
 	}
+	if ok, err := a.DeleteDraft(ctx, -5, 7, d.Version, at); err != nil || ok {
+		t.Fatalf("DeleteDraft of an expired draft = %v, %v; want false", ok, err)
+	}
 
 	// Purge removes expired drafts only.
 	o := draft(60)
@@ -160,7 +174,7 @@ func testDraftExpiry(t *testing.T, open func() store.Store) {
 	if err := a.Purge(ctx, at); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := a.DeleteDraft(ctx, -5, 7, d.Version); err != nil || ok {
+	if ok, err := a.DeleteDraft(ctx, -5, 7, d.Version, live); err != nil || ok {
 		t.Fatalf("expired draft survived Purge: ok=%v err=%v", ok, err)
 	}
 	if _, err := a.GetDraft(ctx, -5, 8, at); err != nil {
@@ -217,7 +231,7 @@ func testDraftConcurrent(t *testing.T, open func() store.Store) {
 	}
 	wins = 0
 	parallel(8, func(i int) {
-		ok, err := hs[i%len(hs)].DeleteDraft(ctx, -5, 7, cur.Version)
+		ok, err := hs[i%len(hs)].DeleteDraft(ctx, -5, 7, cur.Version, now)
 		if err != nil {
 			t.Error(err)
 		}
@@ -299,6 +313,11 @@ func testKBVersion(t *testing.T, open func() store.Store) {
 	}
 	if err := d.SetKBVersion(ctx, 1, 3); err != nil {
 		t.Fatal(err)
+	}
+	// Writing the same value again is not "not found" (MySQL counts only
+	// changed rows unless the DSN sets clientFoundRows=true).
+	if err := d.SetKBVersion(ctx, 1, 3); err != nil {
+		t.Fatalf("SetKBVersion(same value): %v", err)
 	}
 	if v := kb(1); v != 3 {
 		t.Fatalf("KBVersion = %d, want 3", v)

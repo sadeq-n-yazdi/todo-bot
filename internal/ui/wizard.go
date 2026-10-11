@@ -37,6 +37,26 @@ type WizardView struct {
 	// DefaultTime is TODO_DEFAULT_TIME as "HH:MM", for the Default button
 	// and the summary of an item whose Data.Time is "".
 	DefaultTime string
+	// Group is true in a group chat: the assignee step then offers Nobody
+	// and Me (private chats: Me only), and Skip means Nobody.
+	Group bool
+	// AssigneeName is the @username of Data.AssigneeID for the summary
+	// when it is a member (not the actor); "" if unknown, which shows the
+	// translated no-name label (as ui.Mention does).
+	AssigneeName string
+}
+
+// WizardAsk renders the separate ForceReply question a text step (StepText,
+// StepTimeText) sends in a group, where the card's inline keyboard cannot
+// carry ForceReply. The handler sends it and stores its message ID as
+// Draft.AskMsgID. Its text is the step's question in lc's language; the
+// question strings live in ui only.
+//
+// TODO(#68): implemented by the ui follow-up PR. Until then it returns
+// only ForceReply.
+func WizardAsk(step model.DraftStep, lc i18n.Locale) tg.OutMessage {
+	_, _ = step, lc
+	return tg.OutMessage{ForceReply: true}
 }
 
 // WizardTimes are the time step's quick picks: morning, noon, afternoon,

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/nlparse"
 )
 
 // Wizard drafts (#68).
@@ -60,6 +61,72 @@ func TestEndDraftOnce(t *testing.T) {
 	}
 	if _, err := e.svc.Draft(ctx, 7, 7); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ended draft: %v", err)
+	}
+}
+
+func TestSaveDraft(t *testing.T) {
+	e := newEnv(t)
+	_, b := e.node("B")
+	count := func() int {
+		t.Helper()
+		ts, _, err := e.svc.List(ctx, groupChat, 0)
+		e.must(err)
+		return len(ts)
+	}
+	due := t0.Add(2 * time.Hour)
+	r := nlparse.Result{Text: "buy milk", Due: &due, HasTime: true}
+	d := model.Draft{ChatID: groupChat, UserID: 7, MsgID: 11, Step: model.StepConfirm}
+	e.must(e.svc.StartDraft(ctx, &d))
+
+	// A stale version creates nothing.
+	stale := d
+	stale.Version--
+	if _, err := e.svc.SaveDraft(ctx, stale, aliceG, 0, r); !errors.Is(err, ErrStaleDraft) {
+		t.Fatalf("stale SaveDraft: %v, want ErrStaleDraft", err)
+	}
+	if n := count(); n != 0 {
+		t.Fatalf("%d items after a stale save", n)
+	}
+
+	// A failing insert (unknown assignee) rolls back: the draft is kept.
+	if _, err := e.svc.SaveDraft(ctx, d, aliceG, 404, r); err == nil {
+		t.Fatal("SaveDraft with an unknown assignee succeeded")
+	}
+	if cur, err := e.svc.Draft(ctx, groupChat, 7); err != nil || cur.Version != d.Version {
+		t.Fatalf("draft after a failed save = %+v, %v", cur, err)
+	}
+	if n := count(); n != 0 {
+		t.Fatalf("%d items after a failed save", n)
+	}
+
+	// Two nodes saving the same version: exactly one item.
+	td, err := e.svc.SaveDraft(ctx, d, aliceG, 0, r)
+	e.must(err)
+	if td.Text != "buy milk" || td.DueAt == nil || !td.DueAt.Equal(due) {
+		t.Fatalf("saved %+v", td)
+	}
+	if _, err := b.SaveDraft(ctx, d, aliceG, 0, r); !errors.Is(err, ErrStaleDraft) {
+		t.Fatalf("second SaveDraft: %v, want ErrStaleDraft", err)
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("%d items, want 1", n)
+	}
+	if _, err := e.svc.Draft(ctx, groupChat, 7); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("draft after save: %v, want ErrNotFound", err)
+	}
+
+	// An expired draft cannot be saved.
+	x := model.Draft{ChatID: groupChat, UserID: 7, MsgID: 12, Step: model.StepConfirm}
+	e.must(e.svc.StartDraft(ctx, &x))
+	e.clk.Advance(30 * time.Minute)
+	if _, err := e.svc.SaveDraft(ctx, x, aliceG, 0, r); !errors.Is(err, ErrStaleDraft) {
+		t.Fatalf("expired SaveDraft: %v, want ErrStaleDraft", err)
+	}
+	if err := e.svc.EndDraft(ctx, x); !errors.Is(err, ErrStaleDraft) {
+		t.Fatalf("expired EndDraft: %v, want ErrStaleDraft", err)
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("%d items, want 1", n)
 	}
 }
 

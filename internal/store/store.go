@@ -148,7 +148,9 @@ type Store interface {
 
 	// PutDraft inserts d, replacing any draft of (d.ChatID, d.UserID)
 	// whatever its version or expiry (starting the wizard again). It sets
-	// d.Version to a value greater than the replaced draft's, if any.
+	// d.Version to a value greater than the replaced draft's, if any. A
+	// draft inserted where none is stored gets d.UpdatedAt in Unix
+	// milliseconds, so versions do not repeat after a delete or a purge.
 	// d.UpdatedAt and d.ExpiresAt are stored as given.
 	PutDraft(ctx context.Context, d *model.Draft) error
 	// GetDraft returns the draft of (chatID, userID); ErrNotFound if none
@@ -165,9 +167,11 @@ type Store interface {
 	// concurrent callers holding the same version gets ok=true.
 	UpdateDraft(ctx context.Context, d *model.Draft, now time.Time) (ok bool, err error)
 	// DeleteDraft deletes the draft of (chatID, userID) only if its version
-	// is version. ok=false if it was missing or had another version; of
-	// several concurrent callers exactly one gets ok=true (Save, Cancel).
-	DeleteDraft(ctx context.Context, chatID, userID, version int64) (ok bool, err error)
+	// is version and it has not expired at now. ok=false if it was missing,
+	// expired (row left for Purge) or had another version; of several
+	// concurrent callers exactly one gets ok=true (Save, Cancel). Inside
+	// WithTx it is the condition of service.SaveDraft.
+	DeleteDraft(ctx context.Context, chatID, userID, version int64, now time.Time) (ok bool, err error)
 
 	// WithTx runs fn in a transaction. Inside fn use ONLY tx (with SQLite the
 	// pool has a single connection, so using the outer Store deadlocks).

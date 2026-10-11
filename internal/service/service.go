@@ -134,9 +134,9 @@ type Service interface {
 	// Drafts live only in the database. Every change is a compare-and-set
 	// on Draft.Version: a write based on an out-of-date read fails with
 	// ErrStaleDraft and changes nothing. A draft expires DraftTTL (30m)
-	// after its last write and then reads as ErrNotFound. Save is not a
-	// draft method: the handler ends the draft (EndDraft) and then calls
-	// AddTodo / AddTodoFor, the same path as /add.
+	// after its last write and then reads as ErrNotFound. Save is SaveDraft:
+	// it ends the draft and creates the item in one transaction, through
+	// the same code as AddTodoFor (/add).
 
 	// StartDraft stores d as the draft of (d.ChatID, d.UserID), replacing
 	// any earlier one. It sets d.UpdatedAt to now, d.ExpiresAt to
@@ -153,10 +153,18 @@ type Service interface {
 	// d.UpdatedAt and d.ExpiresAt. ErrStaleDraft if the draft was changed,
 	// replaced, ended or expired since d was read.
 	UpdateDraft(ctx context.Context, d *model.Draft) error
-	// EndDraft deletes the draft (Save, Cancel) if d.Version is still the
-	// stored version; ErrStaleDraft otherwise. Exactly one of several
-	// concurrent callers succeeds, so Save creates the item at most once.
+	// EndDraft deletes the draft (Cancel) if d.Version is still the stored
+	// version and it has not expired; ErrStaleDraft otherwise. Exactly one
+	// of several concurrent callers succeeds.
 	EndDraft(ctx context.Context, d model.Draft) error
+	// SaveDraft is Save. In one transaction it deletes the draft if
+	// d.Version is still the stored version and it has not expired
+	// (ErrStaleDraft otherwise, and no item is created), then does what
+	// AddTodoFor(a, assigneeID, r) does. If that fails (ErrEmptyText, an
+	// unknown assignee, ...) the transaction is rolled back and the draft
+	// is still there with the same version. Of several concurrent calls
+	// with one version, at most one creates an item.
+	SaveDraft(ctx context.Context, d model.Draft, a Actor, assigneeID int64, r nlparse.Result) (model.Todo, error)
 	// NamedUsers returns every user with a known @username except
 	// exceptID, ordered by username. It does not check the allowlist: the
 	// handler does.

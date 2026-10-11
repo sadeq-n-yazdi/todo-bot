@@ -50,9 +50,10 @@ func (h *Handler) onWizardText(ctx context.Context, m *tg.Message, r req) (handl
 // request-scoped (a value in ctx), never shared between updates or nodes:
 // what a user has is known only from users.kb_version.
 
-// newTaskKeyboardCtx returns ctx marked so that the request's first plain
-// reply carries the keyboard, if m is in a private chat and the user's
-// KBVersion is out of date. Otherwise it returns ctx unchanged.
+// newTaskKeyboardCtx returns ctx marked (a use-once pointer) so that the
+// request's first plain reply carries the keyboard, if m is in a private
+// chat and the user's KBVersion is out of date. Otherwise it returns ctx
+// unchanged.
 //
 // TODO(#68): the handler follow-up PR implements it.
 func (h *Handler) newTaskKeyboardCtx(ctx context.Context, m *tg.Message, r req) context.Context {
@@ -63,7 +64,15 @@ func (h *Handler) newTaskKeyboardCtx(ctx context.Context, m *tg.Message, r req) 
 // offerNewTaskKeyboard is called by reply before it sends out. If ctx is
 // marked and the mark is unused, and out has no Keyboard, ForceReply or
 // RemoveKeyboard, it sets out.ReplyKeyboard to ui.NewTaskKeyboard in the
-// user's language and uses the mark. It also accepts an out whose
+// user's language and uses the mark. The mark is a use-once pointer stored
+// in ctx, so only one message per update carries it.
+//
+// Rule for callers: a message that will be edited later must never carry a
+// reply keyboard, because Telegram cannot edit a message that has one. So
+// such a message is sent with an inline keyboard (which makes the hook
+// skip it) or with h.Send.Send directly. The wizard's start card is sent
+// with a placeholder inline row (one ui.ActWizNoop button, data "wz:0")
+// and then edited to the first step. It also accepts an out whose
 // ReplyKeyboard the caller set itself (/start, /help, /lang). In both
 // cases it returns a function that reply calls once the send succeeded,
 // which stores ui.NewTaskKeyboardVersion with Svc.SetKBVersion (an error

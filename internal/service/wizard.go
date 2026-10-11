@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/nlparse"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 )
 
@@ -46,7 +47,7 @@ func (s *Svc) UpdateDraft(ctx context.Context, d *model.Draft) error {
 
 // EndDraft implements Service.
 func (s *Svc) EndDraft(ctx context.Context, d model.Draft) error {
-	ok, err := s.st.DeleteDraft(ctx, d.ChatID, d.UserID, d.Version)
+	ok, err := s.st.DeleteDraft(ctx, d.ChatID, d.UserID, d.Version, s.clk.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -54,6 +55,31 @@ func (s *Svc) EndDraft(ctx context.Context, d model.Draft) error {
 		return ErrStaleDraft
 	}
 	return nil
+}
+
+// SaveDraft implements Service: the conditional delete and the insert are
+// one transaction, so either both happen or neither does.
+func (s *Svc) SaveDraft(ctx context.Context, d model.Draft, a Actor, assigneeID int64, r nlparse.Result) (model.Todo, error) {
+	now := s.clk.Now().UTC()
+	var out model.Todo
+	err := s.st.WithTx(ctx, func(tx store.Store) error {
+		ok, err := tx.DeleteDraft(ctx, d.ChatID, d.UserID, d.Version, now)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrStaleDraft
+		}
+		out, err = s.addTodoTx(ctx, tx, a, assigneeID, r, now)
+		return err
+	})
+	if err != nil {
+		return model.Todo{}, err
+	}
+	if out.DueAt != nil {
+		s.wake()
+	}
+	return out, nil
 }
 
 // SetKBVersion implements Service.

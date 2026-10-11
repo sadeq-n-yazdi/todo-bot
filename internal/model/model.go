@@ -215,9 +215,15 @@ const (
 // decodes with the new field at its zero value. Every field is optional
 // and its zero value means "not chosen".
 type DraftData struct {
-	// Text is the item text, after i18n.NormalizeDigits. When a found date
-	// was accepted, it is FoundText (the date phrase removed).
+	// Text is the item text that Save stores, after i18n.NormalizeDigits.
+	// When a found date was accepted, it is FoundText (the date phrase
+	// removed); otherwise it is OrigText.
 	Text string `json:"text,omitempty"`
+	// OrigText is the text as the user typed it (normalised), set by the
+	// text step and by a text edit. No on a found date, and Back from the
+	// found step, restore Text from it, so Yes → Back → No keeps the date
+	// phrase.
+	OrigText string `json:"orig_text,omitempty"`
 	// Date is the chosen civil date, Gregorian "YYYY-MM-DD", in the user's
 	// time zone. "" = no date.
 	Date string `json:"date,omitempty"`
