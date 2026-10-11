@@ -138,6 +138,10 @@ func buildRule(r recSpec, h, m int, now time.Time, cal calendar.Kind) recur.Rule
 		if out.MonthDay == 0 {
 			out.MonthDay = cal.Split(now).Day
 		}
+	case recur.MonthlyWeekday:
+		out.Cal = cal
+		out.Weekdays = append([]time.Weekday(nil), r.wds...)
+		out.Nth = r.nth
 	case recur.Yearly:
 		// Month and day of now (the combined date, for a dated repeat).
 		d := cal.Split(now)
@@ -156,6 +160,8 @@ func explicit(r recSpec) bool {
 		return len(r.wds) > 0
 	case recur.Monthly:
 		return r.monthDay != 0
+	case recur.MonthlyWeekday:
+		return true
 	}
 	return false
 }
@@ -252,6 +258,16 @@ func firstOccurrence(r *recur.Rule, now time.Time) time.Time {
 				break
 			}
 		}
+	case recur.MonthlyWeekday:
+		cur := r.Cal.Split(now)
+		for k := 0; k < 24; k++ {
+			y, mo := calendar.AddMonths(cur.Year, cur.Month, k)
+			day := nthWeekdayOfMonth(r, y, mo, loc)
+			if t := r.Cal.At(calendar.Date{Year: y, Month: mo, Day: day}, r.Hour, r.Minute, loc); t.After(now) {
+				due = t
+				break
+			}
+		}
 	case recur.Yearly:
 		// A day the month lacks in a year (29 Feb, 30 Esfand) falls on the
 		// last day of that month, as in recur.
@@ -273,6 +289,16 @@ func firstOccurrence(r *recur.Rule, now time.Time) time.Time {
 		}
 	}
 	return due
+}
+
+// nthWeekdayOfMonth is the day of month (in r.Cal) of the Nth, or last,
+// weekday of month mo of year y.
+func nthWeekdayOfMonth(r *recur.Rule, y, mo int, loc *time.Location) int {
+	first := 1 + (int(r.Weekdays[0])-int(r.Cal.At(calendar.Date{Year: y, Month: mo, Day: 1}, 12, 0, loc).Weekday())+7)%7
+	if r.Nth == recur.Last {
+		return first + 7*((r.Cal.MonthLength(y, mo)-first)/7)
+	}
+	return first + 7*(r.Nth-1)
 }
 
 func hasWeekday(list []time.Weekday, w time.Weekday) bool {

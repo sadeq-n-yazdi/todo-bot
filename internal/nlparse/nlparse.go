@@ -69,6 +69,13 @@
 //     rules do not depend on the calendar. Daily and
 //     every-N repeats are not combined with a date ("tomorrow every day" is
 //     "tomorrow" in the text and a plain daily rule).
+//   - "every last friday of the month", "last friday of every month", "every
+//     month on the first monday", "every 2nd tuesday of the month", "every
+//     friday of last week of month" and Farsi "آخرین جمعه هر ماه" / "جمعه آخر
+//     هر ماه" are a recur.MonthlyWeekday rule (1st..4th or last weekday of
+//     each month of cal). A repeat word (every, each, monthly, هر) is
+//     required: "last friday" and "last friday of the month" keep their
+//     older meaning (a plain weekday, or no date).
 //   - Result.Due is computed here, with calendar arithmetic, and is also set
 //     for recurring phrases (the first occurrence).
 package nlparse
