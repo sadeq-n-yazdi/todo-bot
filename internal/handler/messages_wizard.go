@@ -8,8 +8,7 @@ func init() {
 	i18n.Register(i18n.En, map[string]string{
 		"wizard.starting":      "Starting…",
 		"wizard.cancelled":     "✖ Cancelled.",
-		"wizard.expired":       "This wizard has expired. Start again with /new.",
-		"wizard.toast.expired": "This wizard has expired. Start again with /new.",
+		"wizard.toast.expired": "This card is closed. To add a new item, use /new.",
 		"wizard.toast.foreign": "Only the person who started this can use it.",
 		"wizard.toast.stale":   "This card was out of date — here is the current step.",
 		"wizard.toast.past":    "That day has passed.",
@@ -22,8 +21,7 @@ func init() {
 	i18n.Register(i18n.Fa, map[string]string{
 		"wizard.starting":      "در حال شروع…",
 		"wizard.cancelled":     "✖ لغو شد.",
-		"wizard.expired":       "این مرحله\u200cها منقضی شده است. دوباره با /new شروع کنید.",
-		"wizard.toast.expired": "این مرحله\u200cها منقضی شده است. دوباره با /new شروع کنید.",
+		"wizard.toast.expired": "این کارت بسته شده است. برای افزودن کار تازه از /new استفاده کنید.",
 		"wizard.toast.foreign": "فقط کسی که این را شروع کرده می\u200cتواند از آن استفاده کند.",
 		"wizard.toast.stale":   "این کارت قدیمی بود — مرحله فعلی نمایش داده شد.",
 		"wizard.toast.past":    "این روز گذشته است.",
