@@ -48,12 +48,13 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | # | Issue | Status | PR |
 |---|---|---|---|
 | 45 | Language and calendar buttons through the ui codec | ✅ merged | #78 |
-| 46 | Bound each scheduler send by the claim deadline | 🚧 in progress | |
-| 49 | Keep the digest claim when MigrateChat merges into an existing chat | 🚧 in progress | |
-| 50 | Never move a lease's held_until backwards | 🚧 in progress | |
+| 46 | Bound each scheduler send by the claim deadline | ✅ merged | #80 |
+| 49 | Keep the digest claim when MigrateChat merges into an existing chat | ✅ merged | #79 |
+| 50 | Never move a lease's held_until backwards | ✅ merged | #79 |
 | 51 | Lease loop: test and doc follow-ups | 🚧 in progress | |
 | 53 | Open the store without migrations for backup | 🚧 in progress | |
 | 54 | Startup getMe retry: honour RetryAfter | 🚧 in progress | |
+| 82 | Minimum claim TTL; tighten the digest hang test | 📋 open | |
 
 ## Log
 - **2026-10-10**
@@ -108,3 +109,4 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - The owner wrote the retry policy for reminders (#77): 5 s, 30 s, 2 min, 10 min, 30 min, then give up. The window is short because a retried reminder is not marked late. v0.1.3 tagged.
   - v0.1.3 deployed to vps00 (it includes v0.1.2). Migration 0004 was applied at startup and the database was backed up first. The service is active with 0 restarts and about 24MB of memory. v0.1.1 is kept as `todo-bot.prev` for rollback.
   - Planned v0.1.4: the seven open follow-ups from earlier reviews (#45, #46, #49, #50, #51, #53, #54). Four PRs started in parallel.
+  - #45 merged (#78). #46 merged (#80): each send now ends before its claim expires. #49 and #50 merged (#79): a stale lease renewal can no longer move the expiry back, and a chat merge keeps the digest claim. The reviews filed #82.

@@ -277,6 +277,8 @@ v0.1 ships SQLite on one host, but its code paths are already multi-node. v0.2 a
   - the claim statements;
   - the migration lock;
   - detecting unique-key violations.
+  - `Greatest(a, b)`: SQLite `max(a, b)`, Postgres and MySQL `GREATEST(a, b)` (#50). MySQL's `GREATEST` returns NULL if an argument is NULL, so `leases.held_until` must stay `BIGINT NOT NULL`.
+- `MigrateChat` into an existing chat keeps the target's digest if it has one. Otherwise the target takes the old chat's digest settings, `digest_next_at` and live claim together (#49). The v0.2 providers must add `AND digest_time IS NULL` to that UPDATE, because their default isolation does not lock the row that was read.
 - `storetest.Run` is the conformance suite. Every provider must pass it, including its concurrency tests, which open several independent handles to one database.
 - Optional capabilities are checked with type assertions:
   - `store.Backuper` is SQLite only. Other databases use `pg_dump` or `mysqldump`.
