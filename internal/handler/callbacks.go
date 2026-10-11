@@ -86,6 +86,11 @@ func (h *Handler) actionCallback(ctx context.Context, cb *tg.Callback, r req, ac
 	lc := r.Prefs.Locale
 	gone := lc.T("settings.cb.gone")
 	switch act.Kind {
+	case ui.ActWizStart, ui.ActWizDate, ui.ActWizMonth, ui.ActWizTime, ui.ActWizRepeat,
+		ui.ActWizAssign, ui.ActWizNav, ui.ActWizEdit, ui.ActWizNoop:
+		return h.wizardCallback(ctx, cb, r, act)
+	}
+	switch act.Kind {
 	case ui.ActPage:
 		page, err := strconv.Atoi(act.Arg)
 		if err != nil || page < 0 {
@@ -199,6 +204,13 @@ func (h *Handler) settingCallback(ctx context.Context, cb *tg.Callback, r req, k
 			return "", err
 		}
 		lc.Lang = lang
+		if r.Actor.ChatKind == model.ChatPrivate {
+			// The edit below cannot carry a reply keyboard: the next reply
+			// carries it in the new language.
+			if err := h.Svc.SetKBVersion(ctx, cb.FromID, 0); err != nil {
+				h.Log.Warn("reset keyboard version", "user", cb.FromID, "err", err)
+			}
+		}
 		h.editCallbackMsg(ctx, cb, tg.OutMessage{Text: lc.T("settings.lang.set", langName(lc, lang))})
 	case settingCal:
 		cal := calendar.Kind(val)

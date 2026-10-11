@@ -138,3 +138,14 @@ func TestHandleDedupesUpdates(t *testing.T) {
 		t.Fatalf("unrecorded update was acted on (%d messages)", n)
 	}
 }
+
+// Wizard drafts (#68): neither fake has any.
+func (prefsOnly) Draft(context.Context, int64, int64) (model.Draft, error) {
+	return model.Draft{}, service.ErrNotFound
+}
+func (prefsOnly) SetKBVersion(context.Context, int64, int) error { return nil }
+
+func (prefsPanics) Draft(context.Context, int64, int64) (model.Draft, error) {
+	return model.Draft{}, service.ErrNotFound
+}
+func (prefsPanics) SetKBVersion(context.Context, int64, int) error { return nil }

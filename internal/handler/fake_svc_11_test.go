@@ -178,3 +178,33 @@ func (f *fakeSvc11) UserByUsername(context.Context, string) (model.User, error) 
 }
 
 func (f *fakeSvc11) ListAssigned(context.Context, int64) ([]model.Todo, error) { return nil, nil }
+
+// Wizard drafts (#68): this fake has none. SetKBVersion is kept in prefs so
+// the reply keyboard is attached once.
+func (f *fakeSvc11) StartDraft(context.Context, *model.Draft) error { return nil }
+
+func (f *fakeSvc11) Draft(context.Context, int64, int64) (model.Draft, error) {
+	return model.Draft{}, service.ErrNotFound
+}
+
+func (f *fakeSvc11) DraftByMessage(context.Context, int64, int) (model.Draft, error) {
+	return model.Draft{}, service.ErrNotFound
+}
+
+func (f *fakeSvc11) UpdateDraft(context.Context, *model.Draft) error { return service.ErrStaleDraft }
+func (f *fakeSvc11) EndDraft(context.Context, model.Draft) error     { return service.ErrStaleDraft }
+
+func (f *fakeSvc11) SaveDraft(context.Context, model.Draft, service.Actor, int64, nlparse.Result) (model.Todo, error) {
+	return model.Todo{}, service.ErrStaleDraft
+}
+
+func (f *fakeSvc11) NamedUsers(context.Context, int64) ([]model.User, error) { return nil, nil }
+
+func (f *fakeSvc11) SetKBVersion(_ context.Context, id int64, v int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p := f.prefs[id]
+	p.KBVersion = v
+	f.prefs[id] = p
+	return nil
+}

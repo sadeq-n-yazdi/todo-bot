@@ -48,7 +48,7 @@ var openStore = store.Open
 var tgServerURL string
 
 // menu lists the bot commands shown in Telegram's menu, in order.
-var menu = []string{"help", "add", "list", "done", "del", "edit", "today", "remind", "tz", "digest", "lang", "calendar"}
+var menu = []string{"help", "new", "add", "list", "done", "del", "edit", "today", "remind", "tz", "digest", "lang", "calendar"}
 
 const usage = "usage: todo-bot [run|version|migrate|backup PATH]\n" +
 	"  backup opens the database like run does: it creates a missing file and applies\n" +

@@ -23,19 +23,22 @@ import (
 // 4096 UTF-16 units and does not split them, so one item must stay small.
 const maxTodoChars = 1000
 
+// cmdStart and cmdHelp always carry the "➕ New task" keyboard in a private
+// chat, so a user who removed it can get it back.
 func (h *Handler) cmdStart(ctx context.Context, m *tg.Message, r req, args string) error {
-	return h.say(ctx, m, r.Prefs.Locale.T("todo.help"))
+	return h.sayWithKeyboard(ctx, m, r.Prefs.Locale, r.Prefs.Locale.T("todo.help"))
 }
 
 func (h *Handler) cmdHelp(ctx context.Context, m *tg.Message, r req, args string) error {
-	return h.say(ctx, m, r.Prefs.Locale.T("todo.help"))
+	return h.sayWithKeyboard(ctx, m, r.Prefs.Locale, r.Prefs.Locale.T("todo.help"))
 }
 
 func (h *Handler) cmdAdd(ctx context.Context, m *tg.Message, r req, args string) error {
 	lc := r.Prefs.Locale
 	input := strings.TrimSpace(args)
 	if input == "" {
-		return h.say(ctx, m, lc.T("todo.usage.add"))
+		// A bare /add starts the step-by-step wizard (#68).
+		return h.startWizard(ctx, r, m.ChatID, m.ID)
 	}
 	if tooLong(input) {
 		return h.sayTooLong(ctx, m, lc, input)
