@@ -2,7 +2,7 @@
 
 This page is updated on `main` after every merged PR.
 
-Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released**) · [v0.1.5](https://github.com/sadeq-n-yazdi/todo-bot/milestone/6) (Nth and last weekday of the month, **released and deployed**) · [v0.1.6](https://github.com/sadeq-n-yazdi/todo-bot/milestone/7) (repeat rule text, deploy hardening, **released**) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
+Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released**) · [v0.1.5](https://github.com/sadeq-n-yazdi/todo-bot/milestone/6) (Nth and last weekday of the month, **released and deployed**) · [v0.1.6](https://github.com/sadeq-n-yazdi/todo-bot/milestone/7) (repeat rule text, deploy hardening, **released and deployed**) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
 
 | # | Wave | Issue | Status | PR |
 |---|---|---|---|---|
@@ -140,3 +140,4 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - #92 was merged while its CI showed a failure. The failure was a flaky poller test in a package that #92 did not change, and main CI passed. Filed #94. Merges now wait on the exit status of the check itself.
   - #84 merged (#93). The review found that a database under a folder the service user cannot open still read as "no database yet". This is fixed and tested. The deploy harness now runs in CI, and shellcheck on the runner found ten warnings in it, all fixed.
   - #94 merged (#95). The fake Telegram server in the test did not wait like a real long poll. Both the author and the review reproduced the CI failure with a short delay. v0.1.6 tagged.
+  - v0.1.6 deployed to vps00 with the new deploy.sh. It has no schema change. The database was backed up first. v0.1.5 is kept as `todo-bot.prev` for rollback.
