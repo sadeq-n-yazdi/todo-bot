@@ -950,7 +950,7 @@ func TestReplyKeyboardAfterLang(t *testing.T) {
 		t.Fatalf("/lang fa %+v", l.Msg)
 	}
 	// The language buttons answer by an edit, so the version is reset.
-	e.press(wzAlice, wzAlice, 5, "sl:en")
+	e.press(wzAlice, wzAlice, 5, ui.Encode(ui.Action{Kind: ui.ActSetLang, Arg: "en"}))
 	if p, _ := e.svc.Prefs(context.Background(), wzAlice, ""); p.KBVersion != 0 {
 		t.Fatalf("KBVersion %d after the language button", p.KBVersion)
 	}

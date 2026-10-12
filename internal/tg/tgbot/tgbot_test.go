@@ -184,7 +184,7 @@ func collect(t *testing.T, b *Bot, want int, h func(tg.Update) error) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(60 * time.Second): // hang guard only; delivery is event-driven
+	case <-time.After(20 * time.Second): // hang guard only; delivery is event-driven
 		t.Fatal("poller did not deliver the expected updates")
 	}
 }

@@ -253,6 +253,11 @@ type DraftData struct {
 	// Editing is set by Edit on the confirm step: the next answer returns
 	// to StepConfirm instead of going on to the following step.
 	Editing bool `json:"editing,omitempty"`
+	// Cal is the user's calendar (calendar.Kind) when the card was last
+	// drawn. Save compares it with the current calendar: a monthly, yearly,
+	// Nth or last-weekday repeat whose meaning changed goes back to the
+	// repeat step. "" = unknown (a draft from before this field): no check.
+	Cal string `json:"cal,omitempty"`
 }
 
 // Draft is one in-progress wizard, one per (ChatID, UserID). It lives only

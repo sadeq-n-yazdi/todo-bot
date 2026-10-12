@@ -27,6 +27,7 @@ const (
 	saveDatePast              // a picked date is before today: back to date
 	saveFoundPast             // a found date has passed: back to date
 	saveRepeatBad             // the repeat does not fit the date: back to repeat
+	saveRepeatCal             // the calendar changed what the repeat means: back to repeat
 )
 
 // wizardTime parses "HH:MM" or returns the default time.
@@ -78,6 +79,31 @@ func repeatRule(repeat string, y int, m time.Month, d, hh, mm int, cal calendar.
 	return recur.Parse(rule.String())
 }
 
+// repeatCalChanged says whether the draft's repeat would be saved as
+// something other than the card showed, because the user's calendar changed
+// since the card was drawn (dd.Cal). Monthly, yearly, Nth and last-weekday
+// repeats depend on the calendar; the two rules are compared apart from the
+// calendar name, as that is what the card text reflects.
+func repeatCalChanged(dd model.DraftData, day time.Time, hh, mm int, cur calendar.Kind) bool {
+	shown := calendar.Kind(dd.Cal)
+	if !shown.Valid() || shown == cur {
+		return false
+	}
+	switch dd.Repeat {
+	case model.RepeatMonthly, model.RepeatYearly, model.RepeatNthWeekday, model.RepeatLastWeekday:
+	default:
+		return false
+	}
+	y, m, d := day.Date()
+	was, err1 := repeatRule(dd.Repeat, y, m, d, hh, mm, shown)
+	now, err2 := repeatRule(dd.Repeat, y, m, d, hh, mm, cur)
+	if err1 != nil || err2 != nil {
+		return true
+	}
+	was.Cal = now.Cal
+	return was.String() != now.String()
+}
+
 // buildResult maps the draft to the nlparse.Result that /add would have
 // produced, or says why it cannot (saveProblem). Only a once item is
 // refused for a time that has passed, or given the Today default; a
@@ -120,6 +146,9 @@ func (h *Handler) buildResult(d model.Draft, lc i18n.Locale, loc *time.Location,
 	if (dd.Repeat == model.RepeatNthWeekday || dd.Repeat == model.RepeatLastWeekday) &&
 		!nthRepeatValid(dd.Repeat, dd.Date, calOf(lc)) {
 		return res, saveRepeatBad, nil
+	}
+	if repeatCalChanged(dd, day, hh, mm, calOf(lc)) {
+		return res, saveRepeatCal, nil
 	}
 	if dd.Repeat != model.RepeatOnce {
 		rule, err := repeatRule(dd.Repeat, day.Year(), day.Month(), day.Day(), hh, mm, calOf(lc))
@@ -184,6 +213,11 @@ func (h *Handler) save(ctx context.Context, r req, d model.Draft) (string, error
 		nd.Data.Repeat = model.RepeatOnce
 		nd.Step = model.StepRepeat
 		return redo(nd, "wizard.note.repeat")
+	case saveRepeatCal:
+		nd := d
+		nd.Data.Repeat = model.RepeatOnce
+		nd.Step = model.StepRepeat
+		return redo(nd, "wizard.note.repeatcal")
 	case saveFoundPast:
 		nd := d
 		clearFound(&nd)

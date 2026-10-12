@@ -151,6 +151,7 @@ func (h *Handler) commit(ctx context.Context, r req, old, nd model.Draft, o card
 			return false, err
 		}
 	}
+	nd.Data.Cal = string(calOf(r.Prefs.Locale)) // the card is drawn in this calendar
 	if err := h.Svc.UpdateDraft(ctx, &nd); err != nil {
 		if errors.Is(err, service.ErrStaleDraft) {
 			return true, nil
