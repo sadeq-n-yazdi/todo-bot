@@ -14,9 +14,10 @@ import (
 type dateKind int
 
 const (
-	dateOffset  dateKind = iota + 1 // today / tomorrow / day after tomorrow
-	dateWeekday                     // monday, next monday
-	dateYMD                         // an explicit calendar date, year optional
+	dateOffset       dateKind = iota + 1 // today / tomorrow / day after tomorrow
+	dateWeekday                          // monday, next monday
+	dateYMD                              // an explicit calendar date, year optional
+	dateMonthWeekday                     // the Nth or last weekday of this or next month
 )
 
 type dateSpec struct {
@@ -27,6 +28,8 @@ type dateSpec struct {
 	cal     calendar.Kind
 	y, m, d int
 	hasYear bool
+	nth     int // dateMonthWeekday: 1..4 or recur.Last (wd is the weekday)
+	months  int // dateMonthWeekday: 0 = this month (next one if passed), 1 = next month
 }
 
 type timeSpec struct {
@@ -98,6 +101,9 @@ func parseFrom(toks []token, start int, cal calendar.Kind, lenient bool) (phrase
 	// A date or time may only be combined with a weekly, monthly or yearly repeat;
 	// "tomorrow every day" is not one phrase.
 	if r := ph.rec; r != nil && (late || ph.date != nil) && r.freq != recur.Weekly && r.freq != recur.Monthly && r.freq != recur.Yearly && r.freq != recur.MonthlyWeekday {
+		return phrase{}, false
+	}
+	if ph.rec != nil && ph.date != nil && ph.date.kind == dateMonthWeekday {
 		return phrase{}, false
 	}
 	if ph.rel != nil && (ph.rel.u == unitMinute || ph.rel.u == unitHour) && (ph.date != nil || ph.tm != nil) {
@@ -287,6 +293,9 @@ func (p *parser) wdAt(j int) (time.Weekday, int, bool) {
 func (p *parser) matchDate() bool {
 	if p.ph.date != nil || p.ph.rel != nil {
 		return false
+	}
+	if p.matchMonthWeekday() {
+		return true
 	}
 	k := p.key(p.i)
 	switch k {
@@ -721,6 +730,97 @@ func (p *parser) matchNthWeekday(j int) bool {
 		}
 	}
 	return p.setRec(recSpec{freq: recur.MonthlyWeekday, wds: []time.Weekday{wd}, nth: nth}, j)
+}
+
+// matchMonthWeekday matches a one-off Nth or last weekday of this or next
+// month, in the user's calendar:
+//
+//	last friday of the month, the last friday of this month,
+//	first monday of next month, 2nd tuesday of the month,
+//	آخرین جمعه این ماه, جمعه آخر ماه, اولین دوشنبه ماه بعد
+//
+// A month word is required: a bare "last friday" keeps its older meaning, and
+// a repeat word gives the rule of matchNthWeekday instead.
+func (p *parser) matchMonthWeekday() bool {
+	if p.afterRepeatWord() {
+		return false
+	}
+	j := p.i
+	if p.key(j) == "the" {
+		j++
+	}
+	var wd time.Weekday
+	nth, ok := 0, false
+	if n, k, found := p.ordAt(j); found {
+		w, wn, found := p.wdAt(k)
+		if !found {
+			return false
+		}
+		nth, wd, ok, j = n, w, true, k+wn
+	} else if w, wn, found := p.wdAt(j); found {
+		if n, found := ordinalWords[p.key(j+wn)]; found && !isEnglishOrdinal(p.key(j+wn)) {
+			nth, wd, ok, j = n, w, true, j+wn+1
+		}
+	}
+	if !ok {
+		return false
+	}
+	months := 0
+	switch p.key(j) {
+	case "of", "in":
+		// English: of the month, of this month, of next month
+		switch d := p.key(j + 1); {
+		case (d == "the" || d == "this") && p.monthAt(j+2):
+			j += 3
+		case d == "next" && p.monthAt(j+2):
+			months, j = 1, j+3
+		default:
+			return false
+		}
+	default:
+		// Farsi: [در|از] [این|همین] ماه [بعد|بعدی|آینده]
+		if k := p.key(j); k == "در" || k == "از" {
+			j++
+		}
+		this := false
+		if k := p.key(j); k == "این" || k == "همین" {
+			this = true
+			j++
+		}
+		if !p.monthAt(j) {
+			return false
+		}
+		j++
+		if k := p.key(j); k == "بعد" || k == "بعدی" || k == "آینده" {
+			if this {
+				return false
+			}
+			months = 1
+			j++
+		}
+	}
+	p.ph.date = &dateSpec{kind: dateMonthWeekday, cal: p.cal, wd: wd, nth: nth, months: months}
+	p.i = j
+	return true
+}
+
+// afterRepeatWord reports whether the tokens before p.i end in a repeat head
+// ("every", "each", "monthly", "هر", "every month", optionally followed by
+// "on"): the text is then a recurring phrase, which keeps its older meaning
+// even when the recurrence grammar leaves a tail unmatched.
+func (p *parser) afterRepeatWord() bool {
+	k := p.i - 1
+	if p.key(k) == "on" {
+		k--
+	}
+	if p.monthAt(k) {
+		k--
+	}
+	switch p.key(k) {
+	case "every", "each", "هر", "monthly", "ماهانه":
+		return true
+	}
+	return false
 }
 
 func isEnglishOrdinal(k string) bool {
