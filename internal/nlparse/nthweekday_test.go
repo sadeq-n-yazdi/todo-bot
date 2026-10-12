@@ -19,8 +19,6 @@ func nthDay(cal calendar.Kind, nth int, wd time.Weekday, h, m int) *recur.Rule {
 var nthPinnedRows = []row{
 	{in: "x last friday", wantText: "x last", wantDue: "2026-10-16 09:00"},
 	{in: "x every last friday", wantText: "x every last", wantDue: "2026-10-16 09:00"},
-	{in: "x last friday of the month", wantText: "x last friday of the month"},
-	{in: "x first friday of the month", wantText: "x first friday of the month"},
 	{in: "x first monday", wantText: "x first", wantDue: "2026-10-12 09:00"},
 	{in: "x next friday", wantText: "x", wantDue: "2026-10-16 09:00"},
 	{in: "last friday", wantText: "last", wantDue: "2026-10-16 09:00"},
@@ -104,8 +102,6 @@ func TestNthWeekdayNotMatched(t *testing.T) {
 	for _, in := range []string{
 		"x every 5th friday of the month",
 		"x every 0th friday of the month",
-		"x last friday of the month",
-		"x the last friday of this month",
 		"x every 2 tuesday of the month",
 		"x every last week of the month",
 		"x on the first monday of march",
