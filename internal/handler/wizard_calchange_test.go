@@ -2,8 +2,8 @@ package handler
 
 import (
 	"context"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
@@ -33,6 +33,7 @@ func TestWizardSaveAfterCalendarChange(t *testing.T) {
 		{"4th Friday", "2026-10-23", ui.WizRepeatNth},
 		{"monthly", "2026-10-23", ui.WizRepeatMonthly},
 		{"yearly", "2026-10-23", ui.WizRepeatYearly},
+		{"last Friday", "2026-10-30", ui.WizRepeatLast},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -41,6 +42,11 @@ func TestWizardSaveAfterCalendarChange(t *testing.T) {
 			got := e.draft(wzGrp, wzAlice)
 			if got.Step != model.StepRepeat || got.Data.Repeat != model.RepeatOnce || len(e.todos(wzGrp)) != 0 {
 				t.Fatalf("draft %+v, items %+v", got, e.todos(wzGrp))
+			}
+			// The card carries the calendar note, not the "does not fit" one.
+			txt := e.lastEdit().Msg.Text
+			if !strings.Contains(txt, "Your calendar changed") || strings.Contains(txt, "does not fit the date") {
+				t.Fatalf("card text %q", txt)
 			}
 			if got.Data.Cal != string(calendar.Jalali) {
 				t.Fatalf("Cal %q after the redraw", got.Data.Cal)
@@ -60,17 +66,15 @@ func TestWizardSaveAfterCalendarChangeSameRule(t *testing.T) {
 }
 
 func TestRepeatCalChangedSameCalendar(t *testing.T) {
-	day := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC)
 	dd := model.DraftData{Repeat: model.RepeatMonthly, Cal: string(calendar.Jalali)}
-	if repeatCalChanged(dd, day, 16, 0, calendar.Jalali) {
+	if repeatCalChanged(dd, calendar.Jalali) {
 		t.Fatal("same calendar must mean no change")
 	}
 }
 
 func TestRepeatCalChangedUnknownCal(t *testing.T) {
-	day := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC)
 	dd := model.DraftData{Repeat: model.RepeatMonthly} // a draft from before the field
-	if repeatCalChanged(dd, day, 16, 0, calendar.Jalali) {
+	if repeatCalChanged(dd, calendar.Jalali) {
 		t.Fatal("no stored calendar must mean no check")
 	}
 }

@@ -79,29 +79,19 @@ func repeatRule(repeat string, y int, m time.Month, d, hh, mm int, cal calendar.
 	return recur.Parse(rule.String())
 }
 
-// repeatCalChanged says whether the draft's repeat would be saved as
-// something other than the card showed, because the user's calendar changed
-// since the card was drawn (dd.Cal). Monthly, yearly, Nth and last-weekday
-// repeats depend on the calendar; the two rules are compared apart from the
-// calendar name, as that is what the card text reflects.
-func repeatCalChanged(dd model.DraftData, day time.Time, hh, mm int, cur calendar.Kind) bool {
+// repeatCalChanged says whether the draft's repeat depends on the calendar
+// (monthly, yearly, Nth or last weekday) and the user's calendar is not the
+// one the card showed (dd.Cal). A draft with no stored calendar is not checked.
+func repeatCalChanged(dd model.DraftData, cur calendar.Kind) bool {
 	shown := calendar.Kind(dd.Cal)
 	if !shown.Valid() || shown == cur {
 		return false
 	}
 	switch dd.Repeat {
 	case model.RepeatMonthly, model.RepeatYearly, model.RepeatNthWeekday, model.RepeatLastWeekday:
-	default:
-		return false
-	}
-	y, m, d := day.Date()
-	was, err1 := repeatRule(dd.Repeat, y, m, d, hh, mm, shown)
-	now, err2 := repeatRule(dd.Repeat, y, m, d, hh, mm, cur)
-	if err1 != nil || err2 != nil {
 		return true
 	}
-	was.Cal = now.Cal
-	return was.String() != now.String()
+	return false
 }
 
 // buildResult maps the draft to the nlparse.Result that /add would have
@@ -143,12 +133,12 @@ func (h *Handler) buildResult(d model.Draft, lc i18n.Locale, loc *time.Location,
 	hh, mm := h.wizardTime(dd.Time)
 	due := time.Date(day.Year(), day.Month(), day.Day(), hh, mm, 0, 0, loc)
 	res.Due, res.HasTime = &due, dd.Time != ""
+	if repeatCalChanged(dd, calOf(lc)) {
+		return res, saveRepeatCal, nil
+	}
 	if (dd.Repeat == model.RepeatNthWeekday || dd.Repeat == model.RepeatLastWeekday) &&
 		!nthRepeatValid(dd.Repeat, dd.Date, calOf(lc)) {
 		return res, saveRepeatBad, nil
-	}
-	if repeatCalChanged(dd, day, hh, mm, calOf(lc)) {
-		return res, saveRepeatCal, nil
 	}
 	if dd.Repeat != model.RepeatOnce {
 		rule, err := repeatRule(dd.Repeat, day.Year(), day.Month(), day.Day(), hh, mm, calOf(lc))
