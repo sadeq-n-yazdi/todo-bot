@@ -73,6 +73,7 @@ func (p Parser) resolve(ph phrase, now time.Time, cal calendar.Kind) (Result, bo
 		var ok bool
 		ds := *ph.date
 		ds.offset += tonightShift
+		ds.timed = ph.tm != nil
 		if due, ok = resolveDate(&ds, now, h, m); !ok {
 			return Result{}, false
 		}
@@ -127,7 +128,9 @@ func resolveDate(d *dateSpec, now time.Time, h, m int) (time.Time, bool) {
 
 // resolveMonthWeekday is the Nth or last weekday of this or next month of
 // d.cal, found with the day rule of the monthly-weekday recurrence. A day of
-// this month that is not after now (date and time) moves to the next month.
+// this month that is not after now moves to the next month, except that with
+// no time named (d.timed false) today stays today, like any other day with no
+// time: resolve then makes it the end of today with no time.
 func resolveMonthWeekday(d *dateSpec, now time.Time, h, m int) time.Time {
 	loc := now.Location()
 	r := recur.Rule{Freq: recur.MonthlyWeekday, Cal: d.cal, Weekdays: []time.Weekday{d.wd}, Nth: d.nth}
@@ -136,7 +139,7 @@ func resolveMonthWeekday(d *dateSpec, now time.Time, h, m int) time.Time {
 	for k := d.months; k <= d.months+1; k++ {
 		y, mo := calendar.AddMonths(cur.Year, cur.Month, k)
 		day := nthWeekdayOfMonth(&r, y, mo, loc)
-		if t = d.cal.At(calendar.Date{Year: y, Month: mo, Day: day}, h, m, loc); t.After(now) {
+		if t = d.cal.At(calendar.Date{Year: y, Month: mo, Day: day}, h, m, loc); t.After(now) || (k == d.months && !d.timed && sameDay(t, now)) {
 			break
 		}
 	}

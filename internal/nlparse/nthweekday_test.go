@@ -100,6 +100,8 @@ func TestNthWeekdayDueIsAnOccurrence(t *testing.T) {
 // Forms that need a repeat word or a valid ordinal never give this rule.
 func TestNthWeekdayNotMatched(t *testing.T) {
 	for _, in := range []string{
+		"x last friday of the month",
+		"x the last friday of this month",
 		"x every 5th friday of the month",
 		"x every 0th friday of the month",
 		"x every 2 tuesday of the month",

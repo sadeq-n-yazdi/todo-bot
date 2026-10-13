@@ -74,14 +74,15 @@
 //     friday of last week of month" and Farsi "آخرین جمعه هر ماه" / "جمعه آخر
 //     هر ماه" are a recur.MonthlyWeekday rule (1st..4th or last weekday of
 //     each month of cal). A repeat word (every, each, monthly, هر) is
-//     required: "last friday" and "last friday of the month" keep their
-//     older meaning (a plain weekday, or no date).
+//     required: "last friday" keeps its older meaning (a plain weekday), and
+//     without one "last friday of the month" is the one-off date below.
 //   - "last friday of the month", "the last friday of this month", "first
 //     monday of next month", "2nd tuesday of the month" and Farsi "آخرین جمعه
 //     این ماه" / "جمعه آخر ماه" / "اولین دوشنبه ماه بعد" are a one-off date
 //     (no rule): the Nth or last weekday of this month of cal, or of the next
 //     one when "next month"/"ماه بعد" is said or this month's day (date and
-//     time) is not after now. A month word is required: a bare "last friday"
+//     time) is not after now; with no time, today stays today (end of day, no
+//     time, as for any date). A month word is required: a bare "last friday"
 //     is a plain weekday.
 //   - Result.Due is computed here, with calendar arithmetic, and is also set
 //     for recurring phrases (the first occurrence).

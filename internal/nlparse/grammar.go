@@ -28,8 +28,9 @@ type dateSpec struct {
 	cal     calendar.Kind
 	y, m, d int
 	hasYear bool
-	nth     int // dateMonthWeekday: 1..4 or recur.Last (wd is the weekday)
-	months  int // dateMonthWeekday: 0 = this month (next one if passed), 1 = next month
+	nth     int  // dateMonthWeekday: 1..4 or recur.Last (wd is the weekday)
+	timed   bool // dateMonthWeekday: the phrase named a time of day
+	months  int  // dateMonthWeekday: 0 = this month (next one if passed), 1 = next month
 }
 
 type timeSpec struct {
@@ -649,8 +650,9 @@ func (p *parser) monthAt(j int) bool { k := p.key(j); return k == "month" || k =
 //	monthly on the 2nd tuesday, every friday of last week of month,
 //	آخرین جمعه هر ماه, جمعه آخر هر ماه, هر ماه اولین دوشنبه
 //
-// A repeat word (every, each, monthly, هر) must be present: "last friday of
-// the month" and "last friday" keep their other meanings.
+// A repeat word (every, each, monthly, هر) must be present: without one,
+// "last friday of the month" is a one-off date (matchMonthWeekday) and "last
+// friday" a plain weekday.
 func (p *parser) matchNthWeekday(j int) bool {
 	rep, monthHead := false, false
 	switch p.key(j) {
@@ -804,21 +806,17 @@ func (p *parser) matchMonthWeekday() bool {
 	return true
 }
 
-// afterRepeatWord reports whether the tokens before p.i end in a repeat head
-// ("every", "each", "monthly", "هر", "every month", optionally followed by
-// "on"): the text is then a recurring phrase, which keeps its older meaning
-// even when the recurrence grammar leaves a tail unmatched.
+// afterRepeatWord reports whether one of the three tokens before p.i is a
+// repeat head ("every", "each", "other", "daily", "weekly", "monthly",
+// "yearly", "هر", ...): the text is then a recurring phrase, which keeps its
+// older meaning even when the recurrence grammar leaves a tail unmatched.
 func (p *parser) afterRepeatWord() bool {
-	k := p.i - 1
-	if p.key(k) == "on" {
-		k--
-	}
-	if p.monthAt(k) {
-		k--
-	}
-	switch p.key(k) {
-	case "every", "each", "هر", "monthly", "ماهانه":
-		return true
+	for k := p.i - 3; k < p.i; k++ {
+		switch p.key(k) {
+		case "every", "each", "other", "daily", "weekly", "monthly", "yearly",
+			"هر", "روزانه", "هفتگی", "ماهانه", "سالانه":
+			return true
+		}
 	}
 	return false
 }
