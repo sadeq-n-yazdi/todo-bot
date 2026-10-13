@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"strings"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/calendar"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
@@ -13,24 +12,6 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/ui"
 )
-
-// legacySetting parses the pre-codec settings data "sl:<lang>" and
-// "sc:<calendar>" of buttons in messages that were sent before these
-// buttons used ui.Encode. It returns the equivalent action; the value is
-// not validated here.
-//
-// LEGACY: remove legacySetting, and its use in onCallback, in v0.1.5.
-func legacySetting(data string) (ui.Action, bool) {
-	kind, val, ok := strings.Cut(data, ":")
-	if !ok || val == "" || strings.Contains(val, ":") {
-		return ui.Action{}, false
-	}
-	switch ui.ActionKind(kind) {
-	case ui.ActSetLang, ui.ActSetCal:
-		return ui.Action{Kind: ui.ActionKind(kind), Arg: val}, true
-	}
-	return ui.Action{}, false
-}
 
 // onCallback handles an inline button press from an allowlisted user. It
 // always answers the callback exactly once (or returns an error before
@@ -43,8 +24,6 @@ func (h *Handler) onCallback(ctx context.Context, cb *tg.Callback, r req) error 
 	)
 	if act, derr := ui.Decode(cb.Data); derr == nil {
 		note, err = h.actionCallback(ctx, cb, r, act)
-	} else if act, ok := legacySetting(cb.Data); ok { // LEGACY: remove in v0.1.5
-		note, err = h.settingCallback(ctx, cb, r, act)
 	} else {
 		h.Log.Warn("bad callback data", "data", cb.Data)
 	}

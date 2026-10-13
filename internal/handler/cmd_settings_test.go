@@ -177,22 +177,20 @@ func TestSettingsButtonsUseUICodec(t *testing.T) {
 	}
 }
 
-// Legacy "sl:<lang>" / "sc:<calendar>" data from messages sent before the
-// ui codec is still accepted. Remove with legacySetting in v0.1.5.
-func TestLegacySettingButtons(t *testing.T) {
+// Old "sl:<lang>" / "sc:<calendar>" button data is no longer accepted: the
+// press gets the normal bad-data answer (one callback answer) and changes
+// nothing.
+func TestLegacySettingButtonsRejected(t *testing.T) {
 	hh := newHarness12(t)
-	hh.press(1, 1, 41, "sl:fa")
-	if hh.svc.prefs[1].Locale.Lang != i18n.Fa {
-		t.Fatalf("legacy lang button ignored: %+v", hh.svc.prefs[1])
-	}
-	hh.press(1, 1, 42, "sc:jalali")
-	if hh.svc.prefs[1].Locale.Cal != calendar.Jalali {
-		t.Fatalf("legacy calendar button ignored: %+v", hh.svc.prefs[1])
-	}
-	for _, d := range []string{"sl:", "sc:", "sx:fa", "sl:0:fa", "td:1"} {
-		if a, ok := legacySetting(d); ok {
-			t.Errorf("legacySetting(%q) = %+v, want no match", d, a)
+	for i, d := range []string{"sl:fa", "sc:jalali"} {
+		hh.fs.Reset()
+		hh.press(1, 1, 41+i, d)
+		if len(hh.fs.Answers) != 1 {
+			t.Fatalf("%q: %d callback answers, want 1", d, len(hh.fs.Answers))
 		}
+	}
+	if p := hh.svc.prefs[1]; p.Locale.Lang == i18n.Fa || p.Locale.Cal == calendar.Jalali {
+		t.Fatalf("legacy button changed the prefs: %+v", p)
 	}
 }
 
