@@ -960,7 +960,7 @@ func TestReplyKeyboardAfterLang(t *testing.T) {
 		t.Fatalf("after the button %+v", l.Msg)
 	}
 	// A group's language button does not touch the version.
-	e.press(wzAlice, wzGrp, 6, "sl:fa")
+	e.press(wzAlice, wzGrp, 6, ui.Encode(ui.Action{Kind: ui.ActSetLang, Arg: "fa"}))
 	if p, _ := e.svc.Prefs(context.Background(), wzAlice, ""); p.KBVersion != ui.NewTaskKeyboardVersion {
 		t.Fatalf("KBVersion %d after a group button", p.KBVersion)
 	}
