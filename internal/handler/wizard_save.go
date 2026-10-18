@@ -27,6 +27,7 @@ const (
 	saveDatePast              // a picked date is before today: back to date
 	saveFoundPast             // a found date has passed: back to date
 	saveRepeatBad             // the repeat does not fit the date: back to repeat
+	saveRepeatCal             // the calendar changed what the repeat means: back to repeat
 )
 
 // wizardTime parses "HH:MM" or returns the default time.
@@ -78,6 +79,21 @@ func repeatRule(repeat string, y int, m time.Month, d, hh, mm int, cal calendar.
 	return recur.Parse(rule.String())
 }
 
+// repeatCalChanged says whether the draft's repeat depends on the calendar
+// (monthly, yearly, Nth or last weekday) and the user's calendar is not the
+// one the card showed (dd.Cal). A draft with no stored calendar is not checked.
+func repeatCalChanged(dd model.DraftData, cur calendar.Kind) bool {
+	shown := calendar.Kind(dd.Cal)
+	if !shown.Valid() || shown == cur {
+		return false
+	}
+	switch dd.Repeat {
+	case model.RepeatMonthly, model.RepeatYearly, model.RepeatNthWeekday, model.RepeatLastWeekday:
+		return true
+	}
+	return false
+}
+
 // buildResult maps the draft to the nlparse.Result that /add would have
 // produced, or says why it cannot (saveProblem). Only a once item is
 // refused for a time that has passed, or given the Today default; a
@@ -117,6 +133,9 @@ func (h *Handler) buildResult(d model.Draft, lc i18n.Locale, loc *time.Location,
 	hh, mm := h.wizardTime(dd.Time)
 	due := time.Date(day.Year(), day.Month(), day.Day(), hh, mm, 0, 0, loc)
 	res.Due, res.HasTime = &due, dd.Time != ""
+	if repeatCalChanged(dd, calOf(lc)) {
+		return res, saveRepeatCal, nil
+	}
 	if (dd.Repeat == model.RepeatNthWeekday || dd.Repeat == model.RepeatLastWeekday) &&
 		!nthRepeatValid(dd.Repeat, dd.Date, calOf(lc)) {
 		return res, saveRepeatBad, nil
@@ -184,6 +203,11 @@ func (h *Handler) save(ctx context.Context, r req, d model.Draft) (string, error
 		nd.Data.Repeat = model.RepeatOnce
 		nd.Step = model.StepRepeat
 		return redo(nd, "wizard.note.repeat")
+	case saveRepeatCal:
+		nd := d
+		nd.Data.Repeat = model.RepeatOnce
+		nd.Step = model.StepRepeat
+		return redo(nd, "wizard.note.repeatcal")
 	case saveFoundPast:
 		nd := d
 		clearFound(&nd)
