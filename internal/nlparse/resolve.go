@@ -105,6 +105,9 @@ func resolveDate(d *dateSpec, now time.Time, h, m int) (time.Time, bool) {
 		}
 		return t, true
 	}
+	if d.kind == dateMonthWeekday {
+		return resolveMonthWeekday(d, now, h, m), true
+	}
 	if d.hasYear {
 		return d.cal.At(calendar.Date{Year: d.y, Month: d.m, Day: d.d}, h, m, loc), true
 	}
@@ -120,6 +123,24 @@ func resolveDate(d *dateSpec, now time.Time, h, m int) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// resolveMonthWeekday is the Nth or last weekday of this or next month of
+// d.cal, found with the day rule of the monthly-weekday recurrence. A day of
+// this month that is not after now (date and time) moves to the next month.
+func resolveMonthWeekday(d *dateSpec, now time.Time, h, m int) time.Time {
+	loc := now.Location()
+	r := recur.Rule{Freq: recur.MonthlyWeekday, Cal: d.cal, Weekdays: []time.Weekday{d.wd}, Nth: d.nth}
+	cur := d.cal.Split(now)
+	var t time.Time
+	for k := d.months; k <= d.months+1; k++ {
+		y, mo := calendar.AddMonths(cur.Year, cur.Month, k)
+		day := nthWeekdayOfMonth(&r, y, mo, loc)
+		if t = d.cal.At(calendar.Date{Year: y, Month: mo, Day: day}, h, m, loc); t.After(now) {
+			break
+		}
+	}
+	return t
 }
 
 func buildRule(r recSpec, h, m int, now time.Time, cal calendar.Kind) recur.Rule {
