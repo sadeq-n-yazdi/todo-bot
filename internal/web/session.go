@@ -85,7 +85,10 @@ func (s *Server) withSession(next http.Handler) http.Handler {
 			s.fail(w, r, errRevoked)
 			return
 		}
-		if fromCookie && ws.Kind == model.WebBrowser && !ws.SeenAt.Before(s.now().UTC().Truncate(time.Second)) {
+		// The service slid the session in this request: seen_at is now and
+		// later than the start (the start already sent its cookie).
+		if fromCookie && ws.Kind == model.WebBrowser && ws.SeenAt.After(ws.CreatedAt) &&
+			!ws.SeenAt.Before(s.now().UTC().Truncate(time.Second)) {
 			s.setCookie(w, token, ws.ExpiresAt)
 		}
 		prefs, err := s.d.Svc.Prefs(r.Context(), ws.UserID, "")
@@ -136,8 +139,10 @@ func (s *Server) setCookie(w http.ResponseWriter, token string, expires time.Tim
 	})
 }
 
-// clearCookie deletes the session cookie (Max-Age=0).
+// clearCookie deletes the session cookie (Max-Age=0). It replaces a cookie
+// that this response already set, because the server sets no other cookie.
 func (s *Server) clearCookie(w http.ResponseWriter) {
+	w.Header().Del("Set-Cookie")
 	http.SetCookie(w, &http.Cookie{
 		Name: cookieName, Value: "", Path: "/", MaxAge: -1,
 		Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,

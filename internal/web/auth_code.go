@@ -10,7 +10,7 @@ import "net/http"
 type codeState struct{}
 
 // initCodes sets up s.codes. New calls it.
-func (s *Server) initCodes() {}
+func (s *Server) initCodes() { s.codes = codeState{} }
 
 // handleNewCode is endpoint 12, POST /api/auth/code (Mini App only).
 func (s *Server) handleNewCode(w http.ResponseWriter, r *http.Request) {

@@ -280,9 +280,8 @@ func (s *Server) ipLimit(l *limiter, next http.Handler) http.Handler {
 // reqInfo is what the middleware learns about a request. The log line
 // reads it after the handler returns.
 type reqInfo struct {
-	loc    i18n.Locale
-	sess   *session // nil without a session
-	status int
+	loc  i18n.Locale
+	sess *session // nil without a session
 }
 
 type reqInfoKey struct{}
@@ -359,7 +358,7 @@ func (s *Server) recoverPanics(next http.Handler) http.Handler {
 			if v == nil {
 				return
 			}
-			if v == http.ErrAbortHandler {
+			if err, ok := v.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 				panic(v)
 			}
 			s.log.Error("web: handler panic", "route", r.Pattern)

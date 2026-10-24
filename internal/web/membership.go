@@ -15,7 +15,7 @@ import (
 type memberState struct{}
 
 // initMembers sets up s.members. New calls it.
-func (s *Server) initMembers() {}
+func (s *Server) initMembers() { s.members = memberState{} }
 
 // groupActor gives the actor of a group, or one of the actor errors of
 // §5.3. The stub knows no member of any group, so it answers 404.

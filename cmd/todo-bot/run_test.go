@@ -25,6 +25,7 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/web"
 	"github.com/sadeq-n-yazdi/todo-bot/migrations"
 )
 
@@ -57,7 +58,14 @@ func TestVersion(t *testing.T) {
 	if code := run(context.Background(), []string{"version"}, envOf(nil), &out, &errb); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	for _, want := range []string{"todo-bot " + version, "(commit ", ", built "} {
+	ui := "\nweb: placeholder"
+	if web.Embedded() {
+		ui = "\nweb: embedded"
+	}
+	if first, _, _ := strings.Cut(out.String(), "\n"); !strings.HasPrefix(first, "todo-bot "+version+" (commit ") {
+		t.Fatalf("first line %q changed", first)
+	}
+	for _, want := range []string{"todo-bot " + version, "(commit ", ", built ", ui} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output %q lacks %q", out.String(), want)
 		}
@@ -678,5 +686,224 @@ func TestExistingModeRefusedOutsideBackup(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "todo.db")); err == nil {
 		t.Error("a database file was created")
+	}
+}
+
+// webListener wraps listenWeb: it listens on a free loopback port instead
+// of the configured address, and reports each call.
+func webListener(t *testing.T) (calls *atomic.Int64, addrs chan string) {
+	t.Helper()
+	calls, addrs = &atomic.Int64{}, make(chan string, 4)
+	old := listenWeb
+	listenWeb = func(network, _ string) (net.Listener, error) {
+		calls.Add(1)
+		l, err := net.Listen(network, "127.0.0.1:0")
+		if err == nil {
+			addrs <- l.Addr().String()
+		}
+		return l, err
+	}
+	t.Cleanup(func() { listenWeb = old })
+	return calls, addrs
+}
+
+func TestWebOffStartsNoListener(t *testing.T) {
+	mock := newMockTelegram(t)
+	setTelegram(t, mock.srv.URL)
+	calls, _ := webListener(t)
+	n := startNode(t, map[string]string{"TELEGRAM_TOKEN": "tokW0", "TODO_ALLOWED_USERS": "1", "TODO_DB_URL": dbURL(t.TempDir()), "TODO_NODE_ID": "w0"})
+	waitUntil(t, 5*time.Second, "polling", func() bool { _, ok := mock.first("tokW0", "getUpdates"); return ok })
+	n.cancel()
+	<-n.done
+	if n.code != 0 {
+		t.Fatalf("exit %d: %s", n.code, n.stderr.String())
+	}
+	if calls.Load() != 0 {
+		t.Error("a web listener was opened with TODO_WEB_ADDR empty")
+	}
+	if strings.Contains(n.stderr.String(), "web:") {
+		t.Errorf("web log lines with the web off: %s", n.stderr.String())
+	}
+}
+
+func insertSession(t *testing.T, db *sql.DB, id string, user int64) {
+	t.Helper()
+	far := time.Now().Add(24 * time.Hour).Unix()
+	if _, err := db.Exec(`INSERT INTO web_sessions (id, user_id, kind, device, created_at, seen_at, expires_at, max_at)
+		VALUES (?, ?, 'browser', '', ?, ?, ?, ?)`, id, user, far-100, far-100, far, far); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func countSessions(t *testing.T, db *sql.DB, user int64) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow("SELECT count(*) FROM web_sessions WHERE user_id = ?", user).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestWebStartsPrunesAndStops(t *testing.T) {
+	mock := newMockTelegram(t)
+	setTelegram(t, mock.srv.URL)
+	calls, addrs := webListener(t)
+	dir := t.TempDir()
+	env := map[string]string{
+		"TELEGRAM_TOKEN": "tokW1", "TODO_ALLOWED_USERS": "1", "TODO_DB_URL": dbURL(dir), "TODO_NODE_ID": "w1",
+		"TODO_WEB_ADDR": "127.0.0.1:8088", "TODO_WEB_ORIGIN": "https://todo.example.com",
+	}
+	var discard syncBuf
+	if code := run(context.Background(), []string{"migrate"}, envOf(env), &discard, &discard); code != 0 {
+		t.Fatalf("migrate: %s", discard.String())
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "todo.db")+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	insertSession(t, db, strings.Repeat("a", 64), 1)   // allowed
+	insertSession(t, db, strings.Repeat("b", 64), 999) // not allowed
+
+	n := startNode(t, env)
+	var addr string
+	select {
+	case addr = <-addrs:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the web did not start: %s", n.stderr.String())
+	}
+	get := func(path, host string) (int, string, error) {
+		req, _ := http.NewRequest("GET", "http://"+addr+path, nil)
+		if host != "" {
+			req.Host = host
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0, "", err
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b), nil
+	}
+	if code, body, err := get("/healthz", ""); err != nil || code != 200 || body != "ok" {
+		t.Fatalf("healthz: %d %q %v", code, body, err)
+	}
+	if code, body, err := get("/", "todo.example.com"); err != nil || code != 200 || !strings.Contains(strings.ToLower(body), "<!doctype html>") {
+		t.Fatalf("/: %d %q %v", code, body, err)
+	}
+	if code, _, _ := get("/", ""); code != http.StatusMisdirectedRequest {
+		t.Errorf("/ with the loopback host: %d", code)
+	}
+	if countSessions(t, db, 999) != 0 || countSessions(t, db, 1) != 1 {
+		t.Errorf("prune at start: user 999 has %d sessions, user 1 has %d", countSessions(t, db, 999), countSessions(t, db, 1))
+	}
+	waitUntil(t, 5*time.Second, "polling", func() bool { _, ok := mock.first("tokW1", "getUpdates"); return ok })
+
+	start := time.Now()
+	n.cancel()
+	<-n.done
+	if n.code != 0 {
+		t.Fatalf("exit %d: %s", n.code, n.stderr.String())
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("shutdown took %v", d)
+	}
+	if _, _, err := get("/healthz", ""); err == nil {
+		t.Error("the web still answers after the run returned")
+	}
+	if calls.Load() != 1 {
+		t.Errorf("%d listeners", calls.Load())
+	}
+}
+
+func TestWebBindErrorStopsStart(t *testing.T) {
+	mock := newMockTelegram(t)
+	setTelegram(t, mock.srv.URL)
+	old := listenWeb
+	listenWeb = func(string, string) (net.Listener, error) { return nil, errors.New("address in use") }
+	t.Cleanup(func() { listenWeb = old })
+	var out, errb syncBuf
+	env := map[string]string{"TELEGRAM_TOKEN": "tokW2", "TODO_ALLOWED_USERS": "1", "TODO_DB_URL": dbURL(t.TempDir()),
+		"TODO_WEB_ADDR": "127.0.0.1:8088", "TODO_WEB_ORIGIN": "https://todo.example.com"}
+	if code := run(context.Background(), nil, envOf(env), &out, &errb); code != 1 || !strings.Contains(errb.String(), "address in use") {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if _, ok := mock.first("tokW2", "getUpdates"); ok {
+		t.Error("the bot polled although the web did not start")
+	}
+}
+
+// webHangStore blocks ListGroupChats (the /readyz read) until released,
+// whatever its context says, and records Close.
+type webHangStore struct {
+	store.Store
+	release chan struct{}
+	entered chan struct{}
+	once    sync.Once
+	closed  atomic.Bool
+}
+
+func (h *webHangStore) ListGroupChats(ctx context.Context, limit int) ([]model.Chat, error) {
+	h.once.Do(func() { close(h.entered) })
+	<-h.release
+	return h.Store.ListGroupChats(ctx, limit)
+}
+
+func (h *webHangStore) Close() error { h.closed.Store(true); return nil }
+
+// A web request that does not end holds the shutdown only up to the one
+// shutdownTimeout; then run gives up and leaves the database open.
+func TestShutdownTimeoutStopsWeb(t *testing.T) {
+	mock := newMockTelegram(t)
+	setTelegram(t, mock.srv.URL)
+	_, addrs := webListener(t)
+	real, err := store.Open(context.Background(), dbURL(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = real.Close() })
+	hs := &webHangStore{Store: real, release: make(chan struct{}), entered: make(chan struct{})}
+	t.Cleanup(func() { close(hs.release) })
+	oldOpen, oldTO := openStore, shutdownTimeout
+	openStore = func(context.Context, string) (store.Store, error) { return hs, nil }
+	shutdownTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { openStore, shutdownTimeout = oldOpen, oldTO })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	var errb syncBuf
+	env := map[string]string{"TELEGRAM_TOKEN": "tokW3", "TODO_ALLOWED_USERS": "1", "TODO_DB_URL": "sqlite:x.db",
+		"TODO_WEB_ADDR": "127.0.0.1:8088", "TODO_WEB_ORIGIN": "https://todo.example.com"}
+	go func() { done <- run(ctx, nil, envOf(env), &syncBuf{}, &errb) }()
+	addr := <-addrs
+	go func() {
+		resp, err := http.Get("http://" + addr + "/readyz")
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	select {
+	case <-hs.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the readyz request did not reach the store")
+	}
+	start := time.Now()
+	cancel()
+	select {
+	case code := <-done:
+		if code != 1 {
+			t.Errorf("exit %d, want 1", code)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("run did not return within the shutdown bound")
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("shutdown took %v", d)
+	}
+	if !strings.Contains(errb.String(), "timed out stopping the web server") {
+		t.Errorf("stderr %q", errb.String())
+	}
+	if hs.closed.Load() {
+		t.Error("the store was closed although a web request still ran")
 	}
 }
