@@ -727,3 +727,26 @@ Each PR owns only the files listed. They are numbered in merge order, but PRs 2�
    It does not change the exported `nlparse` API. `<date> <time> every year` starts on that date at that time and repeats on that month and day, in the user's calendar. A bare `every year` starts on today's date. Existing phrases keep their results.
 
 The v0.2 Postgres and MySQL providers ship their own `0004_wizard.sql` (§9) and must pass the new conformance cases.
+
+## 13. Editing an item with the wizard (#98)
+The wizard can also change an item of the chat. This subsection gives the contracts. The flow is in the design on issue #98.
+
+- **New `DraftData` fields.** The store keeps them in the JSON `data`, so no migration is necessary.
+  - `EditTodoID` (`edit_todo`): the ID of the item to change. `0` means that the wizard creates a new item.
+  - `EditNum` (`edit_num`): the number of the item in its chat. The card header and the toasts use it.
+  - `EditBase` (`edit_base`): a copy of the prefill. Save sends only the differences from it. `nil` means that this is not an edit wizard. `EditBase` holds only item fields: its `Edit*` fields are zero and it has no `EditBase`.
+
+  Each field has `omitempty`. An old draft encodes to the same bytes as before. An old row decodes with the new fields at zero.
+- **`service.TodoPatch`.** A `nil` field means "unchanged". `Text` is the new text. `When` is the new schedule (`Due`, `Rule`, `HasTime`); `Due == nil` means "no date". `AssigneeID` is the new assignee; `0` means "no assignee".
+- **`service.ErrUnknownAssignee`.** The patch names a user that the bot does not know. It is never `ErrNotFound`: the service maps the `ErrNotFound` of `GetUser` to it.
+- **`Service.UpdateTodo(ctx, a, todoID, p)`.** It reads the item again inside the transaction. Access is as for `Todo` (§11). It returns `ErrForeignChat` for an item of another chat. The assignee can also act from their private chat. It returns `ErrNotFound` if the item is missing or deleted, or if its status is not open. `Num` never changes.
+  - The service does not compare. A non-nil `When` always cancels the pending `due` and `snooze` reminders. Custom reminders stay.
+  - The service creates a new `due` reminder only for a future due time. It makes none for the 23:59 date-only sentinel, as `AddTodo` does.
+  - A once `Due` in the past is stored without a reminder. The service does not return `ErrInPast`. The handler does the past checks.
+  - A non-nil `When` also sets the item time zone to the time zone of the actor. A nil `When` keeps it.
+  - A change of text or assignee does not touch the reminders.
+- **`Service.SaveEditDraft(ctx, d, a, todoID, p)`.** In one transaction it deletes the draft with the version check. Then it does the work of `UpdateTodo`. A version mismatch returns `ErrStaleDraft` and changes nothing. If the update fails, the draft stays.
+- **Returned item.** The returned item has `AssigneeID` and `AssigneeName` (the current username) set, as `AddTodoFor` does.
+- **`ui.WizardView.EditNum`.** `0` means that the wizard creates a new item.
+- **Rolling upgrade.** An older node ignores these fields. If it handles Save, it creates a new item. If it writes the draft, it removes the fields. A later Save on any node then creates a new item. Upgrade every node before you use this feature.
+- **State of the code.** `UpdateTodo` and `SaveEditDraft` are stubs in `internal/service/edit.go`. They return an error until the service part of #98 is in `main`. No handler calls them yet.

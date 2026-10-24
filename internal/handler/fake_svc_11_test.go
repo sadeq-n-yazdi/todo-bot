@@ -208,3 +208,11 @@ func (f *fakeSvc11) SetKBVersion(_ context.Context, id int64, v int) error {
 	f.prefs[id] = p
 	return nil
 }
+
+func (f *fakeSvc11) UpdateTodo(context.Context, service.Actor, int64, service.TodoPatch) (model.Todo, error) {
+	return model.Todo{}, service.ErrNotFound
+}
+
+func (f *fakeSvc11) SaveEditDraft(context.Context, model.Draft, service.Actor, int64, service.TodoPatch) (model.Todo, error) {
+	return model.Todo{}, service.ErrStaleDraft
+}

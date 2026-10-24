@@ -258,6 +258,20 @@ type DraftData struct {
 	// Nth or last-weekday repeat whose meaning changed goes back to the
 	// repeat step. "" = unknown (a draft from before this field): no check.
 	Cal string `json:"cal,omitempty"`
+	// EditTodoID is the ID of the item that this wizard edits (#98).
+	// 0 = the wizard creates a new item.
+	EditTodoID int64 `json:"edit_todo,omitempty"`
+	// EditNum is the per-chat number of the edited item. It is for the
+	// card header and the toasts only.
+	EditNum int `json:"edit_num,omitempty"`
+	// EditBase is the prefill of an edit wizard: the item as it was when
+	// the wizard started. Save sends only the differences from it.
+	// nil = not an edit wizard. EditBase holds only item fields: its Edit*
+	// fields are zero and it never has an EditBase.
+	// An older node ignores these fields (ARCHITECTURE §13). If it handles
+	// Save, it creates a new item. If it writes the draft, it removes the
+	// fields, and a later Save on any node then creates a new item.
+	EditBase *DraftData `json:"edit_base,omitempty"`
 }
 
 // Draft is one in-progress wizard, one per (ChatID, UserID). It lives only

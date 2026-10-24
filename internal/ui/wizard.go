@@ -43,6 +43,9 @@ type WizardView struct {
 	// when it is a member (not the actor); "" if unknown, which shows the
 	// translated no-name label (as ui.Mention does).
 	AssigneeName string
+	// EditNum is the number of the item that the wizard edits, for the
+	// card header. 0 = the wizard creates a new item.
+	EditNum int
 }
 
 // WizardAsk renders the separate ForceReply question a text step (StepText,

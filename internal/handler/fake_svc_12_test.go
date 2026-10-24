@@ -461,3 +461,11 @@ func (hh *harness12) last() tgtest.Sent {
 	}
 	return s
 }
+
+func (f *fakeSvc12) UpdateTodo(context.Context, service.Actor, int64, service.TodoPatch) (model.Todo, error) {
+	return model.Todo{}, service.ErrNotFound
+}
+
+func (f *fakeSvc12) SaveEditDraft(context.Context, model.Draft, service.Actor, int64, service.TodoPatch) (model.Todo, error) {
+	return model.Todo{}, service.ErrStaleDraft
+}
