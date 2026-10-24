@@ -1,0 +1,102 @@
+/* Colors are tokens on :root. In the Mini App they come from the --tg-theme-*
+   variables that Telegram sets (see theme.ts), with the PWA colors as fallback.
+   Only logical properties are used, so that RTL needs no extra rules. */
+
+:root {
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --bg2: var(--tg-theme-secondary-bg-color, #f1f5f7);
+  --fg: var(--tg-theme-text-color, #0e3b57);
+  --hint: var(--tg-theme-hint-color, #5d7482);
+  --link: var(--tg-theme-link-color, #147a7a);
+  --accent: var(--tg-theme-button-color, #147a7a);
+  --accent-fg: var(--tg-theme-button-text-color, #ffffff);
+  --danger: var(--tg-theme-destructive-text-color, #c0392b);
+  --gap: 12px;
+  --font: system-ui, "Segoe UI", Roboto, "Noto Sans Arabic", Tahoma, sans-serif;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: var(--tg-theme-bg-color, #0e3b57);
+    --bg2: var(--tg-theme-secondary-bg-color, #0b2e44);
+    --fg: var(--tg-theme-text-color, #eef4f7);
+    --hint: var(--tg-theme-hint-color, #9db4c1);
+    --link: var(--tg-theme-link-color, #5fd0d0);
+    --accent: var(--tg-theme-button-color, #1fa3a3);
+    --danger: var(--tg-theme-destructive-text-color, #ff7b6b);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  min-block-size: var(--tg-viewport-stable-height, 100vh);
+  padding-block-end: env(safe-area-inset-bottom);
+  padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+a {
+  color: var(--link);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: var(--gap) 16px;
+  background: var(--bg2);
+}
+
+.who {
+  font-weight: 600;
+}
+
+.screen {
+  padding: 16px;
+}
+
+.error {
+  color: var(--danger);
+}
+
+/* Arrow icons turn around in RTL. */
+[dir="rtl"] .arrow {
+  transform: scaleX(-1);
+}
+
+.spinner {
+  inline-size: 32px;
+  block-size: 32px;
+  margin-block: 30vh;
+  margin-inline: auto;
+  border: 3px solid var(--bg2);
+  border-block-start-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 3s;
+  }
+}

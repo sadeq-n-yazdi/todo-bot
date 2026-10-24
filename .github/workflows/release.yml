@@ -14,9 +14,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - run: make test
-      - run: make build-linux ARCH=amd64 VERSION=${{ github.ref_name }}
-      - run: make build-linux ARCH=arm64 VERSION=${{ github.ref_name }}
+      - run: make release-linux ARCH=amd64 VERSION=${{ github.ref_name }}
+      - run: make release-linux ARCH=arm64 VERSION=${{ github.ref_name }}
       - name: Checksums
         run: cd dist && sha256sum todo-bot-linux-* > SHA256SUMS
       - name: Publish
