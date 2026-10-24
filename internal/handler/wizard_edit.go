@@ -74,11 +74,23 @@ func (h *Handler) editPrefill(r req, td model.Todo) model.DraftData {
 	}
 	loc := tzOf(r)
 	due := td.DueAt.In(loc)
+	if td.Recur == "" && due.Hour() == 23 && due.Minute() == 59 {
+		// A date-only item is stored at 23:59 (HasTime is not stored). The
+		// wizard would show 23:59 as a chosen time and a later schedule
+		// change would keep it, so show the item as a found date without
+		// a time. An explicit "today 23:59" item looks the same: accepted.
+		found := td.DueAt.UTC()
+		dd.FoundDue, dd.FoundTime = &found, false
+		return dd
+	}
 	dd.Date = due.Format("2006-01-02")
 	if hh, mm := h.wizardTime(""); due.Hour() != hh || due.Minute() != mm {
 		dd.Time = due.Format("15:04")
 	}
 	dd.Repeat = repeatKind(td.Recur)
+	// A creator TZ that differs from the editor's TZ but gives the same rule
+	// string prefills normally: any schedule change sets the editor's TZ, and
+	// an untouched or text-only Save keeps the item's TZ.
 	if h.roundTrips(r, dd, td) {
 		return dd
 	}

@@ -294,7 +294,7 @@ If the person never started the bot, or blocked it, the bot cannot send the mess
 
 **Rules.**
 
-- You can edit an open item of the chat where you use the command. You cannot edit a completed item.
+- The wizard opens only for an open item of the chat where you use the command.
 - You can have one wizard in a chat at a time. If you start an edit while a **➕ New task** wizard is open in the same chat, the bot closes the older card. The reverse is also true.
 - In a group, only the person who started the wizard can press its buttons. Another member sees "Only the person who started this can use it." Answer the text question with Telegram's **Reply**.
 - The card expires after 30 minutes with no answer.

@@ -608,3 +608,61 @@ func TestEditAndNewReplaceEachOther(t *testing.T) {
 		t.Fatalf("new replaces edit: %+v", d)
 	}
 }
+
+// ---- date-only items (stored at 23:59, no reminder) ----
+
+func TestEditDateOnlyItemPrefillsAsFoundWithoutTime(t *testing.T) {
+	e := newWz(t)
+	due := utcT(2026, 10, 10, 23, 59)
+	td := e.add(wzAlice, "milk", &due, "", 0)
+	e.pressEditBtn(wzAlice, wzAlice, td)
+	dd := e.draft(wzAlice, wzAlice).Data
+	if dd.Date != "" || dd.FoundDue == nil || !dd.FoundDue.Equal(due) || dd.FoundTime || dd.FoundRule != "" {
+		t.Fatalf("prefill %+v", dd)
+	}
+}
+
+func TestEditDateOnlyItemUntouchedSaveIsNoChange(t *testing.T) {
+	e := newWz(t)
+	due := utcT(2026, 10, 10, 23, 59)
+	td := e.add(wzAlice, "milk", &due, "", 0)
+	e.pressEditBtn(wzAlice, wzAlice, td)
+	e.save(wzAlice)
+	e.noDraft(wzAlice, wzAlice)
+	if got := e.lastEdit().Msg.Text; got != e.lc(wzAlice).T("wizard.edit.nochange") {
+		t.Fatalf("card %q", got)
+	}
+}
+
+func TestEditDateOnlyItemTextOnlyKeepsTheDate(t *testing.T) {
+	e := newWz(t)
+	due := utcT(2026, 10, 10, 23, 59)
+	td := e.add(wzAlice, "milk", &due, "", 0)
+	e.pressEditBtn(wzAlice, wzAlice, td)
+	e.editText(wzAlice, "oat milk")
+	e.save(wzAlice)
+	got := e.todoByID(wzAlice, td.ID)
+	if got.Text != "oat milk" || !got.DueAt.Equal(due) || got.Recur != "" {
+		t.Fatalf("item %+v", got)
+	}
+}
+
+func TestEditDateOnlyItemNewDateGetsDefaultTime(t *testing.T) {
+	e := newWz(t)
+	due := utcT(2026, 10, 10, 23, 59)
+	td := e.add(wzAlice, "milk", &due, "", 0)
+	e.pressEditBtn(wzAlice, wzAlice, td)
+	d := e.draft(wzAlice, wzAlice)
+	e.pressD(d, wzAlice, ui.ActWizNav, ui.WizNavEdit)
+	e.pressD(d, wzAlice, ui.ActWizEdit, ui.WizEditDate)
+	e.pressD(e.draft(wzAlice, wzAlice), wzAlice, ui.ActWizDate, "20261011")
+	e.pressD(e.draft(wzAlice, wzAlice), wzAlice, ui.ActWizNav, ui.WizNavBack)
+	e.pressD(e.draft(wzAlice, wzAlice), wzAlice, ui.ActWizNav, ui.WizNavBack)
+	if s := e.draft(wzAlice, wzAlice).Step; s != model.StepConfirm {
+		t.Fatalf("step %s", s)
+	}
+	e.save(wzAlice)
+	if got := e.todoByID(wzAlice, td.ID); !got.DueAt.Equal(utcT(2026, 10, 11, 9, 0)) {
+		t.Fatalf("item %+v", got)
+	}
+}
