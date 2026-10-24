@@ -164,57 +164,68 @@ func (h *Handler) buildResult(d model.Draft, lc i18n.Locale, loc *time.Location,
 	return res, saveOK, nil
 }
 
-// save validates the draft and creates the item. It returns the toast.
-func (h *Handler) save(ctx context.Context, r req, d model.Draft) (string, error) {
-	lc := r.Prefs.Locale
-	redo := func(nd model.Draft, noteKey string) (string, error) {
-		nd.Data.Editing = true
-		stale, err := h.commit(ctx, r, d, nd, cardOpts{Note: lc.T(noteKey)})
-		if err != nil {
-			return "", err
-		}
-		if stale {
-			return h.staleToast(ctx, r, d.ChatID, d.MsgID), nil
-		}
-		return "", nil
+// redoSave sends the draft back to the step in nd, with a note.
+func (h *Handler) redoSave(ctx context.Context, r req, d, nd model.Draft, noteKey string) (string, error) {
+	nd.Data.Editing = true
+	stale, err := h.commit(ctx, r, d, nd, cardOpts{Note: r.Prefs.Locale.T(noteKey)})
+	if err != nil {
+		return "", err
 	}
+	if stale {
+		return h.staleToast(ctx, r, d.ChatID, d.MsgID), nil
+	}
+	return "", nil
+}
+
+// problemRedo maps a saveProblem to the draft to go back to and the key of
+// the note. ok=false means there is no problem.
+func problemRedo(p saveProblem, d model.Draft) (nd model.Draft, noteKey string, ok bool) {
+	nd = d
+	switch p {
+	case saveTimePast:
+		nd.Step = model.StepTime
+		return nd, "wizard.note.passed", true
+	case saveDatePast:
+		nd.Step = model.StepDate
+		return nd, "wizard.note.passed", true
+	case saveRepeatBad:
+		nd.Data.Repeat = model.RepeatOnce
+		nd.Step = model.StepRepeat
+		return nd, "wizard.note.repeat", true
+	case saveRepeatCal:
+		nd.Data.Repeat = model.RepeatOnce
+		nd.Step = model.StepRepeat
+		return nd, "wizard.note.repeatcal", true
+	case saveFoundPast:
+		clearFound(&nd)
+		nd.Data.Text = d.Data.OrigText
+		nd.Data.Date, nd.Data.Time, nd.Data.Repeat = "", "", ""
+		nd.Step = model.StepDate
+		return nd, "wizard.note.passed", true
+	}
+	return d, "", false
+}
+
+// save validates the draft and creates the item (or, for an edit wizard,
+// updates it). It returns the toast.
+func (h *Handler) save(ctx context.Context, r req, d model.Draft) (string, error) {
+	if d.Data.EditTodoID != 0 {
+		return h.saveEdit(ctx, r, d)
+	}
+	lc := r.Prefs.Locale
 
 	// The assignee may have left the allowlist since it was chosen.
 	if id := d.Data.AssigneeID; id != 0 && id != r.Actor.UserID && !h.Allowed[id] {
 		nd := d
 		nd.Data.AssigneeID, nd.Step = 0, model.StepAssignee
-		return redo(nd, "wizard.note.assignee")
+		return h.redoSave(ctx, r, d, nd, "wizard.note.assignee")
 	}
 	res, problem, err := h.buildResult(d, lc, tzOf(r), h.Clock.Now())
 	if err != nil {
 		return "", err
 	}
-	switch problem {
-	case saveTimePast:
-		nd := d
-		nd.Step = model.StepTime
-		return redo(nd, "wizard.note.passed")
-	case saveDatePast:
-		nd := d
-		nd.Step = model.StepDate
-		return redo(nd, "wizard.note.passed")
-	case saveRepeatBad:
-		nd := d
-		nd.Data.Repeat = model.RepeatOnce
-		nd.Step = model.StepRepeat
-		return redo(nd, "wizard.note.repeat")
-	case saveRepeatCal:
-		nd := d
-		nd.Data.Repeat = model.RepeatOnce
-		nd.Step = model.StepRepeat
-		return redo(nd, "wizard.note.repeatcal")
-	case saveFoundPast:
-		nd := d
-		clearFound(&nd)
-		nd.Data.Text = d.Data.OrigText
-		nd.Data.Date, nd.Data.Time, nd.Data.Repeat = "", "", ""
-		nd.Step = model.StepDate
-		return redo(nd, "wizard.note.passed")
+	if nd, key, bad := problemRedo(problem, d); bad {
+		return h.redoSave(ctx, r, d, nd, key)
 	}
 
 	td, err := h.Svc.SaveDraft(ctx, d, r.Actor, d.Data.AssigneeID, res)

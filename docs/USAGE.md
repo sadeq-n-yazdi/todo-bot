@@ -243,9 +243,9 @@ Deletes item n, without asking. (The 🗑 button asks first.)
 
 Reply: `🗑 Deleted: 3. buy milk`, in Farsi `🗑 حذف شد: ۳. خرید نان`.
 
-### `/edit <n> <text>`
+### `/edit <n>` and `/edit <n> <text>`
 
-Changes the text of item n. The time and reminders stay as they are, and the new text is **not** searched for a date.
+`/edit <n> <text>` changes the text of item n. The time and reminders stay as they are, and the new text is **not** searched for a date.
 
 ```
 /edit 3 buy oat milk
@@ -253,6 +253,51 @@ Changes the text of item n. The time and reminders stay as they are, and the new
 ```
 
 Reply: `✏️ Updated: 3. buy oat milk`, in Farsi `✏️ ویرایش شد: ۳. خرید نان سنگک`.
+
+`/edit <n>` with no text opens the [edit wizard](#edit-an-item-with-the-wizard) for item n.
+
+```
+/edit 3
+```
+
+#### Edit an item with the wizard
+
+Use the edit wizard to change the text, the date, the time, the repeat or the assignee of an item. Use one of these two ways to start it:
+
+1. Send `/edit 3`.
+2. Press **✏️** on the item in `/list`.
+
+The bot sends a new card. The card has the title "Editing item 3" and a summary of the item. The date and time are in your time zone and your calendar. The card has these buttons:
+
+- **✅ Save changes** changes the item.
+- **✏️ Edit** shows the menu of the parts: text, date, time, repeat and assignee. The steps are the same as in the [new item wizard](#step-by-step-task-new).
+- **✖ Cancel** closes the card. The card shows "No changes made".
+
+**What Save changes does.**
+
+- The bot changes only the parts that you changed. The item keeps its number.
+- If you changed nothing, the card shows "No changes".
+- If you change the date, the bot asks for the time and the repeat again. It does not ask for the assignee.
+- If you change the text, the bot does not search the new text for a date.
+- If you change only the text or the assignee of an overdue item, the bot saves it. If you change the date, the time or the repeat, the normal checks apply. An item that does not repeat must be in the future. An item that repeats starts at its next occurrence.
+- A new date, time or repeat replaces the reminder at the due time and the snoozed reminders. The reminders that you added with `/remind` stay.
+- Some repeats have no button in the wizard, for example every 3 days or several weekdays. The card shows such a repeat as it is. The bot keeps it if you do not change the date, the time or the repeat. If you choose a new date, the bot asks for the repeat again.
+- If someone completes or deletes the item before you press **✅ Save changes**, the card shows "This item was completed or deleted. Nothing changed."
+
+**A new assignee gets a message.** When you give the item to another person, the bot sends that person one private message. The message is in the language and the calendar of that person. It shows the item and your name. It has no buttons. The bot sends no message in these cases:
+
+- You did not change the assignee.
+- You removed the assignee.
+- You give the item to yourself.
+
+If the person never started the bot, or blocked it, the bot cannot send the message. The card then shows the note "@name has not started the bot, so they did not get a message." The bot saves the item. Ask the person to press **Start** in a private chat with the bot.
+
+**Rules.**
+
+- The wizard opens only for an open item of the chat where you use the command.
+- You can have one wizard in a chat at a time. If you start an edit while a **➕ New task** wizard is open in the same chat, the bot closes the older card. The reverse is also true.
+- In a group, only the person who started the wizard can press its buttons. Another member sees "Only the person who started this can use it." Answer the text question with Telegram's **Reply**.
+- The card expires after 30 minutes with no answer.
 
 ### `/today`
 
@@ -371,7 +416,7 @@ Each item in `/list` has four buttons.
 | Button | What it does |
 | --- | --- |
 | `✅ 3` | Marks item 3 done. The list is redrawn with a "Done" line above it. |
-| `✏️` | Asks you to **reply** to a message with the new text. |
+| `✏️` | Opens the [edit wizard](#edit-an-item-with-the-wizard) for the item. |
 | `⏰` | Asks you to **reply** with a time, such as `tomorrow 18:00`, `in 2h` or `فردا ۱۸:۰۰`. |
 | `🗑` | Asks "Delete “…”?" with [🗑 Delete] and [Cancel]. |
 
@@ -379,7 +424,7 @@ Under the items, the button `➕ New task` (`➕ کار جدید`) starts the [s
 
 With several pages there is a row `‹` `›` at the bottom. It changes the page by editing the same message.
 
-For ✏️ and ⏰, you must use Telegram's **Reply** on the bot's question; only the person who pressed the button can answer, and the question expires after 10 minutes. If the answer is not understood, the bot explains and asks again. A recurring phrase is not accepted for ⏰.
+For ⏰, you must use Telegram's **Reply** on the bot's question. Only the person who pressed the button can answer, and the question expires after 10 minutes. If the bot does not understand the answer, it explains and asks again. The bot does not accept a recurring phrase for ⏰.
 
 If the item was already deleted, or belongs to another chat, the button answers "That item no longer exists or belongs to another chat."
 

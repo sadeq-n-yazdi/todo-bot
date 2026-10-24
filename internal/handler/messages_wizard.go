@@ -19,6 +19,12 @@ func init() {
 		"wizard.note.repeat":    "That repeat does not fit the date. Please choose again.",
 		"wizard.note.repeatcal": "Your calendar changed, so this repeat would mean something else. Please choose again.",
 		"wizard.note.assignee":  "That person can't be assigned items any more. Please choose again.",
+
+		"wizard.edit.cancelled":     "✖ No changes made.",
+		"wizard.edit.nochange":      "No changes.",
+		"wizard.edit.gone":          "This item was completed or deleted. Nothing changed.",
+		"wizard.edit.assigned.dm":   "%s assigned you an item: %s",
+		"wizard.edit.assigned.nodm": "%s has not started the bot, so they did not get a message.",
 	})
 	i18n.Register(i18n.Fa, map[string]string{
 		"wizard.starting":       "در حال شروع…",
@@ -34,5 +40,11 @@ func init() {
 		"wizard.note.repeat":    "این تکرار با تاریخ سازگار نیست. لطفاً دوباره انتخاب کنید.",
 		"wizard.note.repeatcal": "تقویم شما تغییر کرده است و این تکرار معنای دیگری پیدا می\u200cکند. لطفاً دوباره انتخاب کنید.",
 		"wizard.note.assignee":  "دیگر نمی\u200cتوان کار را به این فرد محول کرد. لطفاً دوباره انتخاب کنید.",
+
+		"wizard.edit.cancelled":     "✖ تغییری داده نشد.",
+		"wizard.edit.nochange":      "تغییری وجود ندارد.",
+		"wizard.edit.gone":          "این مورد انجام یا حذف شده است. چیزی تغییر نکرد.",
+		"wizard.edit.assigned.dm":   "%s یک کار را به شما محول کرد: %s",
+		"wizard.edit.assigned.nodm": "%s هنوز ربات را شروع نکرده است، پس پیامی دریافت نکرد.",
 	})
 }

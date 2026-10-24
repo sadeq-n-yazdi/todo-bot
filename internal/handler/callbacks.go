@@ -148,8 +148,10 @@ func (h *Handler) actionCallback(ctx context.Context, cb *tg.Callback, r req, ac
 		})
 		return "", nil
 	case ui.ActEdit:
-		text := lc.T("settings.prompt.edit", lc.Num(td.Num), echo(td.Text))
-		return "", h.sendPrompt(ctx, cb, model.PromptEdit, td.ID, text)
+		if !editable(r, td) {
+			return gone, nil
+		}
+		return "", h.startEdit(ctx, r, cb.ChatID, td, 0)
 	default: // ui.ActRemind
 		text := lc.T("settings.prompt.when", lc.Num(td.Num), echo(td.Text))
 		return "", h.sendPrompt(ctx, cb, model.PromptRemind, td.ID, text)

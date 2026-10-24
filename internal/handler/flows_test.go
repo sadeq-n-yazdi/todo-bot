@@ -16,6 +16,18 @@ import (
 func openPrompt(t *testing.T, hh *harness12, user, chat int64, k ui.ActionKind, todoID int64) int {
 	t.Helper()
 	hh.fs.Reset()
+	if k == ui.ActEdit {
+		// The edit button now opens the wizard (#98). A text prompt that is
+		// already in flight (sent by an older node) must still complete.
+		id, err := hh.fs.Send(context.Background(), chat, tg.OutMessage{Text: "new text?", ForceReply: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := hh.svc.PutPrompt(context.Background(), model.Prompt{ChatID: chat, MsgID: id, UserID: user, Kind: model.PromptEdit, TodoID: todoID}); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
 	hh.press(user, chat, 4, act(k, todoID, ""))
 	s := hh.last()
 	if s.Edit || !s.Msg.ForceReply {
