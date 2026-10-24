@@ -186,7 +186,7 @@ type Service interface {
 	// is still there with the same version. Of several concurrent calls
 	// with one version, at most one creates an item.
 	SaveDraft(ctx context.Context, d model.Draft, a Actor, assigneeID int64, r nlparse.Result) (model.Todo, error)
-	// UpdateTodo applies p to the open item todoID of a's chat in one
+	// UpdateTodo applies p to the open item todoID in one
 	// transaction. It reads the item again inside the transaction and
 	// never writes back an older copy. Num never changes. Access is as
 	// for Todo (§11): ErrForeignChat for an item of another chat (the

@@ -64,6 +64,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
   - Enums: `ChatKind` (private/group), `TodoStatus` (open/done/deleted), `ReminderKind` (due/custom/snooze), `ReminderState` (pending/sent/cancelled/failed).
   - Assignment (§11): `User.Username`, `Todo.AssigneeID` (0 = none) and the read-only `Todo.AssigneeName`.
   - Wizard (§12): `Draft`, `DraftData`, `DraftStep` (`Step*`), the `Repeat*` choices, and `User.KBVersion` / `Prefs.KBVersion` (the reply keyboard).
+  - Editing (§13): `DraftData.EditTodoID`, `DraftData.EditNum` and `DraftData.EditBase`.
 - **recur**:
   - `Rule{Freq, Interval, Weekdays, MonthDay, Month, Cal, Hour, Minute, Anchor}`.
   - `Parse(s)`, `String()` and `Next(after, loc)`.
@@ -88,8 +89,8 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
   - `Action{Kind, ID, Arg}` with `Encode` (at most 64 bytes) and `Decode`.
   - `TodoList`, `ReminderMsg`, `Digest` and `FormatWhen`.
   - `Mention(userID, username, locale)` renders a `tg://user?id=` link labelled `@name`, or a translated label when the username is unknown (§11).
-  - Wizard (§12): the `ActWiz*` kinds and `Wiz*` arguments, `WizardView`/`WizardCard`, `DayCell`/`MonthGrid`/`FirstWeekday`, the "➕ New task" helpers and the argument helpers (`DateArg`, `MonthArg`, `TimeArg` and their parsers).
-- **service**: the `Service` interface, `Actor{UserID, ChatID, ChatKind, ChatTitle}`, and `Waker{Wake()}`. Assignment (§11) adds `NoteUsername`, `UserByUsername`, `AddTodoFor` and `ListAssigned`. The wizard (§12) adds `StartDraft`, `Draft`, `DraftByMessage`, `UpdateDraft`, `EndDraft`, `SaveDraft`, `NamedUsers`, `SetKBVersion`, `ErrStaleDraft` and `Config.DraftTTL`.
+  - Wizard (§12): the `ActWiz*` kinds and `Wiz*` arguments, `WizardView`/`WizardCard`, `DayCell`/`MonthGrid`/`FirstWeekday`, the "➕ New task" helpers and the argument helpers (`DateArg`, `MonthArg`, `TimeArg` and their parsers). Editing (§13) adds `WizardView.EditNum`.
+- **service**: the `Service` interface, `Actor{UserID, ChatID, ChatKind, ChatTitle}`, and `Waker{Wake()}`. Assignment (§11) adds `NoteUsername`, `UserByUsername`, `AddTodoFor` and `ListAssigned`. The wizard (§12) adds `StartDraft`, `Draft`, `DraftByMessage`, `UpdateDraft`, `EndDraft`, `SaveDraft`, `NamedUsers`, `SetKBVersion`, `ErrStaleDraft` and `Config.DraftTTL`. Editing (§13) adds `UpdateTodo`, `SaveEditDraft`, `TodoPatch` and `ErrUnknownAssignee`.
 - **scheduler**:
   - `Backend` is implemented by the service.
   - `New(b, sender, clock, log)`, plus `Run`, `Tick` and `Wake`.
@@ -729,7 +730,7 @@ Each PR owns only the files listed. They are numbered in merge order, but PRs 2�
 The v0.2 Postgres and MySQL providers ship their own `0004_wizard.sql` (§9) and must pass the new conformance cases.
 
 ## 13. Editing an item with the wizard (#98)
-The wizard can also change an item of the chat. This subsection gives the contracts. The flow is in the design on issue #98.
+The wizard can also change an item of the chat. This section gives the contracts. The flow is in the design on issue #98.
 
 - **New `DraftData` fields.** The store keeps them in the JSON `data`, so no migration is necessary.
   - `EditTodoID` (`edit_todo`): the ID of the item to change. `0` means that the wizard creates a new item.
@@ -742,7 +743,7 @@ The wizard can also change an item of the chat. This subsection gives the contra
 - **`Service.UpdateTodo(ctx, a, todoID, p)`.** It reads the item again inside the transaction. Access is as for `Todo` (§11). It returns `ErrForeignChat` for an item of another chat. The assignee can also act from their private chat. It returns `ErrNotFound` if the item is missing or deleted, or if its status is not open. `Num` never changes.
   - The service does not compare. A non-nil `When` always cancels the pending `due` and `snooze` reminders. Custom reminders stay.
   - The service creates a new `due` reminder only for a future due time. It makes none for the 23:59 date-only sentinel, as `AddTodo` does.
-  - A once `Due` in the past is stored without a reminder. The service does not return `ErrInPast`. The handler does the past checks.
+  - The service stores a once `Due` in the past without a reminder. The service does not return `ErrInPast`. The handler does the past checks.
   - A non-nil `When` also sets the item time zone to the time zone of the actor. A nil `When` keeps it.
   - A change of text or assignee does not touch the reminders.
 - **`Service.SaveEditDraft(ctx, d, a, todoID, p)`.** In one transaction it deletes the draft with the version check. Then it does the work of `UpdateTodo`. A version mismatch returns `ErrStaleDraft` and changes nothing. If the update fails, the draft stays.
