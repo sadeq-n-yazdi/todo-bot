@@ -142,15 +142,19 @@ func (h *Handler) cmdEdit(ctx context.Context, m *tg.Message, r req, args string
 		numStr = f[0]
 	}
 	text := strings.TrimSpace(strings.TrimPrefix(args, numStr))
-	if text == "" {
-		return h.say(ctx, m, lc.T("todo.usage.edit"))
-	}
-	if tooLong(text) {
+	if text != "" && tooLong(text) {
 		return h.sayTooLong(ctx, m, lc, text)
 	}
 	td, ok, err := h.todoByArg(ctx, m, r, numStr, "todo.usage.edit")
 	if !ok {
 		return err
+	}
+	if text == "" {
+		// A bare /edit N opens the wizard (#98).
+		if !editable(r, td) {
+			return h.say(ctx, m, lc.T("settings.cb.gone"))
+		}
+		return h.startEdit(ctx, r, m.ChatID, td, m.ID)
 	}
 	edited, err := h.Svc.Edit(ctx, r.Actor, td.ID, text)
 	if err != nil {

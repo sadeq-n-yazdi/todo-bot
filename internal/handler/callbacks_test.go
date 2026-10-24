@@ -194,13 +194,13 @@ func TestCallbackDoneItemAnsweredByServiceVerdict(t *testing.T) {
 	}
 }
 
-func TestCallbackEditPromptOnDoneItemAllowed(t *testing.T) {
+func TestCallbackEditOnDoneItemIsGone(t *testing.T) {
 	hh := newHarness12(t)
 	a := hh.svc.addTodo(1, "x")
 	hh.press(1, 1, 1, act(ui.ActDone, a.ID, ""))
 	hh.fs.Reset()
 	hh.press(1, 1, 1, act(ui.ActEdit, a.ID, ""))
-	if !hh.last().Msg.ForceReply {
-		t.Fatalf("Todo includes done items, so the prompt is sent: %+v", hh.last())
+	if len(hh.fs.Messages()) != 0 || len(hh.fs.Answers) != 1 || hh.fs.Answers[0].Text == "" {
+		t.Fatalf("a done item cannot be edited: want only the toast, got %+v, %+v", hh.fs.Messages(), hh.fs.Answers)
 	}
 }

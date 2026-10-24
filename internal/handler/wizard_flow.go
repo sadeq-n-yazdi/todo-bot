@@ -81,6 +81,7 @@ func (h *Handler) cardMessage(ctx context.Context, r req, d model.Draft, o cardO
 		Note:        o.Note,
 		DefaultTime: fmt.Sprintf("%02d:%02d", h.Parser.DefaultHour, h.Parser.DefaultMinute),
 		Group:       r.Actor.ChatKind == model.ChatGroup,
+		EditNum:     d.Data.EditNum,
 	}
 	if d.Step == model.StepAssignee || d.Step == model.StepConfirm {
 		ms, err := h.members(ctx, r.Actor.UserID)
@@ -168,6 +169,7 @@ func (h *Handler) commit(ctx context.Context, r req, old, nd model.Draft, o card
 // callback answer.
 func (h *Handler) wizardCallback(ctx context.Context, cb *tg.Callback, r req, act ui.Action) (string, error) {
 	lc := r.Prefs.Locale
+	ctx = context.WithValue(ctx, editorKey{}, cb.FromUsername)
 	switch act.Kind {
 	case ui.ActWizStart:
 		return "", h.startWizard(ctx, r, cb.ChatID, 0)
@@ -248,7 +250,11 @@ func (h *Handler) pressNav(ctx context.Context, r req, d model.Draft, arg string
 			}
 			return d, o, "", err
 		}
-		h.logErr("edit cancelled card", h.Send.Edit(ctx, d.ChatID, d.MsgID, tg.OutMessage{Text: lc.T("wizard.cancelled")}))
+		text := lc.T("wizard.cancelled")
+		if d.Data.EditTodoID != 0 {
+			text = lc.T("wizard.edit.cancelled")
+		}
+		h.logErr("edit cancelled card", h.Send.Edit(ctx, d.ChatID, d.MsgID, tg.OutMessage{Text: text}))
 		return d, cardOpts{done: true}, "", nil
 	case ui.WizNavSave:
 		if d.Step != model.StepConfirm {
@@ -319,7 +325,8 @@ func afterAnswer(d *model.Draft, next model.DraftStep) {
 // toAssignee goes to the assignee step, or past it when a private chat has
 // no members (Me is then the only choice and is stored).
 func (h *Handler) toAssignee(ctx context.Context, r req, d *model.Draft) error {
-	if d.Data.Editing {
+	if d.Data.Editing || d.Data.EditTodoID != 0 {
+		// An edit wizard keeps the assignee unless the user edits it.
 		goConfirm(d)
 		return nil
 	}
@@ -345,6 +352,10 @@ func back(d model.Draft) (model.Draft, cardOpts) {
 	nd := d
 	if d.Data.Editing && d.Step != model.StepTimeText {
 		goConfirm(&nd)
+		return nd, cardOpts{}
+	}
+	if d.Data.EditTodoID != 0 && d.Step == model.StepDate {
+		goConfirm(&nd) // an edit wizard has no text step before the date
 		return nd, cardOpts{}
 	}
 	switch d.Step {

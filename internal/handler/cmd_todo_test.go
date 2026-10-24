@@ -299,7 +299,6 @@ func TestBadArgsAndErrors(t *testing.T) {
 		{"done missing", "/done 5", "no open item"},
 		{"del missing", "/del 5", "no open item"},
 		{"edit missing", "/edit 5 hi", "no open item"},
-		{"edit no text", "/edit 1", "Usage"},
 		{"edit no args", "/edit", "Usage"},
 		{"unknown private", "/frobnicate", "Unknown command"},
 	}
