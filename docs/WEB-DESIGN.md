@@ -72,7 +72,7 @@ The dependency direction becomes `handler/scheduler/web → service → store, r
 
 - There are no passwords. Telegram proves who the user is, in one of three ways:
   - **Mini App `initData`** (phase 1). Telegram signs it with a key that comes from the bot token.
-  - **Login code** (phase 2). The PWA shows a code. The user confirms it in the Mini App.
+  - **Login code** (phase 2). The Mini App shows a short code. The user types it into the browser.
   - **Telegram Login Widget** (phase 4). This is for desktop browsers.
 - After a proof, the server checks `TODO_ALLOWED_USERS`. Then it creates a session.
 - Sessions live only in SQLite (`web_sessions`), never in memory (§9).
@@ -99,34 +99,62 @@ The Mini App reads `Telegram.WebApp.initData`. This is the raw query string that
 `start_param` is a navigation hint only, and it never grants access:
 
 - `g<digits>` or `g-<digits>` opens the tab of that group. The membership check (§4) still applies.
-- `login_<code>` opens the approval screen of §3.3.
+- `code` opens the code screen of §3.3. It shows a code, but it never signs anyone in.
 
 The test suite signs its own `initData` with a test token, through the steps above. Before the phase 1 PR merges, the developer also checks one real `initData` from the development bot by hand. The PR records the result. The log shows only the result, never the data.
 
 > **Note:** Telegram added the `signature` field in Bot API 8.0. It is for checks with a public key, and this design does not use it. For the HMAC check, all fields except `hash` go into the data-check string. The manual check with real data must confirm this.
 
-### 3.3 Login code: sign in a browser through the Mini App
+### 3.3 Login code: sign in a browser with a code from the Mini App
 
-The Login Widget is weak in an installed PWA on iOS. The PWA there has its own storage, and the widget popup does not return to it. Thus the main way to sign in a browser is a code that the user confirms in the Mini App. This works on every device that has Telegram, and it needs no BotFather `/setdomain`.
+The Login Widget is weak in an installed PWA on iOS. The PWA there has its own storage, and the widget popup does not return to it. Thus the main way to sign in a browser is a short code. The Mini App shows the code, and the user types it into the browser. This works on every device that has Telegram, and it needs no BotFather `/setdomain`.
 
-1. The PWA calls `POST /api/auth/code`. The server creates a row in `web_login_codes`:
-   - `code`: 8 characters from the Crockford base32 alphabet (40 bits), shown as `ABCD-EFGH`;
-   - `poll_token`: 32 random bytes, base64url;
-   - `device`: the `User-Agent` header, cut to 120 characters;
-   - an expiry 5 minutes after now.
+**Rules.**
 
-   The row keeps only the SHA-256 of the code and of the poll token.
-2. The PWA shows the code and a button. The button opens `https://t.me/<bot>?startapp=login_<code>`.
-3. Telegram opens the Mini App. The Mini App signs in with `initData` (§3.2).
-4. The Mini App calls `GET /api/auth/code/{code}`. It shows the device text, the code and a warning: "Confirm only if you started this on your own device."
-5. **Confirm** calls `POST /api/auth/code/{code}/approve`. The store sets `user_id` only where `user_id IS NULL` and the code is live. Thus only one approval can win.
-6. **Cancel** calls `DELETE /api/auth/code/{code}`.
-7. While this occurs, the PWA calls `POST /api/auth/code/poll` with its `poll_token` every 2 seconds:
-   - `202 {"status":"pending"}` while nobody approved the code;
-   - `200` after the Mini App approved the code. In one conditional delete, the server removes the row. Then it checks the allowlist, creates a `browser` session and sets the cookie. Only one poll can win the delete;
-   - `410 gone` if the code expired or the user cancelled it.
+- A link alone never signs anyone in. The code goes from the Mini App screen to the browser only when the user types it.
+- The code never appears in a URL. Caddy and Cloudflare log paths, so the browser sends the code only in a JSON body.
+- The Mini App shows only the code and fixed server text. It shows nothing that the browser chose, such as a device name.
+- A stolen Mini App token cannot make a code alone. The request also needs fresh `initData` for the same user.
 
-The code itself is not a secret that gives a session. Only the holder of the `poll_token` gets the session, and that token has 256 bits.
+**Steps.**
+
+1. In the Mini App, the user opens **Settings**, then **Sign in a browser**. The link `https://t.me/<bot>?startapp=code` opens the same screen.
+2. The Mini App calls `POST /api/auth/code` with its session and the current `initData` (`{"init_data": "…"}`). The server does these checks:
+   - It verifies `init_data` as in §3.2 steps 1 to 9, with an age limit of 10 minutes (`codeProofAge`).
+   - The `user.id` of `init_data` must be equal to the user of the session. Otherwise it answers 403 `wrong_user`.
+   - The user must be in `TODO_ALLOWED_USERS`.
+3. The server makes the code and stores it:
+   - 8 characters from the Crockford base32 alphabet (40 bits), shown as `ABCD-EFGH`;
+   - a row in `web_login_codes` with the SHA-256 of the code, the user ID and an expiry 5 minutes after now;
+   - in the same transaction, the store deletes the other codes of the user. Thus a user has at most one live code.
+   - If 100 codes are live in total (`maxLiveCodes`), the server answers 503 `too_many_codes`.
+4. The Mini App shows the code, the time that is left and this warning: "Type this code only into your own browser. Never send it to another person." **Cancel** calls `DELETE /api/auth/code`.
+5. In the browser, the login screen tells the user to open the Mini App and get a code. The user types the code. The browser sends `POST /api/auth/code/redeem` with `{"code": "ABCDEFGH"}`. The guard of §3.6 applies.
+6. The server normalises the code. It removes spaces and `-`, and it changes letters to upper case. It changes `I` and `L` to `1`, and `O` to `0`. Then it calculates the hash.
+7. The store deletes the row in one conditional delete (`WHERE code_hash = ? AND expires_at > now`). Only one request can win the delete. A code that is unknown, expired or used gives the same 401 `bad_code`.
+8. The server checks the allowlist again, creates a `browser` session and sets the cookie.
+9. The bot sends the sign-in notice of §3.3.1.
+
+**Attempt limits.** A wrong code points to no row, so the server cannot count the failures of one code. These limits apply instead:
+
+- Each code works one time, for 5 minutes.
+- An IP gets at most 5 failed redeems in 10 minutes.
+- A node accepts at most 60 failed redeems in 1 hour, for all IPs together. Above that limit, redeem answers 429 to all clients until the hour ends.
+- At most 100 codes are live, and at most 1 for each user.
+
+With 100 live codes and 40 bits, the chance of one guess is less than 1 in 10,000,000,000. The node limit permits at most 60 guesses in 1 hour.
+
+#### 3.3.1 The sign-in notice
+
+After each new `browser` session, from a code or from the widget, the bot sends a message to the private chat of the user:
+
+- The text is `web.tg.signin`: "New sign-in to the web app from %s (%s). If this was not you, log out everywhere."
+  - The values are the country (`CF-IPCountry`, only from a trusted proxy) and the client IP of §9.3.
+  - The message contains no value that the browser chose, such as the `User-Agent`.
+- One `web_app` button, "Log out everywhere", opens `https://todo.sadeq.uk/tg/?a=signout`. The Mini App signs in with `initData` and asks for a confirmation. Then it calls `POST /api/auth/logout-all`.
+- The button uses a query and not a hash, because Telegram puts its launch data in the hash.
+
+A send error gives only a warning in the log, and the session stays valid. The button needs `tg.Button.WebAppURL` (W1b, §13).
 
 ### 3.4 Telegram Login Widget (phase 4, desktop)
 
@@ -136,9 +164,12 @@ The widget is a quick way for a desktop browser with no Telegram app. It uses th
 2. Telegram sends the browser to `GET /auth/telegram?id=…&first_name=…&username=…&photo_url=…&auth_date=…&hash=…`.
 3. The server removes `hash`, and sorts and joins the other query fields as in §3.2 step 4.
 4. It calculates `secret = SHA256(botToken)` and `want = HMAC_SHA256(key = secret, message = dataCheckString)`. Then it compares `hash` through `hmac.Equal`.
-5. It applies the age limit of §3.2 step 8 and the allowlist of step 10.
-6. It creates a `browser` session, sets the cookie, and answers `303 See Other` to `/`.
-7. On an error, it answers `303` to `/#login-error=<code>`. It never puts the received fields in the URL or in the log.
+5. It applies an age limit of 10 minutes (`widgetProofAge`) and the allowlist of §3.2 step 10.
+6. It calls `Web.UseProof` with the SHA-256 of `hash` and an expiry at `auth_date` + 10 minutes. If the proof was used before, it answers `303` to `/#login-error=used`.
+7. It creates a `browser` session, sets the cookie, sends the sign-in notice (§3.3.1), and answers `303 See Other` to `/`.
+8. On an error, it answers `303` to `/#login-error=<code>`. It never puts the received fields in the URL or in the log.
+
+Telegram puts the proof in the query of the redirect, so Caddy and Cloudflare can log it. Each proof works only one time and for only 10 minutes, so a proof from a log is useless.
 
 The widget needs BotFather `/setdomain todo.sadeq.uk` (§16).
 
@@ -167,20 +198,20 @@ The widget needs BotFather `/setdomain todo.sadeq.uk` (§16).
 - **Allowlist revocation.**
   - The check in step 3 stops a removed user on the next request.
   - At start, the web deletes the sessions of every user who is not in `TODO_ALLOWED_USERS` (`Web.PruneWebSessions`). An allowlist change needs a restart, so this removes the old rows at once.
-- **Limit.** A user has at most 20 sessions. A new session deletes the oldest ones above that limit.
+- **Limits.** A user has at most 5 `miniapp` sessions and at most 20 `browser` sessions. A new session deletes the oldest sessions of the same kind above that limit. Thus many Mini App starts never remove a browser session.
 - **Bot token change.** Sessions do not depend on the bot token after login. If the token leaks, the owner changes it in BotFather and deletes all sessions (§16).
 
 ### 3.6 CSRF guard
 
-- A request with a bearer token needs no CSRF guard. The browser never adds that header by itself.
-- A request with the cookie and an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`) must pass all these checks, or it gets 403 `csrf`:
+- Every request to `/api/*` with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`) must pass all these checks, or it gets 403 `csrf`. This applies with a cookie, with a bearer token and with no session. Thus the sessionless endpoints 4 and 13 are also safe from login CSRF.
   1. It has the header `X-Todo-Request: 1`. A cross-site page cannot send a custom header without a CORS preflight, and the server never answers a preflight.
   2. If `Sec-Fetch-Site` is present, it is `same-origin`.
   3. If `Origin` is present, it is equal to `TODO_WEB_ORIGIN`. At least one of `Sec-Fetch-Site` and `Origin` must be present.
   4. A request with a body has `Content-Type: application/json`.
+- The Mini App sends the same header. Its page is on `TODO_WEB_ORIGIN`, also in the iframe of Telegram Web, so its `Origin` is correct.
 - The server never sends `Access-Control-Allow-*` headers.
 - The cookie is `SameSite=Strict`, which also stops cross-site requests.
-- `GET /auth/telegram` is the only `GET` that changes state, because it creates a session. The hash protects it. A forced login can only sign the victim in to an allowlisted account of the attacker. This design accepts that risk.
+- `GET /auth/telegram` is the only `GET` that changes state, because it creates a session. The hash protects it, and each proof works one time. A forced login can only sign the victim in to an allowlisted account of the attacker. This design accepts that risk.
 
 ## 4. Group membership
 
@@ -207,48 +238,65 @@ The bot asks Telegram only for `message` and `callback_query` updates (`tgbot.Ne
 
 ### 4.4 Check of one group: `groupActor`
 
-Every API call with a group in its path calls `groupActor(ctx, userID, chatID)` before it builds `service.Actor{UserID, ChatID: chatID, ChatKind: group, ChatTitle: <stored title>}`. The title comes from the `chats` row, never from the request. `AddTodo` calls `EnsureChat`, which writes the title. Thus an empty title from the web can erase the name of the group.
+The actor middleware (§5.5) calls `groupActor(ctx, userID, chatID)` for each request with a group in its path. It builds `service.Actor{UserID, ChatID: chatID, ChatKind: group, ChatTitle: <stored title>}`. The title comes from the `chats` row, never from the request. `AddTodo` calls `EnsureChat`, which writes the title. Thus an empty title from the web can erase the name of the group.
 
-1. If `chatID >= 0`, answer 404 `not_found`.
-2. Read the `chat_members` row. If its status is `member` and `checked_at` is less than `TODO_WEB_MEMBER_TTL` (default 10 minutes) old, allow the call.
-3. If there is no fresh answer, call `getChatMember(chatID, userID)` with a 3-second timeout. Then use the result:
+1. If the group has no row in `chats`, answer 404 `not_found`.
+2. Read the `chat_members` row. A row is **stale** if `seen_at > checked_at`, because the user wrote in the group after the last check. A stale row goes to step 3.
+   - A `member` row with `checked_at` less than `TODO_WEB_MEMBER_TTL` (default 10 minutes) old: allow the call.
+   - A `left` row with `checked_at` less than `leftTTL` (1 hour) old: answer 403 `not_member`, with no Telegram call.
+3. Otherwise call `getChatMember(chatID, userID)` with a 3-second timeout. Each node applies these limits to the calls:
+   - At most one call is in flight for each pair of user and group. A second request waits for the result of the first call.
+   - At most 30 calls per minute for each node (`memberCallsPerMin`). A call above the limit counts as a temporary error.
+4. Classify the result in the order of the table. The first row that applies wins. The web does not use `tg.IsPermanent`, because it puts user errors and chat errors together.
 
-   | Telegram result | Action | API result |
-   |---|---|---|
-   | status `creator`, `administrator` or `member` | write `member`, `checked_at = now` | allow |
-   | status `restricted` with `is_member = true` | write `member` | allow |
-   | status `restricted` with `is_member = false`, `left` or `kicked` | write `left` | 403 `not_member` |
-   | 400 "user not found", "member not found" or "PARTICIPANT_ID_INVALID" | write `left` | 403 `not_member` |
-   | `tg.IsPermanent(err)`: an admin removed the bot, or the chat does not exist | `Web.ChatGone(chatID)`: every row of the chat becomes `left` | 404 `not_found` |
-   | `APIError.MigrateTo != 0`: the group became a supergroup | call `Service.MigrateChat(chatID, newID)`, as the handler does, then check `newID` | 409 `group_moved` with `new_id` |
-   | 429, 5xx, timeout or network error | write nothing | see step 4 |
+   | # | Telegram result | Action | API result |
+   |---|---|---|---|
+   | a | `APIError.MigrateTo != 0`: the group became a supergroup | call `Service.MigrateChat(chatID, newID)`, as the handler does. Then call `Web.ChatGone(chatID)` for the old ID. | 409 `group_moved` with `new_id` |
+   | b | 400 or 403 with a description about the user: "user not found", "member not found", "PARTICIPANT_ID_INVALID", "USER_ID_INVALID" or "user is deactivated" | write `left` | 403 `not_member` |
+   | c | any other 403 (the bot is not in the chat), or 400 "chat not found" | `Web.ChatGone(chatID)`: every row of the chat becomes `left` | 404 `not_found` |
+   | d | status `creator`, `administrator` or `member` | write `member`, `checked_at = now` | allow |
+   | e | status `restricted` with `is_member = true` | write `member` | allow |
+   | f | status `restricted` with `is_member = false`, `left` or `kicked` | write `left` | 403 `not_member` |
+   | g | 429, 5xx, timeout, network error, the node limit, or any other error | write nothing. Log a warning for an error that is not in this table. | see step 5 |
 
-4. If Telegram has a temporary error: allow the call if the row is `member` and `checked_at` is less than 1 hour old (`memberGrace`). Otherwise answer 503 `membership_unverified`.
+5. If Telegram has a temporary error: allow the call if the row is `member` and `checked_at` is less than 1 hour old (`memberGrace`). Otherwise answer 503 `membership_unverified`.
+
+The web never calls Telegram inside `WithTx`. The bot has one database connection, so a slow call there stops every other request.
 
 Telegram says that `getChatMember` is "guaranteed to work for other users" only when the bot is an administrator. In practice, it works for the members of small groups. If it fails for a real member, that member gets 403 until the owner makes the bot an administrator (§15, D7).
 
 ### 4.5 The list of groups: `GET /api/chats`
 
-1. Collect the candidates: every group in `chats` (`Web.GroupChats`, at most 50), and every `chat_members` row of the user.
-2. For each candidate, use the row if it is fresh. A `left` row is fresh for 24 hours (`leftTTL`), so the server does not ask again for each group the user has left.
-3. Check the other candidates as in §4.4 step 3. Do at most 4 checks at the same time, and stop all checks after 5 seconds.
+1. Collect the candidates:
+   - every group in `chats` (`Web.GroupChats`, at most 50);
+   - every `chat_members` row of the user whose chat is still in `chats`.
+
+   A chat ID that is not in `chats`, for example the old ID after a migration, is never a candidate.
+2. For each candidate, use the row if it is fresh, with the rules of §4.4 step 2.
+3. Check the other candidates as in §4.4 steps 3 and 4. Do at most 4 checks at the same time, and stop all checks after 5 seconds.
 4. Return the groups with status `member`, with their stored titles, sorted by title.
 5. If a temporary error stopped some checks, the groups in their grace window stay in the list. The response then has `"partial": true`, and the app shows a small note.
 
-Each pair of user and group causes at most one `getChatMember` call per 10 minutes. A family has a few groups, so this is far below the Telegram limits.
+A user can join a group again and write in it. The new hint makes the `left` row stale, so the group shows in the next list. Without a message, the group shows within `leftTTL`.
+
+Each pair of user and group causes at most one `getChatMember` call per `TODO_WEB_MEMBER_TTL`. After the user left, the limit is one call per `leftTTL`. Each new hint can cause one more call. A family has a few groups, so this is far below the Telegram limits.
 
 ### 4.6 Edge cases
 
 - **The user left, or an admin removed the user.** The next check after `TODO_WEB_MEMBER_TTL` sees `left` or `kicked`. The user loses access within 10 minutes, or within 1 hour while Telegram has an outage.
-- **An admin removed the bot from the group.** `getChatMember` returns a permanent error, and `ChatGone` marks every row of the group as `left`. The items stay in the database, as they do today.
-- **Group to supergroup.** The handler moves the chat when it sees the `migrate_to_chat_id` message (§6). The web does not change `MigrateChat`. Old rows with the old ID get a `MigrateTo` error on their next check. The new ID is in `chats`, so the next `GET /api/chats` checks it.
+- **An admin removed the bot from the group.** `getChatMember` returns 403 (§4.4, row c), and `ChatGone` marks every row of the group as `left`. The items stay in the database, as they do today.
+- **Group to supergroup.** The handler moves the chat when it sees the `migrate_to_chat_id` message (§6). The web does not change `MigrateChat`.
+  - If the web gets `MigrateTo` first, it calls `MigrateChat`, and then it marks the rows of the old ID as gone.
+  - The old ID is not in `chats` after the move, so it is never a candidate again.
+  - The new ID is in `chats`, so the next `GET /api/chats` checks it.
 - **A user removed from the allowlist.** §3.5 stops the user before any membership check.
 - **Private chats.** The user's own private chat (`chatID == userID`) needs no membership check. A private chat of another user is always 404.
 
 ### 4.7 Privacy
 
 - The web shows the items of a group only to a confirmed member. Telegram must confirm the membership within `TODO_WEB_MEMBER_TTL`, or within the 1-hour grace when Telegram is down.
-- For a group, `GET /api/chats/{chat}/members` returns the same list as the assignee step of the wizard: the named, allowlisted users. This is the same as in the bot (§12).
+- `GET /api/chats/{chat}/members` returns the same list as the assignee step of the wizard: the named, allowlisted users. This is the same as in the bot (§12). It works for a group and for the private chat, because the Add form of **Mine** also has the assignee picker.
+- An assignee who left a group keeps the items that the group assigned to them, as §11 of ARCHITECTURE says. The assignee sees them in **Assigned to me** and acts on them from the private chat. The assignee does not see the list of the group.
 
 ## 5. API
 
@@ -260,8 +308,8 @@ Each pair of user and group causes at most one `getChatMember` call per 10 minut
 - **Body.** At most 16 KiB. The decoder refuses unknown fields.
 - **Errors.** `{"error": {"code": "not_member", "message": "<text in the user's language>"}}`. The `message` comes from the `web.err.<code>` strings.
 - **Locale.** The server reads `Service.Prefs` of the user on each request. All display strings use the user's language, calendar and time zone.
-- **`{chat}` is the chat of the actor.** It is the user's own ID for **Mine** and for **Assigned to me**, and a group ID for **Groups**. For an assigned item, the actor is the user's private chat, because §11 allows the assignee to act only from there (`a.ChatID == a.UserID`).
-- **Auth column.** "S" means that a session is necessary. "C" means that the CSRF guard of §3.6 applies to cookie sessions. "MA" means that the endpoint accepts only a `miniapp` session.
+- **`{chat}` is the chat of the actor.** It is the user's own ID for **Mine** and for **Assigned to me**, and a group ID for **Groups**. The actor middleware of §5.5 resolves it. For an assigned item, the actor is the user's private chat, because §11 allows the assignee to act only from there (`a.ChatID == a.UserID`).
+- **Auth column.** "S" means that a session is necessary. "C" means that the CSRF guard of §3.6 applies. Every unsafe method has it. "MA" means that the endpoint accepts only a `miniapp` session.
 - **Cache.** API responses have `Cache-Control: no-store`, except the lists. The lists have `Cache-Control: private, no-cache`, a weak `ETag` and `Vary: Authorization, Cookie`. A request with an `If-None-Match` equal to the ETag gets `304`. The ETag is the first 16 hex characters of the SHA-256 of `items`, `page` and `pages`. It does not include `rendered_at`.
 
 ### 5.2 The item object
@@ -286,7 +334,7 @@ Each pair of user and group causes at most one `getChatMember` call per 10 minut
 
 - `due_at`, `due_text` and `due_full` are `null` when the item has no date.
 - `due_text` is `ui.FormatWhen` in the user's locale, time zone and calendar. It is relative to now, for example "today 18:00".
-- `due_full` is an absolute form: weekday, day, month name, year and time. It is for offline views, where the relative form is out of date. `web/format.go` builds it from `calendar.Kind.Split`, `Locale.MonthName`, `Locale.WeekdayName` and `Locale.Num`.
+- `due_full` is an absolute form: weekday, day, month name, year and time. It is for offline views, where the relative form is out of date. `internal/web/format.go` builds it from `calendar.Kind.Split`, `Locale.MonthName`, `Locale.WeekdayName` and `Locale.Num`.
 - `recur_text` is `ui.DescribeRule`. It is `""` when the item does not repeat.
 - `assignee` is `null` when the item has no assignee. `username` is `""` when the bot does not know it. The app then shows the `web.item.noname` string.
 - Only the **Assigned to me** list fills `chat_title`.
@@ -299,39 +347,39 @@ A list response is `{"items": [...], "page": 0, "pages": 3, "rendered_at": "<RFC
 | # | Method and path | Auth | Request | Response | Errors | Calls | Phase |
 |---|---|---|---|---|---|---|---|
 | 1 | `GET /healthz` | none | – | 200 `ok` (text) | – | nothing | 1 |
-| 2 | `GET /readyz` | none | – | 200 `ok` | 503 | `Web.GroupChats(ctx, 1)` | 1 |
+| 2 | `GET /readyz` | none | – | 200 `ok` | 503, 429 | `Web.GroupChats(ctx, 1)` | 1 |
 | 3 | `GET /`, `/tg/`, `/assets/*`, `/manifest.webmanifest`, `/sw.js`, `/icons/*` | none | – | static files | 404 | `fs.FS` | 1 |
-| 4 | `POST /api/auth/miniapp` | none | `{"init_data": "…"}` | 200 `{"token", "expires_at", "user", "start"}` | 400 `bad_request`, 401 `bad_signature`, 401 `expired`, 403 `not_allowed`, 429 | `Prefs`, `NoteUsername`, `Web.StartWebSession` | 1 |
+| 4 | `POST /api/auth/miniapp` | C | `{"init_data": "…"}` | 200 `{"token", "expires_at", "user", "start"}` | 400 `bad_request`, 401 `bad_signature`, 401 `expired`, 403 `not_allowed`, 429 | verify `initData`, `Prefs`, `NoteUsername`, `Web.StartWebSession` | 1 |
 | 5 | `POST /api/auth/logout` | S, C | – | 204 | 401 | `Web.EndWebSession` | 1 |
 | 6 | `POST /api/auth/logout-all` | S, C | – | 204 | 401 | `Web.EndUserWebSessions` | 1 |
 | 7 | `GET /api/me` | S | – | 200 `{"user": {"id", "username", "lang", "calendar", "tz", "dir"}, "session": {"kind", "expires_at"}, "bot": {"username"}}` | 401 | `Prefs`, `Web.User` | 1 |
 | 8 | `GET /api/i18n?lang=en` | none | – | 200 `{"lang", "dir", "messages": {"web.…": "…"}}` | 400 `bad_lang` | `i18n.Keys`, `Locale.T` | 1 |
 | 9 | `GET /api/chats` | S | – | 200 `{"chats": [{"id", "kind", "title"}], "partial": false}`. The private chat is first. | 401 | `Web.GroupChats`, `Web.MembershipsOf`, `MemberChecker`, `Web.RecordMembership` | 1 (private only), 2 |
-| 10 | `GET /api/chats/{chat}/items?page=N` | S | – | list | 403 `not_member`, 404, 409 `group_moved`, 503 `membership_unverified` | `groupActor`, `List` | 2 |
+| 10 | `GET /api/chats/{chat}/items?page=N` | S | – | list | the actor errors | `chatActor`, `List` | 2 |
 | 11 | `GET /api/assigned` | S | – | list, without paging, at most 200 items | 401 | `ListAssigned`, `Web.Chat` (titles) | 2 |
-| 12 | `POST /api/auth/code` | none | `{}` | 201 `{"code", "poll_token", "link", "expires_at"}` | 429 | `Web.NewLoginCode` | 2 |
-| 13 | `POST /api/auth/code/poll` | none | `{"poll_token"}` | 202 `{"status": "pending"}`, or 200 `{"user", "expires_at"}` and `Set-Cookie` | 403 `not_allowed`, 410 `gone`, 429 | `Web.TakeLoginCode`, `Web.StartWebSession` | 2 |
-| 14 | `GET /api/auth/code/{code}` | S, MA | – | 200 `{"code", "device", "created_at", "expires_at"}` | 404, 410 | `Web.LoginCode` | 2 |
-| 15 | `POST /api/auth/code/{code}/approve` | S, MA | `{}` | 204 | 404, 409 `used`, 410 | `Web.ApproveLoginCode` | 2 |
-| 16 | `DELETE /api/auth/code/{code}` | S, MA | – | 204 | 404 | `Web.CancelLoginCode` | 2 |
-| 17 | `POST /api/parse` | S, C | `{"text"}` | 200 `{"text", "due_at", "due_text", "recur", "recur_text"}` | 422 `empty_text`, 422 `too_long` | `nlparse.Parser.Parse` only | 3 |
-| 18 | `GET /api/chats/{chat}/members` | S | – | 200 `{"members": [{"id", "username"}]}` | 403, 404 | `groupActor`, `NamedUsers` and the allowlist | 3 |
-| 19 | `POST /api/chats/{chat}/items` | S, C | `{"text", "assignee_id"}` (`assignee_id` is optional, 0 = nobody) | 201 item | 422 `empty_text`, `too_long`, `unknown_assignee`; 403; 404 | `groupActor`, `AddTodoFor` | 3 |
-| 20 | `POST /api/chats/{chat}/items/{id}/done` | S, C | `{}` | 200 `{"item", "still_open"}` | 404 | `Complete`, then the "did" notice | 3 |
-| 21 | `DELETE /api/chats/{chat}/items/{id}` | S, C | – | 204 | 404 | `Delete` | 3 |
-| 22 | `POST /api/chats/{chat}/items/{id}/remind` | S, C | `{"preset": "10m"}`, `{"preset": "1h"}`, `{"preset": "tomorrow"}` or `{"when": "<text>"}` | 201 `{"fire_at", "fire_text"}` | 404, 422 `in_past`, 422 `bad_time` | `nlparse.Parser.ParseWhen`, `Remind` | 3 |
-| 23 | `PUT /api/me/settings` | S, C | `{"lang"}`, `{"calendar"}` or both | 200, as `/api/me` | 422 `bad_lang`, 422 `bad_calendar` | `SetLang`, `SetCalendar` | 3 |
-| 24 | `GET /api/chats/{chat}/items/{id}` | S | – | 200 item, with `"status"` and `"when_text"` for the edit form | 404 | `Todo` | 4 |
-| 25 | `PATCH /api/chats/{chat}/items/{id}` | S, C | `{"text"}`, `{"when": "<text>"}`, `{"when": null}` (no date), `{"assignee_id"}`, or a mix | 200 item | 404, 422 `empty_text`, `bad_time`, `in_past`, `unknown_assignee` | `UpdateTodo` (#98), then the assignee DM | 4 |
-| 26 | `GET /auth/telegram?…` | none | the widget fields | 303 to `/` with `Set-Cookie` | 303 to `/#login-error=<code>` | `Web.StartWebSession` | 4 |
+| 12 | `POST /api/auth/code` | S, MA, C | `{"init_data"}` | 201 `{"code", "expires_at"}` | 401 `bad_signature`, 401 `expired`, 403 `wrong_user`, 403 `not_allowed`, 429, 503 `too_many_codes` | verify `initData`, `Web.NewLoginCode` | 2 |
+| 13 | `POST /api/auth/code/redeem` | C | `{"code"}` | 200 `{"user", "expires_at"}` and `Set-Cookie` | 400 `bad_request`, 401 `bad_code`, 403 `not_allowed`, 429 | `Web.RedeemLoginCode`, `Web.StartWebSession`, the sign-in notice | 2 |
+| 14 | `DELETE /api/auth/code` | S, MA, C | – | 204 | 401 | `Web.CancelLoginCodes` | 2 |
+| 15 | `POST /api/parse` | S, C | `{"text"}` | 200 `{"text", "due_at", "due_text", "recur", "recur_text"}` | 422 `empty_text`, 422 `too_long` | `nlparse.Parser.Parse` only | 3 |
+| 16 | `GET /api/chats/{chat}/members` | S | – | 200 `{"members": [{"id", "username"}]}` | the actor errors | `chatActor`, `NamedUsers` and the allowlist | 3 |
+| 17 | `POST /api/chats/{chat}/items` | S, C | `{"text", "assignee_id"}` (`assignee_id` is optional, 0 = nobody) | 201 item | 422 `empty_text`, `too_long`, `unknown_assignee`; the actor errors | `chatActor`, `AddTodoFor` | 3 |
+| 18 | `POST /api/chats/{chat}/items/{id}/done` | S, C | `{}` | 200 `{"item", "still_open"}` | 404; the actor errors | `chatActor`, `Complete`, then the "did" notice | 3 |
+| 19 | `DELETE /api/chats/{chat}/items/{id}` | S, C | – | 204 | 404; the actor errors | `chatActor`, `Delete` | 3 |
+| 20 | `POST /api/chats/{chat}/items/{id}/remind` | S, C | `{"preset": "10m"}`, `{"preset": "1h"}`, `{"preset": "tomorrow"}` or `{"when": "<text>"}` | 201 `{"fire_at", "fire_text"}` | 404, 422 `in_past`, 422 `bad_time`; the actor errors | `chatActor`, `nlparse.Parser.ParseWhen`, `Remind` | 3 |
+| 21 | `PUT /api/me/settings` | S, C | `{"lang"}`, `{"calendar"}` or both | 200, as `/api/me` | 422 `bad_lang`, 422 `bad_calendar` | `SetLang`, `SetCalendar`, and `SetKBVersion(user, 0)` after a change of language | 3 |
+| 22 | `GET /api/chats/{chat}/items/{id}` | S | – | 200 item, with `"status"` and `"when_text"` for the edit form | 404; the actor errors | `chatActor`, `Todo` | 4 |
+| 23 | `PATCH /api/chats/{chat}/items/{id}` | S, C | `{"text"}`, `{"when": "<text>"}`, `{"when": null}` (no date), `{"assignee_id"}`, or a mix | 200 item | 404, 422 `empty_text`, `bad_time`, `in_past`, `unknown_assignee`; the actor errors | `chatActor`, `Todo` (the old assignee), `UpdateTodo` (#98), then the assignee DM | 4 |
+| 24 | `GET /auth/telegram?…` | none | the widget fields | 303 to `/` with `Set-Cookie` | 303 to `/#login-error=<code>` | `Web.UseProof`, `Web.StartWebSession`, the sign-in notice | 4 |
 
-Error codes for every endpoint with a session: 401 `unauthenticated`, 401 `session_revoked`, 403 `csrf`, 413 `too_large`, 429 `rate_limited` (with `Retry-After`) and 500 `internal`.
+"The actor errors" are the errors of the actor middleware (§5.5): 403 `not_member`, 404 `not_found`, 409 `group_moved` and 503 `membership_unverified`. Every route under `/api/chats/{chat}/` can give them.
+
+Error codes for every endpoint with a session: 401 `unauthenticated`, 401 `session_revoked`, 403 `csrf`, 413 `too_large`, 429 `rate_limited` (with `Retry-After`) and 500 `internal`. A route that is registered but not built yet answers 501 `not_implemented` (§14.1).
 
 `service.ErrForeignChat` and `service.ErrNotFound` both give 404 `not_found`. Thus a user cannot learn whether an item of another chat exists.
 
 ### 5.4 Rules of the endpoints
 
-- **Add (19).** The server follows the same steps as `/add`:
+- **Add (17).** The server follows the same steps as `/add`:
   1. Apply `i18n.NormalizeDigits`, then `strings.TrimSpace`.
   2. Refuse more than 1000 runes (`too_long`), the same limit as `maxTodoChars` in the handler.
   3. Call `Parser.Parse(text, now)` with `now` in the user's time zone.
@@ -339,23 +387,45 @@ Error codes for every endpoint with a session: 401 `unauthenticated`, 401 `sessi
   5. Call `AddTodoFor(actor, assigneeID, result)`.
 
   The web does not split an `@name` at the start of the text. The form has an assignee picker for that (§15, D9). Text with the same words gives the same item as `/add` (acceptance test in W10).
-- **Done (20).** `Complete` follows §5 of ARCHITECTURE. An item that repeats can stay open with a new date. `still_open` then is `true`, and `item` has the new date.
+- **Done (18).** `Complete` follows §5 of ARCHITECTURE. An item that repeats can stay open with a new date. `still_open` then is `true`, and `item` has the new date.
   - The "did" notice follows §11. The server sends it when `item.AssigneeID == userID` and `item.ChatID != actor.ChatID`.
   - It goes to `item.ChatID`, in the locale of the creator (`Prefs(item.CreatedBy)`), with the `web.tg.did` string and `ui.Mention`.
   - A send error gives only a warning in the log, and the response stays 200.
-- **Remind later (22).** `Service.Snooze` takes a reminder ID, and the web has only items. Thus the web uses `Service.Remind(actor, todoID, at)`, which adds a `custom` reminder. The presets are:
+- **Remind later (20).** `Service.Snooze` takes a reminder ID, and the web has only items. Thus the web uses `Service.Remind(actor, todoID, at)`, which adds a `custom` reminder. The presets are:
   - `10m`: now + 10 minutes;
   - `1h`: now + 1 hour;
   - `tomorrow`: tomorrow at `TODO_DEFAULT_TIME` in the user's time zone, with `time.Date`;
   - `when`: the text, after `i18n.NormalizeDigits`, through `Parser.ParseWhen`, the same as `/remind`.
-- **Edit (25).** This needs #98. The server builds a `service.TodoPatch`:
+- **Edit (23).** This needs #98. Before the save, the server reads the item with `Service.Todo` and keeps the old assignee. Then it builds a `service.TodoPatch`:
   - a `text` field gives `Text`;
   - a `when` text goes through `Parser.Parse` and gives `When`. `when: null` gives `When` with `Due = nil`;
   - an `assignee_id` field gives `AssigneeID`, checked as in Add.
 
-  After a successful save, the server sends the DM to a new assignee. The rules are the rules of #98 §4 (decision 3), with the string `web.tg.assigned`. Fields that are not in the request stay `nil`, so they do not change.
-- **Lists (10, 11).** `Service.List(chatID, page)` takes no actor. Thus the web must call `groupActor` before `List` for a group, and must use the user's own ID for **Mine**.
+  After a successful save, the server sends the DM only when the assignee is new, that is, different from the old assignee. The rules are the rules of #98 §4 (decision 3), with the string `web.tg.assigned`. Fields that are not in the request stay `nil`, so they do not change.
+- **Lists (10, 11).** `Service.List(chatID, page)` takes no actor. Thus the actor middleware is the only check for a group. The handler uses the `ChatID` of the actor, never the path.
+- **Settings (21).** After a change of language, the server calls `SetKBVersion(user, 0)`, as the bot does. Thus the bot sends its keyboard again in the new language.
 - **i18n (8).** It returns every key that starts with `web.`, in the language asked, with `Locale.T` and no arguments. That gives the raw templates. The `web.` strings can use only `%s` and `%d`. The app fills them in order. It is public, because the login screen needs it before a session exists. It has `Cache-Control: public, max-age=300` and an `ETag`.
+
+### 5.5 The actor middleware: `chatActor`
+
+One middleware serves the whole subtree `/api/chats/{chat}/…`. It runs after the session check and before every handler of the subtree. No handler reads `{chat}` itself.
+
+1. Parse `{chat}` as `int64`. If that fails, answer 404 `not_found`.
+2. If `chat` is equal to the user ID of the session, make the private actor: `service.Actor{UserID, ChatID: UserID, ChatKind: private, ChatTitle: <title of the chats row, or "" if there is no row>}`.
+3. If `chat < 0`, call `groupActor` (§4.4). It gives the group actor or one of the actor errors.
+4. Any other value, for example the private chat of another user, gives 404 `not_found`.
+5. Put the actor in the request context. Handlers read it with `actorFrom(r.Context())`.
+
+W3 makes the middleware and fixes these signatures. W4 replaces only the body of `groupActor`.
+
+```go
+// internal/web/actor.go (W3)
+func (s *Server) withActor(next http.Handler) http.Handler
+func actorFrom(ctx context.Context) service.Actor
+
+// internal/web/membership.go (a W3 stub that answers 404; W4 replaces it)
+func (s *Server) groupActor(ctx context.Context, userID, chatID int64) (service.Actor, error)
+```
 
 ## 6. Data and migrations
 
@@ -379,21 +449,28 @@ CREATE TABLE web_sessions (
   expires_at INTEGER NOT NULL,
   max_at     INTEGER NOT NULL
 );
-CREATE INDEX web_sessions_user ON web_sessions (user_id);
+CREATE INDEX web_sessions_user ON web_sessions (user_id, kind);
 CREATE INDEX web_sessions_expires ON web_sessions (expires_at);
 
--- A browser login that waits for approval in the Mini App. user_id is NULL
--- until the approval. Both hashes are hex SHA-256; the table never holds
--- the code or the poll token.
+-- A login code that the Mini App made for one user (§3.3). code_hash is
+-- the hex SHA-256 of the normalised code; the table never holds the code.
+-- A redeem deletes the row, so each code works one time.
 CREATE TABLE web_login_codes (
   code_hash  TEXT    PRIMARY KEY,
-  poll_hash  TEXT    NOT NULL UNIQUE,
-  device     TEXT    NOT NULL DEFAULT '',
-  user_id    INTEGER,
+  user_id    INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL
 );
+CREATE INDEX web_login_codes_user ON web_login_codes (user_id);
 CREATE INDEX web_login_codes_expires ON web_login_codes (expires_at);
+
+-- Login Widget proofs that the server accepted (§3.4). hash is the hex
+-- SHA-256 of the widget hash. A second use of one proof fails.
+CREATE TABLE web_used_proofs (
+  hash       TEXT    PRIMARY KEY,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX web_used_proofs_expires ON web_used_proofs (expires_at);
 
 -- What the web knows about a user in a group. Only getChatMember writes
 -- 'member' or 'left'; an update seen in the group writes 'unknown' (a hint,
@@ -414,7 +491,7 @@ The Postgres and MySQL providers of v0.2 must ship the same version:
 
 - Postgres: `BIGINT` for IDs and times.
 - MySQL:
-  - `VARCHAR(64)` for `id`, `code_hash` and `poll_hash`, because a `TEXT` column cannot be a key without a prefix length;
+  - `VARCHAR(64)` for `id`, `code_hash` and `hash`, because a `TEXT` column cannot be a key without a prefix length;
   - `VARCHAR(16)` for `kind` and `status`;
   - `VARCHAR(120)` for `device`.
 - No foreign keys, as in SQLite.
@@ -441,11 +518,9 @@ type WebSession struct {
 	MaxAt     time.Time
 }
 
-// LoginCode is a row of web_login_codes. UserID is 0 until approved.
+// LoginCode is a row of web_login_codes.
 type LoginCode struct {
 	CodeHash  string
-	PollHash  string
-	Device    string
 	UserID    int64
 	CreatedAt time.Time
 	ExpiresAt time.Time
@@ -469,7 +544,7 @@ type ChatMember struct {
 }
 ```
 
-### 6.3 Store methods (added to `store.Store`)
+### 6.3 Store methods (17, added to `store.Store`)
 
 All providers share `sqlstore`, so `internal/store/sqlstore/web.go` implements these methods one time. `storetest/web.go` adds conformance cases for them.
 
@@ -481,24 +556,22 @@ GetWebSession(ctx context.Context, id string, now time.Time) (model.WebSession, 
 TouchWebSession(ctx context.Context, id string, seenAt, expiresAt time.Time) error
 DeleteWebSession(ctx context.Context, id string) error
 DeleteUserWebSessions(ctx context.Context, userID int64) error
-// TrimUserWebSessions keeps the newest keep sessions of the user.
-TrimUserWebSessions(ctx context.Context, userID int64, keep int) error
+// TrimUserWebSessions keeps the newest keep sessions of the user of one kind.
+TrimUserWebSessions(ctx context.Context, userID int64, kind model.WebSessionKind, keep int) error
 // DeleteWebSessionsExcept deletes the sessions of every user not in keep.
 DeleteWebSessionsExcept(ctx context.Context, keep []int64) (n int, err error)
 
-PutLoginCode(ctx context.Context, c model.LoginCode) error
-// GetLoginCode: ErrNotFound if none or expired.
-GetLoginCode(ctx context.Context, codeHash string, now time.Time) (model.LoginCode, error)
-// ApproveLoginCode sets user_id only WHERE user_id IS NULL AND expires_at > now.
-// ok=false if it was absent, expired or already approved; of several
-// concurrent callers exactly one gets ok=true.
-ApproveLoginCode(ctx context.Context, codeHash string, userID int64, now time.Time) (ok bool, err error)
-// TakeLoginCode: if the code is approved and live, it deletes the row and
-// returns it (exactly one concurrent caller gets it). If it is live but not
-// approved, it returns it with UserID 0 and keeps it. ErrNotFound if
-// absent or expired.
-TakeLoginCode(ctx context.Context, pollHash string, now time.Time) (model.LoginCode, error)
-DeleteLoginCode(ctx context.Context, codeHash string) error
+// PutLoginCode deletes the other codes of c.UserID and inserts c, in one
+// transaction. ok=false, and no insert, if maxLive codes are already live.
+PutLoginCode(ctx context.Context, c model.LoginCode, maxLive int, now time.Time) (ok bool, err error)
+// TakeLoginCode deletes the live row of codeHash and returns it. Of several
+// concurrent callers exactly one gets it. ErrNotFound if absent or expired.
+TakeLoginCode(ctx context.Context, codeHash string, now time.Time) (model.LoginCode, error)
+DeleteUserLoginCodes(ctx context.Context, userID int64) error
+
+// UseProof records a widget proof. fresh=false if a live row with the same
+// hash exists. Of several concurrent callers exactly one gets fresh=true.
+UseProof(ctx context.Context, hash string, expiresAt, now time.Time) (fresh bool, err error)
 
 // NoteChatMember inserts (chat, user) with status 'unknown' and seen_at,
 // or updates only seen_at. It never changes status or checked_at.
@@ -514,17 +587,17 @@ SetChatGone(ctx context.Context, chatID int64, at time.Time) error
 ListGroupChats(ctx context.Context, limit int) ([]model.Chat, error)
 ```
 
-`TakeLoginCode` uses one `DELETE … WHERE poll_hash = ? AND user_id IS NOT NULL AND expires_at > ?` and reads the row in the same transaction. MySQL has no `RETURNING`, so it uses `WithTx`.
+`TakeLoginCode` uses one `DELETE … WHERE code_hash = ? AND expires_at > ?` and reads the row in the same transaction. MySQL has no `RETURNING`, so it uses `WithTx`. `UseProof` first deletes an expired row with the same hash, then inserts. A key conflict gives `fresh=false`.
 
 ### 6.4 Retention
 
 `Purge` also deletes:
 
 - sessions with `expires_at <= now` or `max_at <= now`;
-- login codes with `expires_at <= now`;
+- login codes and used proofs with `expires_at <= now`;
 - `chat_members` rows with a status other than `member`, when both `seen_at` and `checked_at` are more than 30 days old.
 
-A `member` row stays until a check finds that the user left. The tables stay small: a family has a few users, a few groups and at most 20 sessions per user.
+A `member` row stays until a check finds that the user left. The tables stay small: a family has a few users, a few groups and at most 25 sessions per user.
 
 ## 7. Frontend
 
@@ -552,8 +625,8 @@ web/
     theme.ts              Telegram themeParams or prefers-color-scheme
     cache.ts              last lists per user in localStorage
     tabs/                 mine, assigned, groups, list, row      (W6)
-    login/                code login screen, widget              (W7, W13)
-    approve/              Mini App approval screen               (W7)
+    login/                code field, widget                     (W7, W13)
+    code/                 Mini App code and sign-out screens     (W7)
     actions/              add sheet, item sheet, remind, confirm (W9)
     edit/                 edit form                              (W12)
     live.ts               refetch and ETag poll                  (W12)
@@ -562,7 +635,7 @@ web/
   test/                   vitest tests
 ```
 
-W2 makes `app.tsx` with fixed imports from `tabs/index.tsx`, `login/index.tsx`, `approve/index.tsx` and `actions/index.tsx`, as stubs. Later sub-issues replace their own stubs. Thus two parallel sub-issues never edit one file.
+W2 makes `app.tsx` with fixed imports from `tabs/index.tsx`, `login/index.tsx`, `code/index.tsx`, `actions/index.tsx` and `edit/index.tsx`, as stubs. Later sub-issues replace their own stubs. Thus two parallel sub-issues never edit one file.
 
 ### 7.2 Two entries, one bundle
 
@@ -577,22 +650,23 @@ W2 makes `app.tsx` with fixed imports from `tabs/index.tsx`, `login/index.tsx`, 
 
 | Screen | Where | Content |
 |---|---|---|
-| Login | PWA, no session | the code and a button "Open Telegram to confirm"; in phase 4 also the widget (not in an installed iOS app); the wait state; errors |
-| Approve | Mini App, `start_param=login_…` | the device text, the code, the warning, Confirm and Cancel |
+| Login | PWA, no session | the steps "Open the app in Telegram, then Settings, then Sign in a browser"; a button that opens `https://t.me/<bot>?startapp=code`; the code field; errors. In phase 4 also the widget (not in an installed iOS app). |
+| Code | Mini App, **Settings** or `start_param=code` | the code, the time that is left, the warning, Cancel |
+| Sign-out | Mini App, `?a=signout` from the sign-in notice | "Log out every browser and app", Confirm |
 | Not allowed | both | "Your Telegram ID is N. Ask the owner to add it." |
 | Tabs | both | **Mine**, **Assigned to me**, **Groups** |
 | Groups | both | one chip for each group; the app keeps the last group in `localStorage`; an empty state when the user has no group |
 | List | both | one row for each item: a done checkbox, the text (`dir="auto"`), `due_text` (red when `overdue`), 🔁 `recur_text`, `→ @username`; "Load more" for the next page |
 | Item sheet | both | Done, Remind later (10 min, 1 h, tomorrow, custom text), Edit (phase 4), Delete with a confirmation |
 | Add sheet | both | the text field, a live preview (`POST /api/parse`, 400 ms after the last key), the assignee picker, Add |
-| Settings | header menu | language (en, fa), calendar (Gregorian, Jalali), Log out, Log out everywhere |
+| Settings | header menu | language (en, fa), calendar (Gregorian, Jalali), Sign in a browser (Mini App only), Log out, Log out everywhere |
 
 In the Mini App, the Add sheet uses `Telegram.WebApp.MainButton`, and the sheets use `BackButton`. "Done" calls `HapticFeedback.notificationOccurred("success")`.
 
 ### 7.4 Languages, RTL and theme
 
 - **Strings.** All UI strings come from `GET /api/i18n`. Go registers them with `i18n.Register` under the `web.` prefix, in English and Farsi.
-  - Each sub-issue registers its strings in its own `internal/web/messages_<area>.go` file, with its own prefix: `web.app.`, `web.err.`, `web.tabs.`, `web.login.`, `web.item.`, `web.edit.`, `web.tg.` (messages to Telegram).
+  - Each sub-issue registers its strings in its own `internal/web/messages_<area>.go` file, with its own prefix: `web.app.`, `web.err.`, `web.tabs.`, `web.login.`, `web.item.`, `web.write.`, `web.actions.`, `web.edit.`, `web.widget.`, `web.tg.` (messages to Telegram).
   - The app keeps the last catalog in `localStorage` and sends `If-None-Match`.
   - It shows a spinner without text until the catalog arrives.
 - **Digits.** The server gives every date and time with the correct digits. For numbers that the app makes itself, such as counts, `i18n.ts` converts the 10 ASCII digits to Persian digits in Farsi. That is the only locale logic in JavaScript. JavaScript never calculates calendar dates.
@@ -621,6 +695,15 @@ In the Mini App, the Add sheet uses `Telegram.WebApp.MainButton`, and the sheets
   - `/assets/*`: cache first, because the names contain a hash.
   - `/api/*`, `/auth/*` and `/tg/*`: the service worker does not handle them.
   - A new version waits. The app shows "A new version is ready. Reload." On reload, the service worker calls `skipWaiting`.
+- **Cache headers.** The server sets them. Caddy and Cloudflare keep them.
+
+  | Path | `Cache-Control` |
+  |---|---|
+  | `/`, `/index.html`, `/tg/`, `/sw.js`, `/manifest.webmanifest` | `no-cache` |
+  | `/assets/*` (the names contain a hash) | `public, max-age=31536000, immutable` |
+  | `/icons/*` | `public, max-age=86400` |
+  | `/api/*` | §5.1 |
+
 - **Offline.** The app keeps the last response of each list in `localStorage`, under a key with the user ID. The service worker never keeps API data.
   - Offline, the app shows these lists with `due_full` instead of `due_text`, a banner with the `rendered_at` time, and no action buttons.
   - Logout, and a different user in `/api/me`, delete these entries.
@@ -690,6 +773,7 @@ A Go-only contributor runs `make ci` as today, and needs no Node.
 | Idle RSS growth | 8 MiB | W3 records `VmRSS` before and after, on a local run |
 
 - The server serves the files directly from the embedded `fs.FS`. It does not copy them to memory.
+- The cache headers of §7.5 keep the hashed files in the browser cache for one year. Thus a reload gets only the small HTML files.
 - The server does not compress responses. Caddy (`encode zstd gzip`) and Cloudflare compress them.
 - `GOMEMLIMIT=40MiB` and `MemoryMax=96M` do not change. vps03 has about 149 MB of free memory and 608 MB of free disk. The binary and its `.prev` copy need about 40 MB.
 
@@ -699,7 +783,7 @@ A Go-only contributor runs `make ci` as today, and needs no Node.
 
 | Variable | Default | Rule |
 |---|---|---|
-| `TODO_WEB_ADDR` | `""` (web off) | `host:port` with a loopback IP literal, for example `127.0.0.1:8088`. `config.Load` refuses other addresses. |
+| `TODO_WEB_ADDR` | `""` (web off) | `host:port` with a loopback IP literal, for example `127.0.0.1:8088`. `config.Load` refuses other addresses. This rule applies now. A later issue can relax it for nodes on more than one host (§10). |
 | `TODO_WEB_ORIGIN` | – | Necessary when `TODO_WEB_ADDR` has a value. An `https://` URL with no path, for example `https://todo.sadeq.uk`. |
 | `TODO_WEB_SESSION_TTL` | `720h` | The idle limit of a browser session, from 1h to 2160h. |
 | `TODO_WEB_SESSION_MAX` | `2160h` | The absolute limit of a browser session. At least `TODO_WEB_SESSION_TTL`. |
@@ -709,16 +793,19 @@ A Go-only contributor runs `make ci` as today, and needs no Node.
 `config.Config` gets the fields `WebAddr`, `WebOrigin`, `WebSessionTTL`, `WebSessionMax`, `WebMemberTTL` and `WebTrustedProxies []netip.Prefix`. These values are constants in `internal/web`:
 
 - the Mini App session: 12 h;
-- the `initData` age limit: 1 h;
-- the life of a login code: 5 min;
-- the membership grace: 1 h.
+- the `initData` age limit: 1 h for a sign-in, 10 min for a login code;
+- the life of a login code: 5 min, with at most 100 live codes;
+- the age limit of a Login Widget proof: 10 min;
+- the session limits: 5 `miniapp` and 20 `browser` sessions per user;
+- the membership grace: 1 h, and `leftTTL`: 1 h;
+- the node limit on `getChatMember` calls: 30 per minute.
 
 `TODO_HTTP_ADDR` stays reserved for the webhook of v0.2 (#31). The web has its own listener now. `config.Load` refuses a `TODO_WEB_ADDR` that is equal to `TODO_HTTP_ADDR`. When #31 starts, it can serve both on one mux.
 
 ### 9.2 The listener
 
 - `cmd/todo-bot/run.go` starts the web server only when `TODO_WEB_ADDR` has a value. It starts the server after the service exists and before the lease loop.
-- At shutdown, it stops the web first, with `Server.Shutdown` and a 3-second budget. Then it stops the lease loop and the scheduler, as today.
+- At shutdown, it calls `Server.Shutdown` at the same time as it stops the lease loop and the scheduler. All of them share the one 10-second `shutdownTimeout`. The web does not get its own budget.
 - **Server limits.** `ReadHeaderTimeout` 5 s, `ReadTimeout` 10 s, `WriteTimeout` 15 s, `IdleTimeout` 60 s, `MaxHeaderBytes` 8 KiB. At most 64 requests run at the same time. A request above that limit gets 503.
 
 ### 9.3 The contract with Caddy
@@ -727,8 +814,9 @@ A Go-only contributor runs `make ci` as today, and needs no Node.
 |---|---|
 | Upstream | `http://127.0.0.1:8088`, plain HTTP on loopback |
 | Host | Caddy sends `Host: todo.sadeq.uk` without a change. The bot refuses another host with 421, except on `/healthz` and `/readyz`. |
-| Forwarded headers | Caddy sets `X-Forwarded-For` and `X-Forwarded-Proto: https`. Cloudflare sets `CF-Connecting-IP`. |
-| Client IP | Only when the TCP peer is in `TODO_WEB_TRUSTED_PROXIES`, the bot uses `CF-Connecting-IP`. If that header is absent, it uses the last entry of `X-Forwarded-For`. Otherwise it uses the TCP peer. The bot uses the client IP only for rate limits and logs. |
+| Forwarded headers | Caddy sets `X-Forwarded-For` and `X-Forwarded-Proto: https`. Cloudflare sets `CF-Connecting-IP` and `CF-IPCountry`. |
+| Client IP | When the TCP peer is in `TODO_WEB_TRUSTED_PROXIES` and `CF-Connecting-IP` is present, the bot uses that header. In all other cases it uses the TCP peer. It never reads `X-Forwarded-For`: behind Caddy, its last entry is the Cloudflare edge and not the client. The bot uses the client IP only for rate limits, logs and the sign-in notice. |
+| Country | The bot reads `CF-IPCountry` only from a trusted peer, for the sign-in notice. Without it, the notice shows `??`. |
 | Cloudflare only | Caddy accepts `todo.sadeq.uk` only from the Cloudflare IP ranges, or with Authenticated Origin Pulls. Otherwise an attacker can send a false `CF-Connecting-IP`. |
 | Health | `GET /healthz` gives 200 `ok` and does not touch the database. `GET /readyz` gives 200 after one small database read, or 503. |
 | Response headers | Caddy passes `Content-Security-Policy`, `Set-Cookie`, `Cache-Control` and `ETag` without a change. It adds no cache. |
@@ -740,13 +828,18 @@ A Go-only contributor runs `make ci` as today, and needs no Node.
 
 - **State.** All web state is in the database: sessions, login codes and membership. Any node can answer any request, so Caddy can send requests to more than one node.
 - **Coordination.** The web adds only these conditional writes:
-  - `ApproveLoginCode` (`WHERE user_id IS NULL`): one approval wins.
-  - `TakeLoginCode`, a conditional delete: one poll gets the session.
+  - `PutLoginCode`: the cap and the rule of one code per user, in one transaction.
+  - `TakeLoginCode`, a conditional delete: one redeem gets the session.
+  - `UseProof`, an insert on a primary key: one widget sign-in wins.
   - Session and membership writes are single-row upserts, where the last writer wins. Both values are correct, because they come from Telegram or from the same user.
-- **Rate limits are an exception to §9.** Each node keeps its rate limits in memory. This is not coordination, because the limits only slow down abuse. With N nodes, the real limit is N times larger. This design accepts that.
+- **Rate limits are an exception to §9.** Each node keeps its rate limits in memory. This is not coordination, because the limits only slow down abuse. With N nodes, the real limit is N times larger. This design accepts that. The counters of failed redeems, the node limit on `getChatMember` and the single call for each pair of user and group are also in memory. They only save calls or slow down abuse.
 - **No SSE.** A server-sent event to many nodes needs a shared message bus, or in-memory state on each node. The ETag poll of §7.6 works on any node and needs no new table.
 - **The scheduler.** A web change calls `Service.wake()` in its own process. Other nodes see the change at their next wake-up, at most `TODO_SCHED_MAX_SLEEP` later. That is the same as for a bot command today.
-- **One SQLite connection.** Web requests use the same connection as the bot. Each request makes at most 4 queries and 1 write, and no long transaction.
+- **One SQLite connection.** Web requests use the same connection as the bot.
+  - Most requests make at most 4 queries and 1 write, and no long transaction.
+  - `GET /api/chats` is the exception. It reads one row for each candidate (at most 50 groups and the rows of the user), and it writes one row for each check.
+  - The web never calls Telegram inside `WithTx`, because a slow call there blocks the one connection.
+- **Bind address.** The web binds to loopback only now (§9.1). Nodes on more than one host need a bind on a private network. A later issue can relax the rule for that.
 - **Upgrade of one node at a time.** `0005` adds tables only, so an older binary is not affected. Caddy must send web traffic only to nodes with the web on.
 
 ## 11. Security and threat model
@@ -790,10 +883,10 @@ form-action 'self'; frame-ancestors https://web.telegram.org
 
   | Endpoint | Limit |
   |---|---|
+  | `GET /readyz` | 60 per minute per IP |
   | `POST /api/auth/miniapp` | 10 per minute per IP |
-  | `POST /api/auth/code` | 5 per minute per IP |
-  | `POST /api/auth/code/poll` | 60 per minute per IP |
-  | `POST /api/auth/code/{code}/approve` | 10 per minute per user |
+  | `POST /api/auth/code` | 5 per 10 minutes per user |
+  | `POST /api/auth/code/redeem` | 10 per minute per IP. Failures: 5 per 10 minutes per IP, and 60 per hour per node. |
   | `GET /auth/telegram` | 10 per minute per IP |
   | all other `/api/*` with a session | 300 per minute per user |
 
@@ -803,23 +896,23 @@ form-action 'self'; frame-ancestors https://web.telegram.org
   - Path IDs must parse as `int64`.
 - **Output.** The API sends JSON only. The app shows text as text. No code calls `innerHTML` or `dangerouslySetInnerHTML`. A unit test in W2 searches the source for these names.
 - **Host.** The server refuses a `Host` other than the host of `TODO_WEB_ORIGIN` (421). This stops DNS rebinding to `127.0.0.1:8088`.
-- **Logs.** The log never contains a session token, `initData`, a `hash`, a cookie, an `Authorization` header, a poll token or a login code. It can contain the user ID, the method, the route pattern, the status and the duration. A test captures the log of a full login and checks that no secret is in it.
+- **Logs.** The log never contains a session token, `initData`, a `hash`, a cookie, an `Authorization` header or a login code. The code never appears in a URL. It can contain the user ID, the method, the route pattern, the status and the duration. A test captures the log of a full login and checks that no secret is in it.
 
 ### 11.4 Threat model
 
 | # | Threat | Attack | Control | Residual risk |
 |---|---|---|---|---|
 | 1 | False identity | A false `initData` or false widget fields | HMAC with a key from the bot token, compared in constant time; the age limit | Low. It needs the bot token. |
-| 2 | Replay of a proof | A leaked `initData` or widget URL | Age limit of 1 h; never in logs; TLS only | Low, for 1 h |
+| 2 | Replay of a proof | A leaked `initData` or widget URL | Age limit of 1 h for `initData`, and 10 min to make a login code; each widget proof works one time, for 10 min; never in logs; TLS only | Low |
 | 3 | Session theft from a copy of the database | A backup leaks | The table holds only SHA-256 hashes of tokens | Low |
 | 4 | Session theft through XSS | Script in an item text | No HTML output; strict CSP without `unsafe-inline`; `HttpOnly` cookie | Medium for the Mini App token in `sessionStorage`. The CSP is the control. |
-| 5 | CSRF | A cross-site form or `fetch` with the cookie | `SameSite=Strict`, the `X-Todo-Request` header, `Origin` and `Sec-Fetch-Site` checks, no CORS | Low |
+| 5 | CSRF and login CSRF | A cross-site form or `fetch`, with the cookie or to a sessionless endpoint | `SameSite=Strict`; the `X-Todo-Request` header, `Origin` and `Sec-Fetch-Site` checks and JSON on every unsafe `/api/*` request; no CORS | Low |
 | 6 | Clickjacking | Another site frames the app | `frame-ancestors 'none'` on `/`; only Telegram Web on `/tg/` | Low |
-| 7 | Read of a group by a person who is not a member | A request with another group ID | `groupActor` with a `getChatMember` answer at most 10 min old; the hint never grants access | Low |
+| 7 | Read of a group by a person who is not a member | A request with another group ID | The actor middleware calls `groupActor` for every route under `{chat}`, with a `getChatMember` answer at most 10 min old; the hint never grants access | Low |
 | 8 | Access after the owner removes a user from the allowlist | An old session | Allowlist check on every request; sessions deleted; pruned at start | None after the restart |
 | 9 | Access after a user leaves a group | A cached `member` row | `TODO_WEB_MEMBER_TTL` of 10 min, and 1 h of grace during a Telegram outage | Medium for at most 1 h |
-| 10 | Guess of a login code or poll token | Brute force | 256-bit poll token; approval needs a signed-in Mini App; 5 min life; rate limits | Low |
-| 11 | Phishing with a login code | The attacker sends a victim a link to approve the attacker's code | The approval screen shows the device text, the code and a warning; a button press is necessary; "Log out everywhere" | Medium. It needs a mistake by the user. |
+| 10 | Guess of a login code | Brute force on redeem | 40-bit code; one use; 5 min life; at most 100 live codes; 5 failures per IP in 10 min; 60 failures per node in 1 h | Low. During an attack, the node limit can stop real sign-ins for at most 1 h. |
+| 11 | Phishing with a login code | The attacker asks the victim to send a code from the Mini App | The user types the code by hand, and no link signs anyone in; the warning "Never send it to another person"; no text chosen by the attacker on any screen; the sign-in notice with "Log out everywhere" | Medium. It needs a mistake by the user, and the notice shows the sign-in at once. |
 | 12 | False client IP | A false `CF-Connecting-IP` | The server reads forwarded headers only from trusted proxies; Caddy accepts only Cloudflare | Low. The IP controls only rate limits. |
 | 13 | Direct access to the port, or DNS rebinding | A local process, or a page that points a host name at 127.0.0.1 | Loopback bind only; the `Host` check | Low |
 | 14 | A bad npm package | Supply chain | Few dependencies; exact versions; lockfile; `npm ci --ignore-scripts`; nothing from npm runs at run time except the bundle | Medium. This design accepts it. |
@@ -829,6 +922,9 @@ form-action 'self'; frame-ancestors https://web.telegram.org
 | 18 | Access to an item of another chat (IDOR) | An item ID from another chat | The service checks `t.ChatID == a.ChatID` or the assignee rule; `groupActor` checks the chat; both give 404 | Low |
 | 19 | Secrets in logs | Debug log | The rules of §11.3, and a test | Low |
 | 20 | The bot token leaks | Theft of the env file | All proofs fail when the owner changes the token. The owner also deletes all web sessions (§16). | Medium until the owner acts |
+| 21 | A stolen Mini App token makes a login code | Theft of the bearer token from `sessionStorage` | `POST /api/auth/code` also needs `initData` at most 10 min old, for the same user | Low |
+| 22 | A login code in a log | The code in a URL path or query | The browser sends the code only in a JSON body; the log rules of §11.3 | Low |
+| 23 | A flood of login codes | Many calls to `POST /api/auth/code` | A Mini App session and fresh `initData` are necessary; one live code per user; at most 100 live codes; 5 per 10 min per user | Low |
 
 ## 12. Testing
 
@@ -846,37 +942,47 @@ All Go tests follow the rules of `CLAUDE.md`: `clocktest.Fake` for time, `tgtest
   - a user who is not allowlisted;
   - `user.id` 0;
   - a body above 4 KiB.
-- **The widget.** The same cases, with the key `SHA256(token)`.
+- **The widget.** The same cases, with the key `SHA256(token)` and the 10 min age limit. A second use of one proof fails.
+- **Login code.**
+  - A code needs a Mini App session and `initData` at most 10 min old of the same user. The token alone gives 401.
+  - A second code deletes the first one. The cap of 100 live codes gives 503.
+  - Two redeems at the same time give one session. A used, expired or wrong code gives 401 `bad_code`.
+  - The normalisation of `-`, spaces, lower case, `I`, `L` and `O`.
+  - The failure limits per IP and per node.
+  - The sign-in notice: the text, the button URL, and no `User-Agent`.
 - **Sessions.**
   - Expiry with `Fake.Advance`.
   - The expiry update at most one time per hour, and the absolute limit.
   - Logout and "log out everywhere".
   - Allowlist revocation and the prune at start.
-  - The limit of 20 sessions.
+  - The limits of 5 `miniapp` and 20 `browser` sessions, each kind on its own.
   - Bearer and cookie, and the header wins when both are present.
-- **CSRF.** A cookie `POST` without `X-Todo-Request` gives 403. A cross-site `Sec-Fetch-Site` gives 403. A bearer request does not need the header.
+- **CSRF.** A `POST` without `X-Todo-Request` gives 403: with a cookie, with a bearer token, and with no session (endpoints 4 and 13). A cross-site `Sec-Fetch-Site` gives 403.
 - **Membership.**
-  - A fresh row: no Telegram call.
-  - An old row: exactly one call.
-  - `left` and `kicked`: 403, and the row becomes `left`.
-  - `restricted` with `is_member` true and false.
-  - An admin removed the bot: every row of the chat becomes `left`.
-  - `MigrateTo`: the server calls `MigrateChat`, and the answer is 409 with the new ID.
+  - A fresh `member` row: no Telegram call. A fresh `left` row: 403 and no call.
+  - A row with `seen_at > checked_at`: one call.
+  - An old row: exactly one call. Two requests at the same time for one pair: one call.
+  - The node limit: a call above it counts as a temporary error.
+  - Each row of the table of §4.4 step 4, in its order. "user is deactivated" gives 403 `not_member` and does not mark the chat as gone.
+  - `MigrateTo`: the server calls `MigrateChat` and `ChatGone` for the old ID, and the answer is 409 with the new ID. The old ID is never a candidate again.
   - A temporary error inside and outside the grace window.
   - A hint row alone never grants access.
-  - Discovery: at most 4 checks at the same time, and the 5 s stop.
+  - Discovery: only chats in `chats`, at most 4 checks at the same time, and the 5 s stop.
 - **API.**
   - Every endpoint, with a correct request and each error of §5.3.
+  - Every route under `{chat}`, called by a user who is not a member of the group, gives 403 or 404.
+  - A change of language calls `SetKBVersion(user, 0)`.
   - Golden files of the item JSON in `internal/web/testdata/api/`: en and fa, Gregorian and Jalali, with and without a date, a repeat and an assignee.
   - The ETag gives `304`.
   - The actor for an assigned item.
   - The server sends the "did" notice one time.
   - The "remind later" presets across a DST change, with `time.Date`.
-- **Headers.** The CSP of each route, HSTS, the `Host` check, and the client IP with and without a trusted proxy.
+- **Headers.** The CSP and the cache headers of each route, HSTS, the `Host` check, and the client IP with and without a trusted proxy.
 - **Logs.** No secret in the log of a full login (§11.3).
 - **Store.** The conformance suite `storetest/web.go`:
   - session CRUD and expiry;
-  - `ApproveLoginCode` and `TakeLoginCode` from two handles at the same time, where exactly one wins;
+  - `TakeLoginCode` and `UseProof` from two handles at the same time, where exactly one wins;
+  - `PutLoginCode` with the cap and one code per user;
   - the upsert rules of `chat_members`;
   - the retention of `Purge`;
   - `ListGroupChats`.
@@ -897,15 +1003,19 @@ All Go tests follow the rules of `CLAUDE.md`: `clocktest.Fake` for time, `tgtest
 `internal/e2e/web_test.go` (W10) starts the full process in the current harness, with the mock Telegram server and the fake clock. It starts the web on `127.0.0.1:0`. Then it does these steps:
 
 1. Sign in with a signed `initData`.
-2. Add `buy milk tomorrow 18:00 every week` through `POST /api/chats/{me}/items`. Compare the stored row with the row that `/add buy milk tomorrow 18:00 every week` gives in a second chat.
-3. Read the list.
-4. Advance the clock. Make sure that the reminder arrives in the mock Telegram server one time.
-5. Mark the item done through the API.
-6. In a group: the mock answers `getChatMember` with `member`. List the group, and add an item assigned to a second user.
-7. The second user completes it from **Assigned to me**. Make sure that the "did" notice arrives in the group one time.
-8. The mock now answers `left`. After `TODO_WEB_MEMBER_TTL`, make sure that the group list gives 403.
+2. Make a login code with the Mini App session and fresh `initData`. Redeem it with a second client that has no session. Make sure that the client gets the cookie, and that the sign-in notice arrives in the mock Telegram server one time.
+3. Add `buy milk tomorrow 18:00 every week` through `POST /api/chats/{me}/items`. Compare the stored row with the row that `/add buy milk tomorrow 18:00 every week` gives in a second chat.
+4. Read the list.
+5. Advance the clock. Make sure that the reminder arrives in the mock Telegram server one time.
+6. Mark the item done through the API.
+7. In a group: the mock answers `getChatMember` with `member`. List the group, and add an item assigned to a second user.
+8. The second user completes it from **Assigned to me**. Make sure that the "did" notice arrives in the group one time.
+9. The mock now answers `left`. After `TODO_WEB_MEMBER_TTL`, make sure that the group list gives 403.
 
-### 12.4 Manual checks before each phase closes
+### 12.4 Manual checks before each phase closes (owner)
+
+The owner does these checks, because they need real devices and a real Telegram account.
+
 
 - The Mini App in Telegram for iOS, Android and Desktop, and in Telegram Web K and A.
 - PWA install on Chrome for desktop, Chrome for Android and Safari for iOS.
@@ -913,22 +1023,22 @@ All Go tests follow the rules of `CLAUDE.md`: `clocktest.Fake` for time, `tgtest
 
 ## 13. CONTRACT CHANGES
 
-The changes below are necessary. W1 makes all of them except the last two lines. W14 makes `tg.Button`, and #98 makes `TodoPatch`.
+The changes below are necessary. W1 and W1b make all of them except the #98 line. W1 writes the ARCHITECTURE §3 lines for both.
 
 | Package or file | Change | Sub-issue |
 |---|---|---|
-| `migrations/sqlite/0005_web.sql` | a new migration file: `web_sessions`, `web_login_codes`, `chat_members` | W1 |
+| `migrations/sqlite/0005_web.sql` | a new migration file: `web_sessions`, `web_login_codes`, `web_used_proofs`, `chat_members` | W1 |
 | `internal/model` | a new file `web.go`: `WebSession`, `WebSessionKind`, `LoginCode`, `ChatMember`, `MemberStatus` | W1 |
 | `internal/store` | `Store` gets the 17 methods of §6.3. The doc comment of `Purge` lists the new deletes. `MigrateChat` does not change. | W1 |
 | `internal/service` | a new interface `service.Web` (below), implemented by `*Svc`. `service.Service` does **not** change, so the handler fakes do not change. | W1 |
-| `internal/tg` | a new file `members.go`: `MemberChecker`, `ChatMember`, `MemberStatus` (below). `Sender` does not change. | W1 |
-| `internal/tg/tgbot` | `(*Bot).ChatMember` implements `tg.MemberChecker` | W1 |
-| `internal/tg/tgtest` | a new `FakeMembers` | W1 |
-| `internal/config` | `Config` gets the fields of §9.1 | W1 |
+| `internal/tg` | a new file `members.go`: `MemberChecker`, `ChatMember`, `MemberStatus` (below). `Sender` does not change. | W1b |
+| `internal/tg` | `Button` gets `URL string` and `WebAppURL string`, for the sign-in notice (§3.3.1) and the "Open app" buttons | W1b |
+| `internal/tg/tgbot` | `(*Bot).ChatMember` implements `tg.MemberChecker`. The markup maps the new `Button` fields. | W1b |
+| `internal/tg/tgtest` | a new `FakeMembers` | W1b |
+| `internal/config` | `Config` gets the fields of §9.1 | W1b |
 | `internal/ui` | no change. The web uses `FormatWhen`, `DescribeRule` and `Mention`. | – |
 | `internal/i18n` | no change. The web uses `Keys` and `T`. | – |
 | `internal/handler/router.go` | no change. The observer wraps `Handle` in `cmd/todo-bot`. | – |
-| `internal/tg` | `Button` gets `URL string` and `WebAppURL string` for the "Open app" buttons. `tgbot` maps them. | W14 |
 | `internal/service` | `UpdateTodo` and `TodoPatch` come from #98. The web only calls them. | #98 |
 
 ```go
@@ -936,6 +1046,7 @@ The changes below are necessary. W1 makes all of them except the last two lines.
 // Web is the API of internal/web (docs/WEB-DESIGN.md). *Svc implements it.
 type Web interface {
 	// Sessions. The token is never stored; the store keeps its SHA-256.
+	// StartWebSession trims the sessions of the same kind (5 miniapp, 20 browser).
 	StartWebSession(ctx context.Context, userID int64, kind model.WebSessionKind,
 		device string, idle, max time.Duration) (token string, s model.WebSession, err error)
 	// WebSession returns the live session of token (ErrNotFound if none). For a
@@ -945,12 +1056,15 @@ type Web interface {
 	EndUserWebSessions(ctx context.Context, userID int64) error
 	PruneWebSessions(ctx context.Context, allowed map[int64]bool) (int, error)
 
-	// Login codes (§3.3).
-	NewLoginCode(ctx context.Context, device string) (code, pollToken string, c model.LoginCode, err error)
-	LoginCode(ctx context.Context, code string) (model.LoginCode, error)
-	ApproveLoginCode(ctx context.Context, code string, userID int64) error // ErrNotFound, ErrCodeUsed
-	CancelLoginCode(ctx context.Context, code string) error
-	TakeLoginCode(ctx context.Context, pollToken string) (model.LoginCode, error)
+	// Login codes (§3.3). internal/web verifies init_data before NewLoginCode.
+	NewLoginCode(ctx context.Context, userID int64) (code string, c model.LoginCode, err error) // ErrTooManyCodes
+	// RedeemLoginCode normalises code and takes the row. ErrNotFound if the
+	// code is unknown, expired or used.
+	RedeemLoginCode(ctx context.Context, code string) (model.LoginCode, error)
+	CancelLoginCodes(ctx context.Context, userID int64) error
+
+	// Login Widget proofs (§3.4). fresh=false if the proof was used before.
+	UseProof(ctx context.Context, hash string, expiresAt time.Time) (fresh bool, err error)
 
 	// Membership (§4). The service only stores; internal/web calls Telegram.
 	NoteMember(ctx context.Context, a Actor) error
@@ -965,7 +1079,7 @@ type Web interface {
 	User(ctx context.Context, userID int64) (model.User, error)
 }
 
-var ErrCodeUsed = errors.New("login code already approved")
+var ErrTooManyCodes = errors.New("too many live login codes")
 ```
 
 ```go
@@ -978,7 +1092,8 @@ type ChatMember struct {
 }
 
 // MemberChecker calls getChatMember. *tgbot.Bot implements it. Errors are
-// *APIError where Telegram answered, as for Sender.
+// *APIError where Telegram answered, with the code and the description,
+// so that internal/web can classify them (docs/WEB-DESIGN.md §4.4).
 type MemberChecker interface {
 	ChatMember(ctx context.Context, chatID, userID int64) (ChatMember, error)
 }
@@ -1009,40 +1124,59 @@ type Deps struct {
 
 - At most 4 sub-issues run at the same time. One developer can do each one.
 - Sub-issues that run at the same time never edit the same file. A later sub-issue can edit a file that an earlier, merged sub-issue made. The lists below name each such file.
+- **Stubs made up front.**
+  - W2 makes `web/src/app.tsx` with fixed imports of the stubs in `tabs/`, `login/`, `code/`, `actions/` and `edit/`.
+  - W3 makes `internal/web/server.go` with the full route table of §5.3, and `errors.go` with every error code of §5. It also makes `messages_web.go` with every `web.err.*` string, the actor middleware of §5.5, and one stub file for each later Go sub-issue. A stub handler answers 501 `not_implemented`.
+  - A later sub-issue replaces only its own stub files. No later sub-issue edits `server.go`, `errors.go` or `messages_web.go`. If a sub-issue needs a change there, it asks in its PR.
 - **Owners of shared files.**
   - `cmd/todo-bot/run.go`: W3, then W4, then W14.
-  - `docs/ARCHITECTURE.md`: W1, then W10.
+  - `docs/ARCHITECTURE.md`: W1, then W10, then W14.
+  - `internal/tg/tgbot/tgbot.go`: W1b, then W14.
+  - `internal/web/headers.go`: W3, then W13.
   - `web/vite.config.ts`: W2, then W6.
   - `web/src/app.tsx`: W2, then W9, then W12.
+  - `web/src/login/index.tsx`: W2 (stub), then W7, then W13.
+- **Owner checks.** An acceptance line that starts with **Owner check** needs the owner, because it needs a real device, BotFather or a real Telegram account. The developer writes the steps in the PR. The owner does the check and ticks the line.
 - Each sub-issue copies its acceptance criteria into its PR as a checklist, and `make ci` must pass. A sub-issue that touches `web/` must also pass `make web-test`.
 - Branch names follow `issue-<N>-<slug>`.
 
 ### 14.2 Phase 1: plumbing, auth and the Mini App shell
 
-**W1. Web contracts and store** (Go)
-- **Depends on:** #98 part A merged, because both edit `docs/ARCHITECTURE.md` §3.
+W1, W1b, W2 and W2b run at the same time. W3 starts after all four merge.
+
+**W1. Web store and service contracts** (Go)
+- **Depends on:** nothing. #98 part A (#107) has merged, so `docs/ARCHITECTURE.md` §3 is free.
 - **Owns:**
   - `migrations/sqlite/0005_web.sql`;
   - `internal/model/web.go`;
   - `internal/store/store.go`, `internal/store/sqlstore/web.go`, the `Purge` change in `internal/store/sqlstore/multinode.go`;
   - `internal/store/storetest/web.go` and `suite.go`, `internal/store/sqlite/sqlite_test.go` (the version checks);
   - `internal/service/web.go` and `web_test.go`;
-  - `internal/tg/members.go`, `internal/tg/tgbot/members.go` with its test, `internal/tg/tgtest/members.go`;
-  - `internal/config/config.go` and `config_test.go`, `deploy/env.example`;
-  - `docs/ARCHITECTURE.md`: the §3 lines, and a §14 that points to this document.
+  - `docs/ARCHITECTURE.md`: the §3 lines for the contracts of W1 and W1b, and a section that points to this document.
 - **Acceptance:**
   - [ ] The migration has version 0005 (or the next free number), and the parity test passes.
-  - [ ] W1 implements every store method of §6.3, and `storetest` covers each one. The two-handle cases for `ApproveLoginCode` and `TakeLoginCode` give exactly one winner.
+  - [ ] W1 implements the 17 store methods of §6.3, and `storetest` covers each one. The two-handle cases for `TakeLoginCode` and `UseProof` give exactly one winner. `PutLoginCode` keeps the cap and one code per user.
   - [ ] `Purge` applies the retention of §6.4.
-  - [ ] `*Svc` implements `service.Web`. Tests use SQLite in `t.TempDir()` and `clocktest.Fake`. They cover the expiry update and the hash-only storage.
-  - [ ] `tgbot` maps `getChatMember` and its errors. The test uses an `httptest` Telegram server.
-  - [ ] `config.Load` parses and checks the variables of §9.1. It refuses a `TODO_WEB_ADDR` that is not on loopback.
+  - [ ] `*Svc` implements `service.Web`. Tests use SQLite in `t.TempDir()` and `clocktest.Fake`. They cover the expiry update, the session limits for each kind, and the hash-only storage.
   - [ ] The PR has a `CONTRACT CHANGE` section with the W1 rows of §13.
+
+**W1b. Telegram and config contracts** (Go)
+- **Depends on:** nothing. It runs at the same time as W1.
+- **Owns:**
+  - `internal/tg/members.go`, `internal/tg/tg.go` (`Button.URL`, `Button.WebAppURL`);
+  - `internal/tg/tgbot/members.go` with its test, `internal/tg/tgbot/tgbot.go` (the markup of the new button fields);
+  - `internal/tg/tgtest/members.go`;
+  - `internal/config/config.go` and `config_test.go`, `deploy/env.example`.
+- **Acceptance:**
+  - [ ] `tgbot` maps `getChatMember`. Its errors are `*APIError` values with the code and the description. The test uses an `httptest` Telegram server.
+  - [ ] A button with `WebAppURL` gives `web_app` markup, and a button with `URL` gives `url` markup. A button with `Data` does not change.
+  - [ ] `config.Load` parses and checks the variables of §9.1. It refuses a `TODO_WEB_ADDR` that is not on loopback.
+  - [ ] The PR has a `CONTRACT CHANGE` section with the W1b rows of §13.
 
 **W2. Frontend scaffold and build** (Node and build files)
 - **Depends on:** nothing. It runs at the same time as W1.
 - **Owns:**
-  - `web/**`: the files of §7.1 except `tabs/`, `login/`, `approve/`, `actions/` and `edit/`, which it makes only as stubs;
+  - `web/**`: the files of §7.1 except `tabs/`, `login/`, `code/`, `actions/` and `edit/`, which it makes only as stubs;
   - `internal/web/doc.go`, `internal/web/assets_webui.go`, `internal/web/assets_placeholder.go`, `internal/web/placeholder/index.html`;
   - `.gitignore`, `Makefile`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`;
   - `scripts/deploy.sh` (the `build()` step and the `-tags=webui` guard) and `scripts/test-deploy.sh`.
@@ -1055,41 +1189,58 @@ type Deps struct {
   - [ ] The Mini App shell signs in with `POST /api/auth/miniapp` and shows the user name from `GET /api/me`. Tests mock `fetch`.
   - [ ] RTL and the theme work in the shell. A test checks that the source has no `innerHTML`.
 
+**W2b. The `initData` verifier** (Go)
+- **Depends on:** nothing. It runs at the same time as W1.
+- **Owns:** `internal/web/initdata.go` and `initdata_test.go`. The file has `verifyInitData(raw, botToken string, now time.Time, maxAge time.Duration) (initData, error)` and the result type. It uses only the standard library.
+- **Acceptance:**
+  - [ ] Every `initData` case of §12.1 passes, with the steps of §3.2.
+  - [ ] The same function serves the sign-in (1 h) and the login code (10 min) with the `maxAge` argument.
+  - [ ] **Owner check:** one real `initData` from the development bot passes (§3.2). The repository keeps no real data.
+
 **W3. Web server core and Mini App sign-in** (Go)
-- **Depends on:** W1 and W2 merged.
+- **Depends on:** W1, W1b, W2 and W2b merged.
 - **Owns:**
-  - `internal/web/server.go`, `deps.go`, `static.go`, `headers.go`, `clientip.go`, `ratelimit.go`, `errors.go`;
-  - `internal/web/initdata.go`, `session.go`, `auth.go`, `me.go`, `i18n_api.go`;
-  - `internal/web/membership.go`: a simple `groupActor` that reads only the row (no Telegram call). W4 replaces it;
-  - `internal/web/chats_api.go`: `GET /api/chats` with the private chat only. W4 replaces it;
-  - `internal/web/messages_web.go` (`web.app.*`, `web.err.*`) and the tests of all these files;
+  - `internal/web/server.go` (the full route table of §5.3), `deps.go`, `static.go`, `headers.go`, `clientip.go`, `ratelimit.go`, `errors.go` (every error code of §5), `actor.go` (§5.5);
+  - `internal/web/session.go`, `auth.go` (endpoints 4 to 6), `me.go`, `i18n_api.go`;
+  - `internal/web/messages_web.go` (`web.app.*` and every `web.err.*` string);
+  - the stubs that later sub-issues replace:
+    - `membership.go` (`groupActor` answers 404), `observe.go` (it passes each update through) and `chats_api.go` (the private chat only), for W4;
+    - `items_read.go`, for W5;
+    - `auth_code.go`, for W7;
+    - `items_write.go`, `parse_api.go`, `members_api.go` and `settings_api.go`, for W8;
+    - `items_edit.go`, for W11;
+    - `auth_widget.go`, for W13;
+  - the tests of all these files;
   - `cmd/todo-bot/run.go` and `run_test.go` (start and stop the server, `PruneWebSessions` at start), `cmd/todo-bot/main.go` (the `version` line).
 - **Acceptance:**
   - [ ] Endpoints 1 to 9 of §5.3 work as specified, with the error codes.
-  - [ ] Every `initData` and session case of §12.1 passes.
-  - [ ] The CSRF guard, the headers and CSP of §11, the `Host` check, the client IP rule and the rate limits have tests.
+  - [ ] W3 registers every other route of §5.3, and each one answers 501 `not_implemented`.
+  - [ ] The actor middleware follows §5.5. The own ID gives the private actor, another positive ID gives 404, and a negative ID calls `groupActor`. No handler reads `{chat}`.
+  - [ ] Every session case of §12.1 passes, with the limits for each kind.
+  - [ ] The CSRF guard on every unsafe `/api/*` request, the headers, the CSP and the cache headers of §7.5 and §11 have tests. The `Host` check, the client IP rule and the rate limits (`/readyz` included) also have tests.
   - [ ] No secret is in the log of a full sign-in.
   - [ ] With `TODO_WEB_ADDR` empty, no listener starts, and the bot works as before.
-  - [ ] Shutdown stops the web first, inside the 10 s budget.
+  - [ ] Shutdown stops the web at the same time as the lease loop, inside the one `shutdownTimeout`.
   - [ ] The PR records the binary size and the idle RSS before and after (§8.5).
-  - [ ] One real `initData` from the development bot passes, checked by hand (§3.2).
 
 ### 14.3 Phase 2: read-only tabs, membership and the PWA
 
 All four sub-issues depend on W3 merged. They run at the same time.
 
 **W4. Group membership** (Go)
-- **Owns:** `internal/web/membership.go` (it replaces the W3 stub), `internal/web/observe.go`, `internal/web/chats_api.go` (it replaces the W3 stub), their tests, and `cmd/todo-bot/run.go` (the observer wraps `h.Handle`).
+- **Owns:** `internal/web/membership.go`, `observe.go` and `chats_api.go` (they replace the W3 stubs), their tests, and `cmd/todo-bot/run.go` (the observer wraps `h.Handle`).
 - **Acceptance:**
-  - [ ] `groupActor` follows §4.4, with every row of its table tested.
-  - [ ] `GET /api/chats` follows §4.5: at most 4 checks at the same time, the 5 s stop, `partial`.
+  - [ ] `groupActor` follows §4.4: the freshness rules, one call for each pair, the node limit, and the table in its order.
+  - [ ] `GET /api/chats` follows §4.5: candidates only from `chats`, at most 4 checks at the same time, the 5 s stop, `partial`.
+  - [ ] On `MigrateTo`, the rows of the old ID become `left`, and the old ID is never a candidate.
   - [ ] The observer writes hints only for allowlisted users in groups, at most one time per hour, and never grants access.
   - [ ] The title for the actor comes from the `chats` row.
 
 **W5. Read API** (Go)
-- **Owns:** `internal/web/items_read.go`, `dto.go`, `format.go` (`due_full`), `etag.go`, `messages_items.go` (`web.item.*`), `internal/web/testdata/api/*.json`, and their tests.
+- **Owns:** `internal/web/items_read.go` (it replaces the W3 stub), `dto.go`, `format.go` (`due_full`), `etag.go`, `messages_items.go` (`web.item.*`), `internal/web/testdata/api/*.json`, and their tests.
 - **Acceptance:**
-  - [ ] Endpoints 10 and 11 work. **Mine** uses the user's own ID. A group calls `groupActor` before `List`.
+  - [ ] Endpoints 10 and 11 work. The handlers read the actor with `actorFrom`, and never read `{chat}`.
+  - [ ] Endpoint 10, called by a user who is not a member of the group, gives 403 or 404.
   - [ ] The golden files cover en and fa, Gregorian and Jalali, with Persian digits.
   - [ ] `If-None-Match` gives `304`. The ETag does not change with `rendered_at`.
   - [ ] **Assigned to me** has `chat_title` and at most 200 items.
@@ -1099,29 +1250,35 @@ All four sub-issues depend on W3 merged. They run at the same time.
 - **Acceptance:**
   - [ ] The three tabs, the group chips, the empty states and "Load more" work against the golden JSON.
   - [ ] Refetch on `visibilitychange`, on `focus` and on `activated`.
-  - [ ] The manifest and the icons (192, 512, maskable, apple-touch) pass the Chrome install check.
   - [ ] The service worker caches the shell only. It does not handle `/api/`, `/auth/` or `/tg/`. The update banner works.
   - [ ] Offline, the app shows the cached lists with `due_full`, a banner and no actions. Logout clears them.
+  - [ ] **Owner check:** install the PWA on Chrome for desktop, Chrome for Android and Safari for iOS. Check the icons (192, 512, maskable, apple-touch).
 
 **W7. Login code** (Go and Node)
-- **Owns:** `internal/web/auth_code.go`, its tests, `internal/web/messages_login.go` (`web.login.*`), `web/src/login/**` (the code screen) and `web/src/approve/**`.
+- **Owns:** `internal/web/auth_code.go` (it replaces the W3 stub), `internal/web/signin_notice.go`, their tests, `internal/web/messages_login.go` (`web.login.*`, `web.tg.signin`), `web/src/login/index.tsx` (the code field), and `web/src/code/**`.
 - **Acceptance:**
-  - [ ] Endpoints 12 to 16 follow §3.3.
-  - [ ] Two polls at the same time give one session. Two approvals at the same time give one winner.
-  - [ ] A code expires after 5 min. A cancelled code gives 410 to the poll.
-  - [ ] The approval screen shows the device text, the code and the warning.
+  - [ ] Endpoints 12 to 14 follow §3.3.
+  - [ ] A code needs a Mini App session and `initData` at most 10 min old of the same user. A Mini App token alone gives 401.
+  - [ ] Two redeems at the same time give one session. A used, expired or wrong code gives 401 `bad_code`.
+  - [ ] The failure limits per IP and per node, the cap of 100 live codes, and one live code per user have tests.
+  - [ ] The code appears in no URL and in no log.
+  - [ ] The sign-in notice follows §3.3.1, with the `web_app` button to the sign-out screen. A send error does not stop the sign-in.
   - [ ] The PWA gets the cookie and opens the tabs.
+  - [ ] **Owner check:** a sign-in of the installed PWA on iOS with a code, and the sign-out from the notice.
 
 ### 14.4 Phase 3: add, done, delete and remind later
 
 **W8. Write API** (Go)
 - **Depends on:** W4 and W5 merged.
-- **Owns:** `internal/web/items_write.go`, `parse_api.go`, `members_api.go`, `settings_api.go`, `notify.go` (the "did" notice), `messages_write.go` (`web.item.*` write strings, `web.tg.did`), and their tests.
+- **Owns:** `internal/web/items_write.go`, `parse_api.go`, `members_api.go` and `settings_api.go` (they replace the W3 stubs), `notify.go` (the "did" notice), `messages_write.go` (`web.write.*`, `web.tg.did`), and their tests.
 - **Acceptance:**
-  - [ ] Endpoints 17 to 23 work as specified, with every error code.
+  - [ ] Endpoints 15 to 21 work as specified, with every error code.
+  - [ ] Each route of W8 under `{chat}` (16 to 20), called by a user who is not a member of the group, gives 403 or 404.
+  - [ ] Members (16) works for a group and for the private chat.
   - [ ] Add follows §5.4: digits, the 1000-rune limit, the parse in the user's time zone, the assignee check.
   - [ ] "Remind later" `tomorrow` uses `TODO_DEFAULT_TIME` with `time.Date`, and it is correct across a DST change.
   - [ ] The server sends the "did" notice one time, only for the assignee from another chat, in the creator's locale.
+  - [ ] A change of language calls `SetKBVersion(user, 0)`.
   - [ ] Every write wakes the scheduler: a test with the fake clock sees the reminder.
 
 **W9. Frontend: actions** (Node)
@@ -1134,73 +1291,84 @@ All four sub-issues depend on W3 merged. They run at the same time.
   - [ ] An error shows the `message` of the server.
 
 **W10. e2e and user docs**
-- **Depends on:** W8 merged.
+- **Depends on:** W8 merged, and #106 (#98 part D) merged, because both edit `docs/USAGE.md`, `README.md` and `README.fa.md`.
 - **Owns:** `internal/e2e/web_test.go`, `internal/e2e/mocktg_test.go` (`getChatMember`), `internal/e2e/harness_test.go` (if it needs a helper), `docs/USAGE.md`, `docs/DEPLOYMENT.md` (env, the Caddy contract, the steps of §16), `README.md`, `README.fa.md`, `docs/ARCHITECTURE.md` (§3: the frozen API of `internal/web`).
 - **Acceptance:**
   - [ ] The e2e test of §12.3 passes with `-race`.
   - [ ] ARCHITECTURE §3 lists `web.Deps` and `web.New` as frozen.
   - [ ] The docs follow the STE rules, and the checker shows no errors.
+  - [ ] W10 merges before phase 4 starts.
 
 ### 14.5 Phase 4: edit, the widget and live updates
 
+Phase 4 starts after W10 merges. Thus at most 4 sub-issues run at the same time.
+
 **W11. Edit API** (Go)
-- **Depends on:** #98 part B merged (`UpdateTodo`), and W8 merged.
-- **Owns:** `internal/web/items_edit.go`, `internal/web/assign_dm.go`, `internal/web/messages_edit.go` (`web.edit.*`, `web.tg.assigned`), and their tests.
+- **Depends on:** W8 merged. #98 part B (`UpdateTodo`, #111) has merged.
+- **Owns:** `internal/web/items_edit.go` (it replaces the W3 stub), `internal/web/assign_dm.go`, `internal/web/messages_edit.go` (`web.edit.*`, `web.tg.assigned`), and their tests.
 - **Acceptance:**
-  - [ ] Endpoints 24 and 25. A field that is not in the request does not change.
+  - [ ] Endpoints 22 and 23. A field that is not in the request does not change.
+  - [ ] Each route of W11, called by a user who is not a member of the group, gives 403 or 404.
   - [ ] `when: null` removes the date. A new `when` replaces the due and snooze reminders and keeps custom reminders (#98).
-  - [ ] The DM to a new assignee follows #98 §4. A 403 from Telegram does not fail the save.
+  - [ ] The server reads the old assignee before `UpdateTodo`. The DM goes only to a new assignee and follows #98 §4. A 403 from Telegram does not stop the save.
   - [ ] A done or deleted item gives 404.
 
 **W12. Frontend: edit and live updates** (Node)
 - **Depends on:** W9 merged. It can run at the same time as W11.
 - **Owns:** `web/src/edit/**`, `web/src/live.ts`, `web/src/app.tsx` (the poll start and stop), `web/src/actions/item.tsx` (the Edit entry).
 - **Acceptance:**
-  - [ ] The edit form fills from endpoint 24 and sends only the changed fields.
+  - [ ] The edit form fills from endpoint 22 and sends only the changed fields.
   - [ ] The poll with `If-None-Match` runs every 30 s only while the page is visible and online.
 
 **W13. Login Widget** (Go and Node)
-- **Depends on:** W7 merged. The owner must run `/setdomain` (§16) before the manual check.
-- **Owns:** `internal/web/auth_widget.go`, its tests, `internal/web/headers.go` (the CSP of `/` for the login screen), `internal/web/messages_widget.go`, `web/src/login/widget.tsx`, `web/src/login/index.tsx`.
+- **Depends on:** W7 merged.
+- **Owns:** `internal/web/auth_widget.go` (it replaces the W3 stub), its tests, `internal/web/headers.go` (the CSP of `/` for the login screen), `internal/web/messages_widget.go` (`web.widget.*`), `web/src/login/widget.tsx`, `web/src/login/index.tsx`.
 - **Acceptance:**
-  - [ ] Endpoint 26 follows §3.4, in redirect mode.
+  - [ ] Endpoint 24 follows §3.4: the redirect mode, a 10 min age limit, and each proof works one time.
+  - [ ] Each widget sign-in sends the sign-in notice.
   - [ ] The widget does not show in an installed iOS app.
   - [ ] The CSP of `/` allows `telegram.org` and `oauth.telegram.org` only as §11.2 says.
+  - [ ] **Owner check:** `/setdomain` in BotFather (§16.1), then one widget sign-in on a desktop browser.
 
 **W14. "Open app" buttons and the menu button** (Go)
-- **Depends on:** #98 part D merged, because both edit `internal/handler/cmd_todo.go`.
+- **Depends on:** #106 (#98 part D) merged, because both edit `internal/handler/cmd_todo.go`.
 - **Owns:**
-  - `internal/tg/tg.go` (`Button.URL`, `Button.WebAppURL`) and `internal/tg/tgbot/tgbot.go` (markup and `SetMenuButton`);
+  - `internal/tg/tgbot/tgbot.go` (`SetMenuButton`);
   - `internal/handler/cmd_todo.go` and `messages_todo.go` (the button under `/start` and `/help`);
-  - `cmd/todo-bot/run.go` (`setChatMenuButton` in `lead`, only when the web is on).
+  - `cmd/todo-bot/run.go` (`setChatMenuButton` in `lead`, only when the web is on);
+  - `docs/ARCHITECTURE.md` (the §3 line for `SetMenuButton`).
 - **Acceptance:**
   - [ ] In a private chat, the button is a `web_app` button to `/tg/`. Telegram allows `web_app` inline buttons only in private chats.
   - [ ] In a group, the button is a URL button to `https://t.me/<bot>?startapp=g<chatID>`.
   - [ ] The menu button opens `/tg/`.
   - [ ] With the web off, no button and no menu change.
-  - [ ] The PR has a `CONTRACT CHANGE` section for `tg.Button`.
+  - [ ] The PR has a `CONTRACT CHANGE` section for `SetMenuButton`. W1b made the `tg.Button` fields.
 
 ### 14.6 Order
 
 ```
-Phase 1:  W1 ─┬─> W3
-          W2 ─┘
-Phase 2:  W3 ──> W4, W5, W6, W7            (4 at the same time)
-Phase 3:  W4 + W5 ──> W8 ──> W10
+Phase 1:  W1, W1b, W2, W2b                  (4 at the same time)
+          W1 + W1b + W2 + W2b ──> W3
+Phase 2:  W3 ──> W4, W5, W6, W7             (4 at the same time)
+Phase 3:  W4 + W5 ──> W8
           W6 ──> W9                         (W8 and W9 at the same time)
-Phase 4:  #98 B + W8 ──> W11
+          W8 + #106 ──> W10
+Phase 4:  starts after W10 merges
+          W8 ──> W11
           W9 ──> W12
           W7 ──> W13
-          #98 D ──> W14                     (4 at the same time)
+          #106 ──> W14                      (4 at the same time)
 ```
 
-## 15. Owner decisions still open
+## 15. Owner decisions
 
-| # | Decision | Recommendation |
+The owner accepted D1 to D12 on 2026-10-24, as recommended. For D3, the owner reversed the direction of the code: the Mini App shows it, and the user types it into the browser (§3.3).
+
+| # | Decision | Result (decided 2026-10-24) |
 |---|---|---|
 | D1 | Add Node to the repository: `web/package.json`, a lockfile, a `web` CI job, and Node in `release.yml` and `deploy.sh`. | **Yes**, with Node 24 LTS. `make ci` stays Go only. |
 | D2 | Frontend library. | **Preact with Vite** (§8.1). It adds about 4 KB. |
-| D3 | How a browser signs in. | **The login code, confirmed in the Mini App**, in phase 2, for all devices. **The Login Widget** comes in phase 4 for desktop browsers only. |
+| D3 | How a browser signs in. | **A login code**: the Mini App shows it, and the user types it into the browser. A link alone never signs anyone in. Phase 2, for all devices. **The Login Widget** comes in phase 4, for desktop browsers only. |
 | D4 | Session lifetimes. | Browser: 30 days idle, 90 days absolute. Mini App: 12 h. |
 | D5 | Behaviour while Telegram is down. | Allow a member that Telegram confirmed less than 1 hour ago. After that, answer 503. |
 | D6 | Discovery of groups. | Check every group in `chats`, at most 50, at sign-in and every 10 minutes. |
