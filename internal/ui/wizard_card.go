@@ -74,9 +74,13 @@ func wizardCard(v WizardView, lc i18n.Locale, loc *time.Location, now time.Time)
 			text = lc.T("ui.wizard.q.edit")
 			kb = editKeyboard(v, lc)
 		} else {
-			text = lc.T("ui.wizard.q.confirm") + "\n\n" + summary(v, lc, cal, loc, now)
+			head, saveKey := lc.T("ui.wizard.q.confirm"), "ui.wizard.btn.save"
+			if v.EditNum != 0 {
+				head, saveKey = lc.T("ui.wizard.edit.head", lc.Num(v.EditNum)), "ui.wizard.edit.save"
+			}
+			text = head + "\n\n" + summary(v, lc, cal, loc, now)
 			kb = [][]tg.Button{{
-				nav("ui.wizard.btn.save", WizNavSave),
+				nav(saveKey, WizNavSave),
 				nav("ui.wizard.btn.edit", WizNavEdit),
 				cancel(),
 			}}
@@ -291,6 +295,11 @@ func repeatLabel(v WizardView, lc i18n.Locale, cal calendar.Kind) string {
 	d := v.Draft.Data
 	if d.Date == "" {
 		if d.FoundDue != nil && d.FoundRule != "" {
+			if v.EditNum != 0 {
+				if s := DescribeRule(d.FoundRule, lc); s != "" {
+					return Escape(s)
+				}
+			}
 			return lc.T("ui.wizard.repeat.text")
 		}
 		return ""
