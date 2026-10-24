@@ -45,10 +45,17 @@ type Update struct {
 	Callback *Callback
 }
 
-// Button is an inline keyboard button carrying callback data (<= 64 bytes).
+// Button is an inline keyboard button. It carries callback data (<= 64
+// bytes), or opens a URL, or opens a Mini App. At most one of Data, URL and
+// WebAppURL may be set; tgbot refuses a button that sets more than one.
 type Button struct {
 	Text string
 	Data string
+	// URL makes a "url" button: Telegram opens the link.
+	URL string
+	// WebAppURL makes a "web_app" button: Telegram opens the Mini App. The
+	// URL must be https.
+	WebAppURL string
 }
 
 // OutMessage is an outgoing message. Text is HTML (parse_mode=HTML).

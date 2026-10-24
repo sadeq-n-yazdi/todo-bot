@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
@@ -54,6 +55,26 @@ type Config struct {
 	// SchedMaxSleep caps the scheduler's sleep (TODO_SCHED_MAX_SLEEP,
 	// default 5m; ~30s recommended with several nodes).
 	SchedMaxSleep time.Duration
+
+	// WebAddr is the listen address of the web UI (TODO_WEB_ADDR). Empty
+	// means the web is off. Otherwise it is host:port with a loopback IP
+	// literal (docs/WEB-DESIGN.md §9.1).
+	WebAddr string
+	// WebOrigin is the public https origin of the web UI, with no path
+	// (TODO_WEB_ORIGIN). It is required when WebAddr is set.
+	WebOrigin string
+	// WebSessionTTL is the idle limit of a browser session
+	// (TODO_WEB_SESSION_TTL, default 720h, 1h to 2160h).
+	WebSessionTTL time.Duration
+	// WebSessionMax is the absolute limit of a browser session
+	// (TODO_WEB_SESSION_MAX, default 2160h, at least WebSessionTTL).
+	WebSessionMax time.Duration
+	// WebMemberTTL is how long a getChatMember answer stays valid
+	// (TODO_WEB_MEMBER_TTL, default 10m, 1m to 1h).
+	WebMemberTTL time.Duration
+	// WebTrustedProxies are the proxies whose forwarded headers the web
+	// server reads (TODO_WEB_TRUSTED_PROXIES, default 127.0.0.1/32,::1/128).
+	WebTrustedProxies []netip.Prefix
 }
 
 // Modes.
@@ -176,10 +197,97 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	c.SchedMaxSleep = duration(get, "TODO_SCHED_MAX_SLEEP", 5*time.Minute, bad)
 
+	loadWeb(&c, get, bad)
+
 	if err := errors.Join(errs...); err != nil {
 		return Config{}, err
 	}
 	return c, nil
+}
+
+// Limits of the web variables (docs/WEB-DESIGN.md §9.1).
+const (
+	minWebSessionTTL = time.Hour
+	maxWebSessionTTL = 2160 * time.Hour
+	minWebMemberTTL  = time.Minute
+	maxWebMemberTTL  = time.Hour
+)
+
+const defaultWebProxies = "127.0.0.1/32,::1/128"
+
+// loadWeb reads and checks the TODO_WEB_* variables. The rules apply also
+// when the web is off, so that a typo shows at start, not at the day the web
+// is switched on. Messages never echo the origin, which could carry userinfo.
+func loadWeb(c *Config, get func(string) string, bad func(string, ...any)) {
+	c.WebAddr = get("TODO_WEB_ADDR")
+	if c.WebAddr != "" {
+		checkWebAddr(c.WebAddr, c.HTTPAddr, bad)
+	}
+
+	c.WebOrigin = get("TODO_WEB_ORIGIN")
+	if c.WebOrigin == "" {
+		if c.WebAddr != "" {
+			bad("TODO_WEB_ORIGIN: required when TODO_WEB_ADDR is set (e.g. https://todo.example.com)")
+		}
+	} else if u, err := url.Parse(c.WebOrigin); err != nil || u.Scheme != "https" || u.Hostname() == "" ||
+		u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || strings.HasSuffix(c.WebOrigin, "?") {
+		bad("TODO_WEB_ORIGIN: an https URL with a host and no path, userinfo, query or fragment is required (e.g. https://todo.example.com)")
+	}
+
+	c.WebSessionTTL = durationIn(get, "TODO_WEB_SESSION_TTL", 720*time.Hour, minWebSessionTTL, maxWebSessionTTL, bad)
+	c.WebSessionMax = duration(get, "TODO_WEB_SESSION_MAX", 2160*time.Hour, bad)
+	if c.WebSessionMax < c.WebSessionTTL {
+		bad("TODO_WEB_SESSION_MAX: must be at least TODO_WEB_SESSION_TTL (%s)", c.WebSessionTTL)
+	}
+	c.WebMemberTTL = durationIn(get, "TODO_WEB_MEMBER_TTL", 10*time.Minute, minWebMemberTTL, maxWebMemberTTL, bad)
+
+	raw := get("TODO_WEB_TRUSTED_PROXIES")
+	if raw == "" {
+		raw = defaultWebProxies
+	}
+	for _, part := range strings.Split(raw, ",") {
+		p, err := netip.ParsePrefix(strings.TrimSpace(part))
+		if err != nil {
+			bad("TODO_WEB_TRUSTED_PROXIES: entry %q is not a CIDR prefix (e.g. 127.0.0.1/32)", part)
+			continue
+		}
+		c.WebTrustedProxies = append(c.WebTrustedProxies, p)
+	}
+}
+
+// checkWebAddr checks that addr is host:port with a loopback IP literal and a
+// port that httpAddr does not use on an overlapping host.
+func checkWebAddr(addr, httpAddr string, bad func(string, ...any)) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		bad("TODO_WEB_ADDR: a host:port address with a loopback IP is required (e.g. 127.0.0.1:8088)")
+		return
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil || ip.Zone() != "" {
+		bad("TODO_WEB_ADDR: the host must be a loopback IP literal (127.0.0.1 or ::1), not a name")
+		return
+	}
+	if !ip.IsLoopback() {
+		bad("TODO_WEB_ADDR: %s is not a loopback address; use 127.0.0.1 or ::1", ip)
+		return
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 || !isDigits(port) {
+		bad("TODO_WEB_ADDR: the port must be a number from 1 to 65535")
+		return
+	}
+	// TODO_HTTP_ADDR is reserved for the webhook (docs/WEB-DESIGN.md §9.1).
+	if httpAddr == "" {
+		return
+	}
+	hh, hp, err := net.SplitHostPort(httpAddr)
+	if err != nil || hp != port {
+		return
+	}
+	hip, herr := netip.ParseAddr(hh)
+	if hh == "" || (herr == nil && (hip.IsUnspecified() || hip == ip)) {
+		bad("TODO_WEB_ADDR: must differ from TODO_HTTP_ADDR; the webhook and the web UI need separate listeners")
+	}
 }
 
 // MinClaimTTL is the smallest accepted TODO_CLAIM_TTL. A shorter claim leaves
@@ -252,6 +360,16 @@ func duration(get func(string) string, key string, def time.Duration, bad func(s
 	d, err := time.ParseDuration(raw)
 	if err != nil || d <= 0 {
 		bad("%s: %q is not a positive duration (e.g. 30s, 2m)", key, raw)
+		return def
+	}
+	return d
+}
+
+// durationIn is duration with an inclusive range.
+func durationIn(get func(string) string, key string, def, lo, hi time.Duration, bad func(string, ...any)) time.Duration {
+	d := duration(get, key, def, bad)
+	if d < lo || d > hi {
+		bad("%s: %q is out of range; it must be from %s to %s", key, get(key), lo, hi)
 		return def
 	}
 	return d
