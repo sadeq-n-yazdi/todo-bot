@@ -7,3 +7,5 @@
 /env
 .remember/
 .claude/settings.local.json
+/internal/web/dist/
+node_modules/

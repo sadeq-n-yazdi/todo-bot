@@ -24,3 +24,20 @@ jobs:
       - run: make check-deploy
       - run: make build-linux ARCH=amd64
       - run: make build-linux ARCH=arm64
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # web-test builds the front end first, then runs the typecheck, the
+      # tests and the size check.
+      - run: make web-test
+      - run: go vet -tags webui ./internal/web/...
+      - run: go test -tags webui ./internal/web/...

@@ -100,4 +100,35 @@ else
 		"TODO_DB_URL=sqlite://$d/state/sub/todo.db\n" "$d/state/sub/todo.db" "$d/state/sub"
 fi
 
+# require_webui: the deploy stops when the binary has no webui build tag.
+# It runs the function from deploy.sh with a shim for "go version -m".
+awk '/^require_webui\(\)/ { grab = 1 } grab { print } grab && /^}/ { exit }' scripts/deploy.sh >"$work/webui.sh"
+[ -s "$work/webui.sh" ] || { echo "FAIL: cannot extract require_webui" >&2; exit 1; }
+mkdir -p "$work/gobin"
+cat >"$work/gobin/go" <<'SHIM'
+#!/usr/bin/env bash
+[ "$1 $2" = "version -m" ] || exit 2
+printf '%s: go1.27\n\tpath\tx\n' "$3"
+printf '%b' "${GO_BUILD_LINES:-}"
+SHIM
+chmod +x "$work/gobin/go"
+# webui_case NAME EXPECT_STATUS BUILD_LINES
+webui_case() {
+	local name=$1 want=$2 lines=$3 rc=0 out
+	out="$(GO_BUILD_LINES="$lines" PATH="$work/gobin:$PATH" bash -c '
+		die() { echo "deploy: $*" >&2; exit 1; }
+		source "$1"
+		require_webui /x/todo-bot' _ "$work/webui.sh" 2>&1)" || rc=$?
+	if [ "$rc" != "$want" ]; then
+		echo "FAIL: $name: rc=$rc (want $want): $out" >&2
+		fail=1
+	else
+		echo "ok: $name"
+	fi
+}
+webui_case "webui tag: continue" 0 '\tbuild\t-trimpath=true\n\tbuild\t-tags=webui\n'
+webui_case "webui among other tags: continue" 0 '\tbuild\t-tags=foo,webui\n'
+webui_case "no tags: stop" 1 '\tbuild\t-trimpath=true\n'
+webui_case "other tag only: stop" 1 '\tbuild\t-tags=nowebui\n'
+
 exit "$fail"

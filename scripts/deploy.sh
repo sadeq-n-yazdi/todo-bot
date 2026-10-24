@@ -53,9 +53,19 @@ detect_arch() {
 	esac
 }
 
+# Stop unless the binary was built with -tags=webui. Without the tag it holds
+# only the placeholder page, and production must never get that.
+require_webui() {
+	local bin="$1" info
+	info="$(go version -m "$bin")" || die "cannot read the build settings of $bin"
+	grep -Eq '^[[:space:]]*build[[:space:]]+-tags=([^[:space:]]*,)?webui(,|[[:space:]]|$)' <<<"$info" ||
+		die "$bin was not built with -tags=webui; refusing to deploy the placeholder"
+}
+
 build() {
 	local arch="$1"
-	make -C "$ROOT" build-linux ARCH="$arch" >&2
+	make -C "$ROOT" release-linux ARCH="$arch" >&2
+	require_webui "$ROOT/dist/todo-bot-linux-$arch"
 	echo "$ROOT/dist/todo-bot-linux-$arch"
 }
 
