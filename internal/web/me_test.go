@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +88,10 @@ func TestI18nEndpoint(t *testing.T) {
 		loc := i18n.Locale{Lang: lang}
 		if resp.Messages["web.app.notallowed"] != loc.T("web.app.notallowed") || resp.Messages["web.err.csrf"] != loc.T("web.err.csrf") {
 			t.Errorf("%s: messages %v", lang, resp.Messages)
+		}
+		// The front end fills the %s itself: the template stays raw.
+		if !strings.Contains(resp.Messages["web.app.notallowed"], "%s") {
+			t.Errorf("%s: notallowed %q lost its %%s", lang, resp.Messages["web.app.notallowed"])
 		}
 		for k := range resp.Messages {
 			if len(k) < 4 || k[:4] != "web." {
