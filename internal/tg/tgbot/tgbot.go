@@ -33,6 +33,9 @@ var (
 	// ErrCallbackDataTooLong is returned by Send and Edit, without calling the
 	// API, when a button's Data exceeds 64 bytes.
 	ErrCallbackDataTooLong = errors.New("tgbot: callback data longer than 64 bytes")
+	// ErrButtonKind is returned by Send and Edit, without calling the API,
+	// when a button sets more than one of Data, URL and WebAppURL.
+	ErrButtonKind = errors.New("tgbot: a button may set only one of Data, URL and WebAppURL")
 )
 
 // Options configures the adapter.
@@ -220,6 +223,15 @@ func validate(m tg.OutMessage) error {
 	}
 	for _, row := range m.Keyboard {
 		for _, btn := range row {
+			kinds := 0
+			for _, s := range []string{btn.Data, btn.URL, btn.WebAppURL} {
+				if s != "" {
+					kinds++
+				}
+			}
+			if kinds > 1 {
+				return fmt.Errorf("%w: %q", ErrButtonKind, btn.Text)
+			}
 			if len(btn.Data) > maxCallbackData {
 				return fmt.Errorf("%w: %q", ErrCallbackDataTooLong, btn.Data)
 			}
@@ -263,7 +275,11 @@ func editMarkup(m tg.OutMessage) models.ReplyMarkup {
 	for i, row := range m.Keyboard {
 		rows[i] = make([]models.InlineKeyboardButton, len(row))
 		for j, btn := range row {
-			rows[i][j] = models.InlineKeyboardButton{Text: btn.Text, CallbackData: btn.Data}
+			b := models.InlineKeyboardButton{Text: btn.Text, CallbackData: btn.Data, URL: btn.URL}
+			if btn.WebAppURL != "" {
+				b.WebApp = &models.WebAppInfo{URL: btn.WebAppURL}
+			}
+			rows[i][j] = b
 		}
 	}
 	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
