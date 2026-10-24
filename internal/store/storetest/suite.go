@@ -67,6 +67,17 @@ func Run(t *testing.T, f Factory) {
 		{"PutDraftConcurrent", testPutDraftConcurrent},
 		{"ListNamedUsers", testListNamedUsers},
 		{"KBVersion", testKBVersion},
+		{"WebSessions", testWebSessions},
+		{"TrimWebSessions", testTrimWebSessions},
+		{"DeleteWebSessionsExcept", testDeleteWebSessionsExcept},
+		{"LoginCodes", testLoginCodes},
+		{"LoginCodeCap", testLoginCodeCap},
+		{"TakeLoginCodeConcurrent", testTakeLoginCodeConcurrent},
+		{"UseProof", testUseProof},
+		{"UseProofConcurrent", testUseProofConcurrent},
+		{"ChatMembers", testChatMembers},
+		{"ListGroupChats", testListGroupChats},
+		{"WebPurge", testWebPurge},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

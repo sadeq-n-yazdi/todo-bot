@@ -135,7 +135,11 @@ type Store interface {
 	// MarkUpdate records a Telegram update_id; first=false if already seen.
 	MarkUpdate(ctx context.Context, updateID int64, now time.Time) (first bool, err error)
 	// Purge deletes expired prompts, expired drafts (expires_at <= now)
-	// and update ids older than 48h.
+	// and update ids older than 48h. For the web (#102) it also deletes
+	// web sessions with expires_at <= now or max_at <= now, login codes
+	// and used proofs with expires_at <= now, and chat_members rows whose
+	// status is not 'member' when both seen_at and checked_at are more
+	// than 30 days before now.
 	Purge(ctx context.Context, now time.Time) error
 
 	// ---- Wizard drafts (#68, ARCHITECTURE §12) ----
@@ -172,6 +176,55 @@ type Store interface {
 	// concurrent callers exactly one gets ok=true (Save, Cancel). Inside
 	// WithTx it is the condition of service.SaveDraft.
 	DeleteDraft(ctx context.Context, chatID, userID, version int64, now time.Time) (ok bool, err error)
+
+	// ---- Web UI (#102, docs/WEB-DESIGN.md) ----
+	//
+	// Session IDs, code hashes and proof hashes are hex SHA-256 values:
+	// the store never sees a token or a code. Deletes of rows that do not
+	// exist are not errors.
+
+	// PutWebSession inserts s (s.ID is the hash of the token).
+	PutWebSession(ctx context.Context, s model.WebSession) error
+	// GetWebSession: ErrNotFound if none, or expires_at <= now, or max_at <= now.
+	GetWebSession(ctx context.Context, id string, now time.Time) (model.WebSession, error)
+	// TouchWebSession writes seen_at and expires_at. ErrNotFound if no row.
+	TouchWebSession(ctx context.Context, id string, seenAt, expiresAt time.Time) error
+	DeleteWebSession(ctx context.Context, id string) error
+	DeleteUserWebSessions(ctx context.Context, userID int64) error
+	// TrimUserWebSessions keeps the newest keep sessions (by created_at)
+	// of the user of one kind and deletes the others; keep <= 0 deletes
+	// them all.
+	TrimUserWebSessions(ctx context.Context, userID int64, kind model.WebSessionKind, keep int) error
+	// DeleteWebSessionsExcept deletes the sessions of every user not in keep.
+	DeleteWebSessionsExcept(ctx context.Context, keep []int64) (n int, err error)
+
+	// PutLoginCode deletes the other codes of c.UserID and inserts c, in one
+	// transaction. ok=false, and no insert, if maxLive codes are already live.
+	// The codes of c.UserID do not count, and on ok=false they are kept.
+	PutLoginCode(ctx context.Context, c model.LoginCode, maxLive int, now time.Time) (ok bool, err error)
+	// TakeLoginCode deletes the live row of codeHash and returns it. Of several
+	// concurrent callers exactly one gets it. ErrNotFound if absent or expired.
+	TakeLoginCode(ctx context.Context, codeHash string, now time.Time) (model.LoginCode, error)
+	DeleteUserLoginCodes(ctx context.Context, userID int64) error
+
+	// UseProof records a widget proof. fresh=false if a live row with the same
+	// hash exists. Of several concurrent callers exactly one gets fresh=true.
+	UseProof(ctx context.Context, hash string, expiresAt, now time.Time) (fresh bool, err error)
+
+	// NoteChatMember inserts (chat, user) with status 'unknown' and seen_at,
+	// or updates only seen_at. It never changes status or checked_at.
+	NoteChatMember(ctx context.Context, chatID, userID int64, seenAt time.Time) error
+	// SetChatMember writes status and checked_at, and keeps seen_at. A new
+	// row gets m.SeenAt.
+	SetChatMember(ctx context.Context, m model.ChatMember) error
+	// GetChatMember returns the row of (chatID, userID); ErrNotFound if none.
+	GetChatMember(ctx context.Context, chatID, userID int64) (model.ChatMember, error)
+	// ListChatMembersOf returns every row of the user, ordered by chat_id.
+	ListChatMembersOf(ctx context.Context, userID int64) ([]model.ChatMember, error)
+	// SetChatGone sets every row of the chat to 'left' with checked_at = at.
+	SetChatGone(ctx context.Context, chatID int64, at time.Time) error
+	// ListGroupChats returns up to limit chats of kind group, ordered by id.
+	ListGroupChats(ctx context.Context, limit int) ([]model.Chat, error)
 
 	// WithTx runs fn in a transaction. Inside fn use ONLY tx (with SQLite the
 	// pool has a single connection, so using the outer Store deadlocks).

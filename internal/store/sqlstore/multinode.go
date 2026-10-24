@@ -256,8 +256,12 @@ func (d *DB) MarkUpdate(ctx context.Context, updateID int64, now time.Time) (boo
 	return n > 0, err
 }
 
-// Purge deletes expired prompts and drafts, and update ids older than 48h.
+// Purge deletes expired prompts and drafts, update ids older than 48h, and
+// the expired web rows of purgeWeb (web.go).
 func (d *DB) Purge(ctx context.Context, now time.Time) error {
+	if err := d.purgeWeb(ctx, now); err != nil {
+		return err
+	}
 	if _, err := d.q.ExecContext(ctx, "DELETE FROM prompts WHERE expires_at <= ?", now.Unix()); err != nil {
 		return fmt.Errorf("sqlstore: purge prompts: %w", err)
 	}

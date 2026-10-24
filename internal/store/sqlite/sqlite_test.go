@@ -334,6 +334,47 @@ func TestUserVersionFollowsMigrations(t *testing.T) {
 	}
 }
 
+// 0005_web.sql (#102) adds the web tables. The shipped versions must not
+// skip a number, so the web migration is version 5 or the next free one.
+func TestWebMigration(t *testing.T) {
+	got := shipped(t)
+	for i, v := range got {
+		if v != i+1 {
+			t.Fatalf("migration versions %v are not 1..n", got)
+		}
+	}
+	if got[len(got)-1] < 5 {
+		t.Fatalf("latest version %d, want at least 5 (0005_web.sql)", got[len(got)-1])
+	}
+	path := filepath.Join(t.TempDir(), "w.db")
+	d, err := sqlite.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Close()
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	var v int
+	if err := raw.QueryRow("SELECT version FROM schema_migrations WHERE name LIKE '%web%'").Scan(&v); err != nil {
+		t.Fatalf("no web migration recorded: %v", err)
+	}
+	if v != 5 {
+		t.Fatalf("web migration has version %d, want 5", v)
+	}
+	for _, table := range []string{"web_sessions", "web_login_codes", "web_used_proofs", "chat_members"} {
+		var n int
+		if err := raw.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Errorf("table %s missing", table)
+		}
+	}
+}
+
 func TestOpenExistingURLRules(t *testing.T) {
 	for _, raw := range []string{
 		"sqlite:todo.db?mode=existing", "sqlite:todo.db?", "sqlite:todo.db#f", "sqlite://h/x.db",
