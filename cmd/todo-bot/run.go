@@ -24,6 +24,7 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store/sqlite" // registers the "sqlite" scheme
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/tg/tgbot"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/web"
 )
 
 // Set with -ldflags "-X main.version=... -X main.commit=... -X main.date=...".
@@ -60,6 +61,9 @@ var openExisting = func(ctx context.Context, raw string) (store.Store, error) {
 	}
 	return d, nil
 }
+
+// listenWeb opens the listener of the web UI; tests wrap it.
+var listenWeb = net.Listen
 
 // tgServerURL points the Telegram client at another server; tests set it.
 var tgServerURL string
@@ -124,7 +128,11 @@ func versionString() string {
 	if d == "" {
 		d = "unknown"
 	}
-	return fmt.Sprintf("todo-bot %s (commit %s, built %s)", version, c, d)
+	ui := "placeholder"
+	if web.Embedded() {
+		ui = "embedded"
+	}
+	return fmt.Sprintf("todo-bot %s (commit %s, built %s)\nweb: %s", version, c, d, ui)
 }
 
 // loadAdminConfig loads the configuration for migrate and backup, which need
@@ -269,6 +277,13 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 		Log:         log,
 	})
 
+	// The web UI starts only when TODO_WEB_ADDR has a value, after the
+	// service exists and before the lease loop (docs/WEB-DESIGN.md §9.2).
+	webSrv, err := startWeb(ctx, cfg, svc, bot, clk, log)
+	if err != nil {
+		return err
+	}
+
 	// lead runs while this node holds the poller lease. The lease loop may call
 	// it again for the same epoch, so every step is safe to repeat.
 	lead := func(lctx context.Context, epoch int64) {
@@ -308,17 +323,83 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 	log.Info("shutting down", "budget", shutdownTimeout) // one budget for the whole shutdown
 	timeout := time.NewTimer(shutdownTimeout)
 	defer timeout.Stop()
+	// The web stops at the same time as the lease loop, inside the same
+	// budget: it gets no time of its own.
+	webDone := make(chan struct{})
+	if webSrv == nil {
+		close(webDone)
+	} else {
+		go func() {
+			defer close(webDone)
+			wctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(shutdownTimeout))
+			defer cancel()
+			if err := webSrv.Shutdown(wctx); err != nil {
+				log.Warn("stop web server", "err", err)
+			}
+		}()
+	}
+	// fail gives up: the database stays open, because a loop may still use it.
+	fail := func(what string) error {
+		closeDB = false
+		if webSrv != nil {
+			_ = webSrv.Close()
+		}
+		return errors.New("shutdown timed out stopping the " + what)
+	}
 	stopLease() // the lease loop stops polling, then releases the lease
 	if !waitFor(leaseDone, timeout.C) {
-		closeDB = false
-		return errors.New("shutdown timed out stopping the poller")
+		return fail("poller")
 	}
 	stopSched()
 	if !waitFor(schedDone, timeout.C) {
-		closeDB = false
-		return errors.New("shutdown timed out stopping the scheduler")
+		return fail("scheduler")
+	}
+	if !waitFor(webDone, timeout.C) {
+		return fail("web server")
 	}
 	return nil
+}
+
+// startWeb starts the web UI on cfg.WebAddr, or returns nil if the address
+// is empty. It first deletes the sessions of the users who are not in the
+// allowlist (an allowlist change needs a restart). The listener opens here,
+// so a bind error stops the start.
+func startWeb(ctx context.Context, cfg config.Config, svc *service.Svc, bot *tgbot.Bot, clk clock.Clock, log *slog.Logger) (*web.Server, error) {
+	if cfg.WebAddr == "" {
+		return nil, nil
+	}
+	n, err := svc.PruneWebSessions(ctx, cfg.AllowedUsers)
+	if err != nil {
+		return nil, fmt.Errorf("web: prune sessions: %w", err)
+	}
+	if n > 0 {
+		log.Info("web: removed the sessions of users not allowed", "sessions", n)
+	}
+	srv := web.New(web.Deps{
+		Svc:     svc,
+		Web:     svc,
+		Send:    bot,
+		Members: bot,
+		Parser:  nlparse.Parser{DefaultHour: cfg.DefaultHour, DefaultMinute: cfg.DefaultMinute},
+		Clock:   clk,
+		Allowed: cfg.AllowedUsers,
+		Token:   cfg.Token,
+		BotName: bot.Username(),
+		Config:  cfg,
+		Assets:  web.Assets(),
+		Log:     log,
+	})
+	l, err := listenWeb("tcp", cfg.WebAddr)
+	if err != nil {
+		return nil, fmt.Errorf("web: listen on %s: %w", cfg.WebAddr, err)
+	}
+	log.Info("web: listening", "addr", l.Addr().String(), "ui", map[bool]string{true: "embedded", false: "placeholder"}[web.Embedded()])
+	go func() {
+		if err := srv.Serve(l); err != nil {
+			log.Error("web server", "err", err)
+		}
+	}()
+	return srv, nil
 }
 
 // connectTelegram calls getMe, retrying with a capped backoff on transient
