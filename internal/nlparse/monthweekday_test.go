@@ -37,7 +37,11 @@ var monthWeekdayRows = []row{
 	{in: "x last friday of the month at 4pm", now: "2026-10-30 08:00", wantText: "x", wantDue: "2026-10-30 16:00", wantTime: true},
 	{in: "x last friday of the month at 4pm", now: "2026-10-30 17:00", wantText: "x", wantDue: "2026-11-27 16:00", wantTime: true},
 	{in: "x last friday of the month at 4pm", now: "2026-10-30 16:00", wantText: "x", wantDue: "2026-11-27 16:00", wantTime: true},
-	{in: "x last friday of the month", now: "2026-10-30 10:00", wantText: "x", wantDue: "2026-11-27 09:00"},
+	{in: "x last friday of the month", now: "2026-10-30 10:00", wantText: "x", wantDue: "2026-10-30 23:59"}, // today wins with no time
+	{in: "x آخرین جمعه این ماه", now: "2026-10-30 10:00", wantText: "x", wantDue: "2026-10-30 23:59"},
+	{in: "x آخرین جمعه این ماه", cal: jal, now: "2026-10-16 10:00", wantText: "x", wantDue: "2026-10-16 23:59"}, // 24 Mehr
+	{in: "x last friday of the month", cal: jal, now: "2026-10-16 10:00", wantText: "x", wantDue: "2026-10-16 23:59"},
+	{in: "x last friday of next month", now: "2026-10-30 10:00", wantText: "x", wantDue: "2026-11-27 09:00"},
 	{in: "x last friday of the month", now: "2026-10-30 08:00", wantText: "x", wantDue: "2026-10-30 09:00"},
 	// this month's occurrence has passed
 	{in: "x last friday of the month", now: "2026-10-31 08:00", wantText: "x", wantDue: "2026-11-27 09:00"},
@@ -83,7 +87,7 @@ var monthWeekdayRows = []row{
 	{in: "x first saturday of next month", cal: jal, now: "2027-02-25 08:15", wantText: "x", wantDue: "2027-03-27 09:00"},
 	{in: "x اولین شنبه ماه بعد", cal: jal, now: "2027-02-25 08:15", wantText: "x", wantDue: "2027-03-27 09:00"},
 	// Esfand's last Friday has passed: last Friday of Farvardin 1406 is the 27th (16 Apr 2027)
-	{in: "x last friday of the month", cal: jal, now: "2027-03-19 17:00", wantText: "x", wantDue: "2027-04-16 09:00"},
+	{in: "x last friday of the month at 9am", cal: jal, now: "2027-03-19 17:00", wantText: "x", wantDue: "2027-04-16 09:00", wantTime: true},
 }
 
 func TestMonthWeekday(t *testing.T) { runRows(t, monthWeekdayRows) }
@@ -147,6 +151,29 @@ func TestMonthWeekdayRepeatWordWins(t *testing.T) {
 		got, _ := Parser{}.Parse(in, parseNow(t, "", ""), greg)
 		if got.Rule == nil || got.Rule.Freq != recur.MonthlyWeekday {
 			t.Errorf("%q: got %+v", in, got)
+		}
+	}
+}
+
+// Other repeat heads before the phrase never give a one-off date: the result
+// is what it was before (a rule, or plain text).
+func TestMonthWeekdayOtherRepeatHeads(t *testing.T) {
+	for _, in := range []string{
+		"x every 2 months last friday of the month",
+		"x every other last friday of the month",
+		"x every week last friday of the month",
+		"x weekly last friday of the month",
+		"x daily last friday of the month",
+		"x yearly last friday of the month",
+		"x every day last friday of the month",
+		"x every friday last friday of the month",
+		"x هر هفته آخرین جمعه ماه",
+		"x هر دو ماه آخرین جمعه ماه",
+		"x هفتگی آخرین جمعه ماه",
+	} {
+		got, _ := Parser{}.Parse(in, parseNow(t, "", ""), greg)
+		if got.Rule == nil && got.Due != nil && got.Due.Format(layout) == "2026-10-30 09:00" {
+			t.Errorf("%q: one-off date", in)
 		}
 	}
 }
