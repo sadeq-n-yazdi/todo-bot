@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-10-24
+
+### Added
+- Edit an item with the wizard (#98). Use `/edit N` with no text, or press ✏️ in `/list`. The wizard opens with the text, date, time, repeat and assignee of the item. Change one or more of them, then press Save. If you change nothing, the bot says "No changes". `/edit N text` still changes only the text.
+- When you give an item to a new person, that person gets a short message in their language and calendar (#106). If the bot cannot send the message, the edit card shows a note.
+
+### Changed
+- A change of date, time or repeat cancels the due reminder and the snooze of the item, and makes a new due reminder. A custom reminder that you set with `/remind` stays (#104).
+- The ✏️ button on a completed item now says that the item is gone. Before, it asked for new text.
+
 ## [0.1.7] - 2026-10-24
 
 ### Added
@@ -167,7 +177,8 @@ All notable changes to this project are documented here. The format follows
   - Times follow wall-clock time across DST changes.
   - A time that falls in the spring-forward gap fires at the shifted time, never earlier.
 
-[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.4...v0.1.5

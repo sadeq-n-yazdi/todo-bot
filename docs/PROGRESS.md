@@ -2,7 +2,7 @@
 
 This page is updated on `main` after every merged PR.
 
-Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released**) · [v0.1.5](https://github.com/sadeq-n-yazdi/todo-bot/milestone/6) (Nth and last weekday of the month, **released and deployed**) · [v0.1.6](https://github.com/sadeq-n-yazdi/todo-bot/milestone/7) (repeat rule text, deploy hardening, **released and deployed**) · [v0.1.7](https://github.com/sadeq-n-yazdi/todo-bot/milestone/8) (one-off Nth weekday, cleanups, **released**) · [v0.1.8](https://github.com/sadeq-n-yazdi/todo-bot/milestone/9) (edit with the wizard) · [v0.3.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/10) (web UI) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
+Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released**) · [v0.1.5](https://github.com/sadeq-n-yazdi/todo-bot/milestone/6) (Nth and last weekday of the month, **released and deployed**) · [v0.1.6](https://github.com/sadeq-n-yazdi/todo-bot/milestone/7) (repeat rule text, deploy hardening, **released and deployed**) · [v0.1.7](https://github.com/sadeq-n-yazdi/todo-bot/milestone/8) (one-off Nth weekday, cleanups, **released**) · [v0.1.8](https://github.com/sadeq-n-yazdi/todo-bot/milestone/9) (edit with the wizard, **released**) · [v0.1.9](https://github.com/sadeq-n-yazdi/todo-bot/milestone/11) (edit follow-ups) · [v0.3.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/10) (web UI) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
 
 | # | Wave | Issue | Status | PR |
 |---|---|---|---|---|
@@ -79,6 +79,15 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 |---|---|---|---|
 | 96 | Cleanups: legacy settings data, repeat after a calendar change, test guard | ✅ merged | #99 |
 | 97 | nlparse: one-off Nth or last weekday of this or next month | ✅ merged | #100, #101 |
+
+### v0.1.8
+
+| # | Issue | Status | PR |
+|---|---|---|---|
+| 103 | Edit: contracts (model, service, ui) | ✅ merged | #107, #108 |
+| 104 | Edit: service (`UpdateTodo`, `SaveEditDraft`) | ✅ merged | #111 |
+| 105 | Edit: the wizard card in edit mode | ✅ merged | #110 |
+| 106 | Edit: handler, DM to a new assignee, e2e | ✅ merged | #112 |
 
 ## Log
 - **2026-10-10**
@@ -158,3 +167,6 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - The review fix of #100 merged as #101. v0.1.7 tagged.
   - Posted the #98 design on the issue.
   - The owner asked for a web UI: a Telegram Mini App and an installable web app at todo.sadeq.uk. A Caddy proxy on vps03 serves all sadeq.uk sites on port 443 with DNS-01 certificates. todo-bot moves from vps00 to vps03. Filed #102 for the design.
+  - Merged the #98 parts: contracts #107 and #108, card #110, service #111 and handler #112. The review of #112 found that a date-only item got a 23:59 reminder after a schedule edit. The fix went in before the merge. v0.1.8 tagged.
+  - The review of #111 after the merge approved it. Its follow-ups are in #114.
+  - The owner accepted D1–D12 of the web design. The review fixes of the design are in #113.

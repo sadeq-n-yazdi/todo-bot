@@ -752,4 +752,4 @@ The wizard can also change an item of the chat. This section gives the contracts
 - **Returned item.** The returned item has `AssigneeID` and `AssigneeName` (the current username) set, as `AddTodoFor` does.
 - **`ui.WizardView.EditNum`.** `0` means that the wizard creates a new item.
 - **Rolling upgrade.** An older node ignores these fields. If it handles Save, it creates a new item. If it writes the draft, it removes the fields. A later Save on any node then creates a new item. Upgrade every node before you use this feature.
-- **State of the code.** `UpdateTodo` and `SaveEditDraft` are stubs in `internal/service/edit.go`. They return an error until the service part of #98 is in `main`. No handler calls them yet.
+- **State of the code.** `internal/service/edit.go` has `UpdateTodo` and `SaveEditDraft`. `internal/handler/wizard_edit.go` opens the wizard in edit mode, compares the draft with the item, saves with `SaveEditDraft` and sends the DM to a new assignee. A once item at 23:59 in the time zone of the editor opens as a date without a time, because `HasTime` is not stored.
