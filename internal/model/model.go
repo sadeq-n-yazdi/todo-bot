@@ -266,8 +266,11 @@ type DraftData struct {
 	EditNum int `json:"edit_num,omitempty"`
 	// EditBase is the prefill of an edit wizard: the item as it was when
 	// the wizard started. Save sends only the differences from it.
-	// nil = not an edit wizard. An older node drops this field and the two
-	// above (ARCHITECTURE §12), so its Save would create a new item.
+	// nil = not an edit wizard. EditBase holds only item fields: its Edit*
+	// fields are zero and it never has an EditBase.
+	// An older node ignores these fields (ARCHITECTURE §13). If it handles
+	// Save, it creates a new item. If it writes the draft, it removes the
+	// fields, and a later Save on any node then creates a new item.
 	EditBase *DraftData `json:"edit_base,omitempty"`
 }
 

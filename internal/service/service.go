@@ -43,7 +43,8 @@ var (
 	// or expired (#68).
 	ErrStaleDraft = errors.New("wizard draft changed")
 	// ErrUnknownAssignee: TodoPatch.AssigneeID names a user the bot has
-	// never seen (#98).
+	// never seen (#98). It is never ErrNotFound: the store's ErrNotFound
+	// from GetUser is mapped to it.
 	ErrUnknownAssignee = errors.New("unknown assignee")
 )
 
@@ -55,7 +56,8 @@ type TodoPatch struct {
 	Text *string
 	// When is the new schedule. Only Due, Rule and HasTime are used; its
 	// Text is ignored. Due nil means "no date". The schedule is computed
-	// as AddTodo does, in the time zone of the Actor.
+	// as AddTodo does, in the time zone of the Actor. A non-nil When also
+	// sets the item's TZ to the actor's TZ; a nil When keeps the TZ.
 	When *nlparse.Result
 	// AssigneeID is the new assignee. 0 means "no assignee". The chat's
 	// own ID is stored as 0. Any other ID must be a known user, else
@@ -186,12 +188,19 @@ type Service interface {
 	SaveDraft(ctx context.Context, d model.Draft, a Actor, assigneeID int64, r nlparse.Result) (model.Todo, error)
 	// UpdateTodo applies p to the open item todoID of a's chat in one
 	// transaction. It reads the item again inside the transaction and
-	// never writes back an older copy. Num never changes. ErrNotFound if
-	// the item is missing, deleted or done (or in another chat);
-	// ErrEmptyText, ErrUnknownAssignee as TodoPatch says. Only a changed
-	// When cancels the pending due and snooze reminders and creates a new
-	// due reminder; custom reminders are kept. Text and assignee changes
-	// do not touch reminders.
+	// never writes back an older copy. Num never changes. Access is as
+	// for Todo (§11): ErrForeignChat for an item of another chat (the
+	// assignee may also act from their private chat); ErrNotFound if the
+	// item is missing or deleted, or its status is not open.
+	// ErrEmptyText and ErrUnknownAssignee are as TodoPatch says. The
+	// service does not compare: a non-nil When always cancels the pending
+	// due and snooze reminders. It then creates a new due reminder only if
+	// the due time is in the future and is not the 23:59 date-only
+	// sentinel, as AddTodo does. A once Due in the past is stored without
+	// a reminder, and there is no ErrInPast (the handler checks the past).
+	// Custom reminders are kept. Text and assignee changes do not touch
+	// reminders. The returned todo has AssigneeID and AssigneeName (the
+	// current username) filled, as AddTodoFor's does.
 	UpdateTodo(ctx context.Context, a Actor, todoID int64, p TodoPatch) (model.Todo, error)
 	// SaveEditDraft is Save of an edit wizard (#98). In one transaction it
 	// deletes the draft if d.Version is still the stored version and it

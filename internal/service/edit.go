@@ -7,10 +7,10 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 )
 
-// Editing an item with the wizard (#98, ARCHITECTURE §12). These are stubs
+// Editing an item with the wizard (#98, ARCHITECTURE §13). These are stubs
 // until the service part of #98 fills them in.
 
-var errEditNotImplemented = errors.New("not implemented")
+var errEditNotImplemented = errors.New("service: editing an item is not implemented")
 
 // UpdateTodo implements Service.
 func (s *Svc) UpdateTodo(ctx context.Context, a Actor, todoID int64, p TodoPatch) (model.Todo, error) {
