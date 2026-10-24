@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-10-24
+
+### Added
+- The bot reads a one-off date on the Nth or last weekday of this month or next month, in your calendar (#97). Examples: `last friday of the month 4pm`, `2nd monday of next month`, `آخرین جمعه این ماه`, `اولین دوشنبه ماه بعد`. If this month's day and time are already past, the date moves to next month. If you give no time and the day is today, the item is for today.
+- A repeat word before the phrase keeps the repeat. For example, `every last friday of the month` still repeats every month (#101).
+
+### Fixed
+- In the wizard, if you change your calendar before you press Save, the bot asks for the repeat again when the repeat depends on the calendar (#96). Before, it saved the repeat in the new calendar without a message.
+
+### Removed
+- The bot no longer reads the old language and calendar button data from before v0.1.2 (#96). An old button now only stops its spinner.
+
 ## [0.1.6] - 2026-10-12
 
 ### Added
@@ -155,7 +167,8 @@ All notable changes to this project are documented here. The format follows
   - Times follow wall-clock time across DST changes.
   - A time that falls in the spring-forward gap fires at the shifted time, never earlier.
 
-[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sadeq-n-yazdi/todo-bot/compare/v0.1.3...v0.1.4

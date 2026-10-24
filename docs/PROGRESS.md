@@ -2,7 +2,7 @@
 
 This page is updated on `main` after every merged PR.
 
-Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released**) · [v0.1.5](https://github.com/sadeq-n-yazdi/todo-bot/milestone/6) (Nth and last weekday of the month, **released and deployed**) · [v0.1.6](https://github.com/sadeq-n-yazdi/todo-bot/milestone/7) (repeat rule text, deploy hardening, **released and deployed**) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
+Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (single host, multi-node seams, **released**) · [v0.1.1](https://github.com/sadeq-n-yazdi/todo-bot/milestone/3) (assign tasks to members, **released**) · v0.1.2 (step-by-step wizard, **released**) · v0.1.3 (retry policy, **released**) · [v0.1.4](https://github.com/sadeq-n-yazdi/todo-bot/milestone/5) (hardening, **released**) · [v0.1.5](https://github.com/sadeq-n-yazdi/todo-bot/milestone/6) (Nth and last weekday of the month, **released and deployed**) · [v0.1.6](https://github.com/sadeq-n-yazdi/todo-bot/milestone/7) (repeat rule text, deploy hardening, **released and deployed**) · [v0.1.7](https://github.com/sadeq-n-yazdi/todo-bot/milestone/8) (one-off Nth weekday, cleanups, **released**) · [v0.1.8](https://github.com/sadeq-n-yazdi/todo-bot/milestone/9) (edit with the wizard) · [v0.3.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/10) (web UI) · [v0.2.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/2) (Postgres/MySQL, webhook, two-node HA)
 
 | # | Wave | Issue | Status | PR |
 |---|---|---|---|---|
@@ -73,6 +73,13 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
 | 84 | Backup and startup follow-ups from the #81 review | ✅ merged | #93 |
 | 94 | Flaky test: TestPollerAdvancesOffsetAndSurvivesHandlerError | ✅ merged | #95 |
 
+### v0.1.7
+
+| # | Issue | Status | PR |
+|---|---|---|---|
+| 96 | Cleanups: legacy settings data, repeat after a calendar change, test guard | ✅ merged | #99 |
+| 97 | nlparse: one-off Nth or last weekday of this or next month | ✅ merged | #100, #101 |
+
 ## Log
 - **2026-10-10**
   - Planned the project and created the repo and 17 issues.
@@ -141,3 +148,13 @@ Milestones: [v0.1.0](https://github.com/sadeq-n-yazdi/todo-bot/milestone/1) (sin
   - #84 merged (#93). The review found that a database under a folder the service user cannot open still read as "no database yet". This is fixed and tested. The deploy harness now runs in CI, and shellcheck on the runner found ten warnings in it, all fixed.
   - #94 merged (#95). The fake Telegram server in the test did not wait like a real long poll. Both the author and the review reproduced the CI failure with a short delay. v0.1.6 tagged.
   - v0.1.6 deployed to vps00 with the new deploy.sh. It has no schema change. The database was backed up first. v0.1.5 is kept as `todo-bot.prev` for rollback.
+- **2026-10-13**
+  - #96 merged (#99). The review found that a keyboard test sent old button data, so it passed for the wrong reason. The fix makes the test fail when the group path is broken. The calendar check now runs before the repeat-fit check.
+  - #97: the review found that other repeat words, such as "every week" or "هفتگی", gave a one-off with no repeat. It also asked that a phrase with no time, typed on the day itself, keep today. Both are fixed, and a second review compared the results with main.
+  - Owner decisions for #98 (edit with the wizard): `/edit N` with no text opens the wizard, a schedule change keeps the custom reminders, and a new assignee gets a short DM.
+- **2026-10-18**
+  - The owner merged #99 and #100. #100 went in before its review fix.
+- **2026-10-24**
+  - The review fix of #100 merged as #101. v0.1.7 tagged.
+  - Posted the #98 design on the issue.
+  - The owner asked for a web UI: a Telegram Mini App and an installable web app at todo.sadeq.uk. A Caddy proxy on vps03 serves all sadeq.uk sites on port 443 with DNS-01 certificates. todo-bot moves from vps00 to vps03. Filed #102 for the design.
