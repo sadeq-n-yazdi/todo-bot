@@ -8,6 +8,8 @@ file, and it runs as a hardened systemd service on a small VPS.
 > **The contracts in §3 are frozen.** Changing them requires a `CONTRACT CHANGE`
 > note in the PR description (see `CLAUDE.md`).
 
+The design of the web UI (Mini App and PWA) is in [WEB-DESIGN.md](WEB-DESIGN.md).
+
 ## 1. Library choices
 
 | Concern | Choice | Why |
