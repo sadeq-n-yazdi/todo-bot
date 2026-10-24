@@ -984,7 +984,7 @@ type MemberChecker interface {
 }
 ```
 
-`internal/web` has the `Deps` below. It is a new package, so its API is not frozen yet. W1 adds it to the frozen list in ARCHITECTURE §3 after W3 merges.
+`internal/web` has the `Deps` below. It is a new package, so its API is not frozen yet. W10 adds it to the frozen list in ARCHITECTURE §3, after the API is complete.
 
 ```go
 type Deps struct {
@@ -1007,11 +1007,11 @@ type Deps struct {
 
 ### 14.1 Rules
 
-- At most 4 sub-issues run at the same time. One Sonnet agent can do each one.
+- At most 4 sub-issues run at the same time. One developer can do each one.
 - Sub-issues that run at the same time never edit the same file. A later sub-issue can edit a file that an earlier, merged sub-issue made. The lists below name each such file.
 - **Owners of shared files.**
   - `cmd/todo-bot/run.go`: W3, then W4, then W14.
-  - `docs/ARCHITECTURE.md`: W1 only.
+  - `docs/ARCHITECTURE.md`: W1, then W10.
   - `web/vite.config.ts`: W2, then W6.
   - `web/src/app.tsx`: W2, then W9, then W12.
 - Each sub-issue copies its acceptance criteria into its PR as a checklist, and `make ci` must pass. A sub-issue that touches `web/` must also pass `make web-test`.
@@ -1135,9 +1135,10 @@ All four sub-issues depend on W3 merged. They run at the same time.
 
 **W10. e2e and user docs**
 - **Depends on:** W8 merged.
-- **Owns:** `internal/e2e/web_test.go`, `internal/e2e/mocktg_test.go` (`getChatMember`), `internal/e2e/harness_test.go` (if it needs a helper), `docs/USAGE.md`, `docs/DEPLOYMENT.md` (env, the Caddy contract, the steps of §16), `README.md`, `README.fa.md`.
+- **Owns:** `internal/e2e/web_test.go`, `internal/e2e/mocktg_test.go` (`getChatMember`), `internal/e2e/harness_test.go` (if it needs a helper), `docs/USAGE.md`, `docs/DEPLOYMENT.md` (env, the Caddy contract, the steps of §16), `README.md`, `README.fa.md`, `docs/ARCHITECTURE.md` (§3: the frozen API of `internal/web`).
 - **Acceptance:**
   - [ ] The e2e test of §12.3 passes with `-race`.
+  - [ ] ARCHITECTURE §3 lists `web.Deps` and `web.New` as frozen.
   - [ ] The docs follow the STE rules, and the checker shows no errors.
 
 ### 14.5 Phase 4: edit, the widget and live updates
