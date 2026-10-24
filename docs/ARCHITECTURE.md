@@ -669,6 +669,25 @@ The `Result`:
   `WizardCard` and `MonthGrid` are stubs that return zero values. `WizardAsk` is a stub that returns only `ForceReply`.
 - `handler`: `router.go` registers `/new` (`cmdNew`) and calls `onWizardText` for non-commands after `onReply`. `handleMessage` calls `newTaskKeyboardCtx`, and `reply` calls `offerNewTaskKeyboard` and, after a successful send, the function it returns. All four live in `wizard.go` as stubs: `/new` answers like an unknown command, `onWizardText` handles nothing, and the keyboard hooks attach nothing. The stubs call no new service method, so the existing fakes keep working.
 
+### Editing an item with the wizard (#98)
+The wizard can also change an item that you made before. This subsection gives the contracts. The flow is in the design on issue #98.
+
+- **New `DraftData` fields.** The store keeps them in the JSON `data`, so no migration is necessary.
+  - `EditTodoID` (`edit_todo`): the ID of the item to change. `0` means that the wizard creates a new item.
+  - `EditNum` (`edit_num`): the number of the item in its chat. The card header and the toasts use it.
+  - `EditBase` (`edit_base`): a copy of the prefill. Save sends only the differences from it. `nil` means that this is not an edit wizard.
+
+  Each field has `omitempty`. An old draft encodes to the same bytes as before. An old row decodes with the new fields at zero.
+- **`service.TodoPatch`.** A `nil` field means "unchanged". `Text` is the new text. `When` is the new schedule (`Due`, `Rule`, `HasTime`); `Due == nil` means "no date". `AssigneeID` is the new assignee; `0` means "no assignee".
+- **`service.ErrUnknownAssignee`.** The patch names a user that the bot does not know.
+- **`Service.UpdateTodo(ctx, a, todoID, p)`.** It reads the item again inside the transaction. It returns `ErrNotFound` if the item is complete, deleted or in another chat. `Num` never changes.
+  - A changed `When` cancels the pending `due` and `snooze` reminders and creates a new `due` reminder. Custom reminders stay.
+  - A change of text or assignee does not touch the reminders.
+- **`Service.SaveEditDraft(ctx, d, a, todoID, p)`.** In one transaction it deletes the draft with the version check. Then it does the work of `UpdateTodo`. A version mismatch returns `ErrStaleDraft` and changes nothing. If the update fails, the draft stays.
+- **`ui.WizardView.EditNum`.** `0` means that the wizard creates a new item.
+- **Rolling upgrade.** An older node drops the unknown `DraftData` fields when it writes a draft. Its Save then creates a duplicate item. Upgrade every node before you use this feature.
+- **State of the code.** `UpdateTodo` and `SaveEditDraft` are stubs in `internal/service/edit.go`. They return an error until the service part of #98 is in `main`. No handler calls them yet.
+
 ### Follow-up PRs
 Each PR owns only the files listed. They are numbered in merge order, but PRs 2–4 can be written in parallel against the frozen contracts.
 
