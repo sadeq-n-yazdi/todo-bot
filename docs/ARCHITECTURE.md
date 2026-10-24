@@ -67,6 +67,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
   - Assignment (§11): `User.Username`, `Todo.AssigneeID` (0 = none) and the read-only `Todo.AssigneeName`.
   - Wizard (§12): `Draft`, `DraftData`, `DraftStep` (`Step*`), the `Repeat*` choices, and `User.KBVersion` / `Prefs.KBVersion` (the reply keyboard).
   - Editing (§13): `DraftData.EditTodoID`, `DraftData.EditNum` and `DraftData.EditBase`.
+  - Web (§14): `WebSession`, `WebSessionKind` (`WebMiniApp`/`WebBrowser`), `LoginCode`, `ChatMember` and `MemberStatus` (`MemberYes`/`MemberLeft`/`MemberUnknown`).
 - **recur**:
   - `Rule{Freq, Interval, Weekdays, MonthDay, Month, Cal, Hour, Minute, Anchor}`.
   - `Parse(s)`, `String()` and `Next(after, loc)`.
@@ -81,21 +82,23 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
   - `Parser{DefaultHour, DefaultMinute}`.
   - `Parse(input, now) (Result, error)`, which returns `Result{Text, Due, Rule, HasTime}`.
   - `ParseWhen(input, now)`, used for reminder prompts.
-- **store**: the `Store` interface, plus `ErrNotFound`. `WithTx(fn)` hands `fn` a store bound to the transaction, and that store is the only one `fn` may use. Assignment (§11) adds `SetUsername`, `UserByUsername` and `ListAssigned`. The wizard (§12) adds `ListNamedUsers`, `SetKBVersion` and the compare-and-set draft methods `PutDraft`, `GetDraft`, `DraftByMessage`, `UpdateDraft` and `DeleteDraft`; `Purge` also deletes expired drafts.
+- **store**: the `Store` interface, plus `ErrNotFound`. `WithTx(fn)` hands `fn` a store bound to the transaction, and that store is the only one `fn` may use. Assignment (§11) adds `SetUsername`, `UserByUsername` and `ListAssigned`. The wizard (§12) adds `ListNamedUsers`, `SetKBVersion` and the compare-and-set draft methods `PutDraft`, `GetDraft`, `DraftByMessage`, `UpdateDraft` and `DeleteDraft`; `Purge` also deletes expired drafts. The web (§14) adds 17 methods: `PutWebSession`, `GetWebSession`, `TouchWebSession`, `DeleteWebSession`, `DeleteUserWebSessions`, `TrimUserWebSessions`, `DeleteWebSessionsExcept`, `PutLoginCode`, `TakeLoginCode`, `DeleteUserLoginCodes`, `UseProof`, `NoteChatMember`, `SetChatMember`, `GetChatMember`, `ListChatMembersOf`, `SetChatGone` and `ListGroupChats`. `PutLoginCode`, `TakeLoginCode` and `UseProof` are conditional writes: of concurrent callers, exactly one wins. `Purge` also deletes the expired web rows (WEB-DESIGN §6.4).
 - **tg**:
   - Types: `Message`, `Callback`, `Update`, `Button`, `OutMessage` (HTML text, inline keyboard, ForceReply, and a persistent reply keyboard or its removal (§12)).
   - `Message.FromUsername` and `Callback.FromUsername` carry the sender's @username without "@", as Telegram sends it (§11).
   - `Sender{Send, Edit, AnswerCallback}`.
   - `APIError{Code, Desc, RetryAfter, MigrateTo}` and `IsPermanent(err)`.
+  - Web (§14): `Button.URL` and `Button.WebAppURL` give `url` and `web_app` buttons. `MemberChecker{ChatMember(ctx, chatID, userID)}` calls `getChatMember` and returns `ChatMember{Status, IsMember}` with a `MemberStatus`. `*tgbot.Bot` implements it, and `tgtest.FakeMembers` is its fake. `Sender` does not change.
 - **ui**:
   - `Action{Kind, ID, Arg}` with `Encode` (at most 64 bytes) and `Decode`.
   - `TodoList`, `ReminderMsg`, `Digest` and `FormatWhen`.
   - `Mention(userID, username, locale)` renders a `tg://user?id=` link labelled `@name`, or a translated label when the username is unknown (§11).
   - Wizard (§12): the `ActWiz*` kinds and `Wiz*` arguments, `WizardView`/`WizardCard`, `DayCell`/`MonthGrid`/`FirstWeekday`, the "➕ New task" helpers and the argument helpers (`DateArg`, `MonthArg`, `TimeArg` and their parsers). Editing (§13) adds `WizardView.EditNum`.
-- **service**: the `Service` interface, `Actor{UserID, ChatID, ChatKind, ChatTitle}`, and `Waker{Wake()}`. Assignment (§11) adds `NoteUsername`, `UserByUsername`, `AddTodoFor` and `ListAssigned`. The wizard (§12) adds `StartDraft`, `Draft`, `DraftByMessage`, `UpdateDraft`, `EndDraft`, `SaveDraft`, `NamedUsers`, `SetKBVersion`, `ErrStaleDraft` and `Config.DraftTTL`. Editing (§13) adds `UpdateTodo`, `SaveEditDraft`, `TodoPatch` and `ErrUnknownAssignee`.
+- **service**: the `Service` interface, `Actor{UserID, ChatID, ChatKind, ChatTitle}`, and `Waker{Wake()}`. Assignment (§11) adds `NoteUsername`, `UserByUsername`, `AddTodoFor` and `ListAssigned`. The wizard (§12) adds `StartDraft`, `Draft`, `DraftByMessage`, `UpdateDraft`, `EndDraft`, `SaveDraft`, `NamedUsers`, `SetKBVersion`, `ErrStaleDraft` and `Config.DraftTTL`. Editing (§13) adds `UpdateTodo`, `SaveEditDraft`, `TodoPatch` and `ErrUnknownAssignee`. The web (§14) adds the interface `Web` and `ErrTooManyCodes`. `*Svc` implements `Web`. `Service` does not change.
 - **scheduler**:
   - `Backend` is implemented by the service.
   - `New(b, sender, clock, log)`, plus `Run`, `Tick` and `Wake`.
+- **config**: `Config`. The web (§14) adds `WebAddr`, `WebOrigin`, `WebSessionTTL`, `WebSessionMax`, `WebMemberTTL` and `WebTrustedProxies`.
 - **handler**:
   - `Deps{Svc, Send, Parser, Clock, Allowed, BotUsername, Log}`.
   - `New(Deps)` and `Handle(ctx, Update)`.
@@ -753,3 +756,14 @@ The wizard can also change an item of the chat. This section gives the contracts
 - **`ui.WizardView.EditNum`.** `0` means that the wizard creates a new item.
 - **Rolling upgrade.** An older node ignores these fields. If it handles Save, it creates a new item. If it writes the draft, it removes the fields. A later Save on any node then creates a new item. Upgrade every node before you use this feature.
 - **State of the code.** `internal/service/edit.go` has `UpdateTodo` and `SaveEditDraft`. `internal/handler/wizard_edit.go` opens the wizard in edit mode, compares the draft with the item, saves with `SaveEditDraft` and sends the DM to a new assignee. A once item at 23:59 in the time zone of the editor opens as a date without a time, because `HasTime` is not stored.
+
+## 14. Web UI (#102)
+The design of the web UI is in [`docs/WEB-DESIGN.md`](WEB-DESIGN.md). Read it before you change a web file. This section gives only the contracts.
+
+- **Migration.** `0005_web.sql` adds the tables `web_sessions`, `web_login_codes`, `web_used_proofs` and `chat_members` (WEB-DESIGN §6.1).
+- **Secrets.** The database holds only the hex SHA-256 of a session token, a login code or a widget proof. It never holds the secret itself.
+- **Tokens.** A session token is `tb1_` and 32 random bytes as base64url without padding.
+- **Sessions.** A `miniapp` session does not slide. A `browser` session slides, with at most one write per hour, and never passes `max_at`. A user has at most 5 `miniapp` and 20 `browser` sessions. A new session removes the oldest session of the same kind.
+- **Login codes.** A code has 8 Crockford base32 characters and works one time, for 5 minutes. A user has at most one live code. At most 100 codes are live in total.
+- **Membership.** Only an answer of `getChatMember` writes `member` or `left`. An update in a group writes only a hint (`unknown`), and a hint never grants access. The service only stores these rows. `internal/web` calls Telegram.
+- **Multi-node.** All web state is in the database. `PutLoginCode`, `TakeLoginCode` and `UseProof` are the only new coordination points (WEB-DESIGN §10).
