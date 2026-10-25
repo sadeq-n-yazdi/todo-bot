@@ -6,15 +6,7 @@ import { t } from "../i18n";
 import type { User } from "../types";
 import { Groups } from "./groups";
 import { ItemList } from "./list";
-import {
-  applyUpdate,
-  checkIosHint,
-  dismissIosHint,
-  ensureTouchIcon,
-  promptInstall,
-  registerServiceWorker,
-  usePwa,
-} from "./pwa";
+import { applyUpdate, checkIosHint, dismissIosHint, promptInstall, usePwa } from "./pwa";
 import "./tabs.css";
 
 export type TabId = "mine" | "assigned" | "groups";
@@ -74,12 +66,11 @@ export function Tabs(props: { user: User }) {
     };
   }, []);
 
-  // The PWA at "/" has the service worker. The Mini App at "/tg/" has none.
+  // The iOS install hint is for the PWA at "/" only. The app (app.tsx)
+  // registers the service worker.
   useEffect(() => {
     if (location.pathname.startsWith("/tg/")) return;
-    ensureTouchIcon();
     checkIosHint();
-    if (import.meta.env.PROD) void registerServiceWorker();
   }, []);
 
   const choose = (id: TabId) => {

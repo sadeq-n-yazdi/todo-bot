@@ -1,6 +1,8 @@
 package web
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -83,5 +85,51 @@ func TestPlaceholderMiniApp(t *testing.T) {
 	h.srv.d.Assets = Assets()
 	if w := h.do("GET", "/", ""); w.Code != 200 {
 		t.Fatalf("/ with the real Assets(): %d", w.Code)
+	}
+}
+
+// The PWA page gets the bot name as <meta name="todo-bot">, so that the login
+// screen can link to the Mini App. The Mini App page does not get it.
+func TestPageBotNameMeta(t *testing.T) {
+	h := newHarness(t)
+	h.srv.d.Assets = fstest.MapFS{
+		"index.html":    {Data: []byte("<!doctype html><html><head><title>pwa</title></head><body></body></html>")},
+		"tg/index.html": {Data: []byte("<!doctype html><html><head><title>tg</title></head><body></body></html>")},
+	}
+	want := `<!doctype html><html><head><title>pwa</title><meta name="todo-bot" content="TodoBot"></head><body></body></html>`
+	for _, p := range []string{"/", "/index.html"} {
+		w := h.do("GET", p, "")
+		if w.Code != 200 || w.Body.String() != want {
+			t.Fatalf("%s: %d %q", p, w.Code, w.Body)
+		}
+		if got := w.Header().Get("Content-Length"); got != strconv.Itoa(len(want)) {
+			t.Errorf("%s: Content-Length %q, want %d", p, got, len(want))
+		}
+		if w.Header().Get("Content-Security-Policy") != cspPWA || w.Header().Get("Cache-Control") != "no-cache" {
+			t.Errorf("%s: headers %v", p, w.Header())
+		}
+	}
+	if w := h.do("HEAD", "/", ""); w.Code != 200 || w.Header().Get("Content-Length") != strconv.Itoa(len(want)) {
+		t.Errorf("HEAD /: %d %q", w.Code, w.Header().Get("Content-Length"))
+	}
+	if w := h.do("GET", "/tg/", ""); w.Code != 200 || strings.Contains(w.Body.String(), "todo-bot") {
+		t.Errorf("/tg/: %d %q", w.Code, w.Body)
+	}
+
+	// The name is HTML-escaped.
+	h.srv.d.BotName = `a"b<c>&d`
+	if w := h.do("GET", "/", ""); !strings.Contains(w.Body.String(), `<meta name="todo-bot" content="a&#34;b&lt;c&gt;&amp;d"></head>`) {
+		t.Errorf("escaped: %q", w.Body)
+	}
+
+	// No name, or a page without </head>: the page is unchanged.
+	h.srv.d.BotName = ""
+	if w := h.do("GET", "/", ""); strings.Contains(w.Body.String(), "todo-bot") {
+		t.Errorf("no name: %q", w.Body)
+	}
+	h.srv.d.BotName = "TodoBot"
+	h.srv.d.Assets = fstest.MapFS{"index.html": {Data: []byte("placeholder")}}
+	if w := h.do("GET", "/", ""); w.Body.String() != "placeholder" {
+		t.Errorf("no </head>: %q", w.Body)
 	}
 }

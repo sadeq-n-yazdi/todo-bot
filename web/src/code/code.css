@@ -68,7 +68,7 @@
   color: var(--danger);
 }
 
-.row {
+.code-row {
   display: flex;
   flex-wrap: wrap;
   gap: var(--gap);

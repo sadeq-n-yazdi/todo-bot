@@ -12,7 +12,7 @@ import { Edit } from "./edit/index";
 import { onListsChanged, startPoll } from "./live";
 import { Login } from "./login/index";
 import { LOGOUT_EVENT, Tabs } from "./tabs/index";
-import { ensureTouchIcon, registerServiceWorker } from "./tabs/pwa";
+import { registerServiceWorker } from "./tabs/pwa";
 
 export type Mode = "miniapp" | "pwa";
 
@@ -66,10 +66,10 @@ export function App(props: { mode: Mode; initData?: string; screen?: "signout" }
   const [codeOpen, setCodeOpen] = useState(false);
   const miniapp = props.mode === "miniapp";
 
-  // The PWA registers its service worker and the iOS icon before sign-in too.
+  // The PWA registers its service worker here, before sign-in too. This is the
+  // only place that registers it. The Mini App at "/tg/" has none.
   useEffect(() => {
     if (miniapp) return;
-    ensureTouchIcon();
     if (import.meta.env.PROD) void registerServiceWorker();
   }, [miniapp]);
 

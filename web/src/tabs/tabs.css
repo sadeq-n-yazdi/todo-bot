@@ -82,7 +82,9 @@
   min-inline-size: 0;
 }
 
+/* The row body is made of spans (a button holds only phrasing content). */
 .row-text {
+  display: block;
   overflow-wrap: anywhere;
 }
 

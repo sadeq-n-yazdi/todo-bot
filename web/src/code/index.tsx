@@ -107,7 +107,7 @@ function ShowCode() {
             {after}
           </p>
           <p class="warning">{tr("web.login.code_warning")}</p>
-          <div class="row">
+          <div class="code-row">
             <button class="btn plain" type="button" onClick={cancel}>
               {tr("web.login.code_cancel")}
             </button>
@@ -117,13 +117,13 @@ function ShowCode() {
       {state.phase === "expired" && (
         <>
           <p>{tr("web.login.code_expired")}</p>
-          <div class="row">{again}</div>
+          <div class="code-row">{again}</div>
         </>
       )}
       {state.phase === "canceled" && (
         <>
           <p>{tr("web.login.code_canceled")}</p>
-          <div class="row">{again}</div>
+          <div class="code-row">{again}</div>
         </>
       )}
       {state.phase === "error" && (
@@ -131,7 +131,7 @@ function ShowCode() {
           <p role="alert" class="error">
             {state.message}
           </p>
-          <div class="row">{again}</div>
+          <div class="code-row">{again}</div>
         </>
       )}
     </main>
@@ -172,7 +172,7 @@ function SignOut() {
               {error}
             </p>
           )}
-          <div class="row">
+          <div class="code-row">
             <button class="btn" type="button" disabled={busy} onClick={confirm}>
               {tr("web.login.signout_ok")}
             </button>

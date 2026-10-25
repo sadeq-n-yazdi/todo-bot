@@ -8,7 +8,7 @@ import "github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 func init() {
 	i18n.Register(i18n.En, map[string]string{
 		"web.login.title":         "Sign in",
-		"web.login.steps":         "1. Open the app in Telegram.\n2. Go to Settings, then Sign in a browser.\n3. Type the code here.",
+		"web.login.steps":         "1. In Telegram, open the chat with the bot.\n2. Tap the Open button next to the message field. The web app of the bot opens.\n3. In the web app, tap the ⚙ button (Settings) at the top. Do not open the settings of Telegram.\n4. Tap Sign in a browser. The web app shows a code.\n5. Type the code here, then tap Sign in.",
 		"web.login.open":          "Open the app in Telegram",
 		"web.login.code_label":    "Code",
 		"web.login.submit":        "Sign in",
@@ -30,7 +30,7 @@ func init() {
 	})
 	i18n.Register(i18n.Fa, map[string]string{
 		"web.login.title":         "ورود",
-		"web.login.steps":         "۱. برنامه را در تلگرام باز کنید.\n۲. به تنظیمات بروید و «ورود در مرورگر» را بزنید.\n۳. کد را همین\u200cجا بنویسید.",
+		"web.login.steps":         "۱. در تلگرام، گفتگو با ربات را باز کنید.\n۲. دکمهٔ «Open» را در کنار جای نوشتن پیام بزنید. برنامهٔ وب ربات باز می\u200cشود.\n۳. در برنامهٔ وب، دکمهٔ ⚙ (تنظیمات) را در بالا بزنید. تنظیمات خود تلگرام را باز نکنید.\n۴. «ورود در مرورگر» را بزنید. برنامهٔ وب یک کد نشان می\u200cدهد.\n۵. کد را همین\u200cجا بنویسید و «ورود» را بزنید.",
 		"web.login.open":          "باز کردن برنامه در تلگرام",
 		"web.login.code_label":    "کد",
 		"web.login.submit":        "ورود",

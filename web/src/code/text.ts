@@ -6,7 +6,8 @@ import { t } from "../i18n";
 
 const english: Record<string, string> = {
   "web.login.title": "Sign in",
-  "web.login.steps": "1. Open the app in Telegram.\n2. Go to Settings, then Sign in a browser.\n3. Type the code here.",
+  "web.login.steps":
+    "1. In Telegram, open the chat with the bot.\n2. Tap the Open button next to the message field. The web app of the bot opens.\n3. In the web app, tap the ⚙ button (Settings) at the top. Do not open the settings of Telegram.\n4. Tap Sign in a browser. The web app shows a code.\n5. Type the code here, then tap Sign in.",
   "web.login.open": "Open the app in Telegram",
   "web.login.code_label": "Code",
   "web.login.submit": "Sign in",
