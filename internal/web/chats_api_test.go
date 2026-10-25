@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -126,29 +125,35 @@ func TestChatsPartialAndGrace(t *testing.T) {
 func TestChatsAtMostFourChecksAtOnce(t *testing.T) {
 	h := newHarness(t)
 	tok := h.signIn(userAnn)
-	for i := range 10 {
+	for i := range 8 {
 		id := -100 - int64(i)
 		addGroup(t, h, id, "G")
 		h.members.Set(id, idAnn, tg.ChatMember{Status: tg.MemberMember})
 	}
-	var cur, peak atomic.Int32
+	entered := make(chan struct{}, 16)
+	release := make(chan struct{})
 	h.members.Hook = func(context.Context, int64, int64) {
-		n := cur.Add(1)
-		for {
-			p := peak.Load()
-			if n <= p || peak.CompareAndSwap(p, n) {
-				break
-			}
+		entered <- struct{}{}
+		<-release
+	}
+	done := make(chan chatsResponse, 1)
+	go func() { done <- listChats(t, h, tok) }()
+	for range 4 {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("fewer than 4 checks started")
 		}
-		time.Sleep(20 * time.Millisecond)
-		cur.Add(-1)
 	}
-	r := listChats(t, h, tok)
-	if len(r.Chats) != 11 {
+	select {
+	case <-entered:
+		t.Fatal("a 5th check started while 4 were running")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	r := <-done
+	if len(r.Chats) != 9 || r.Partial {
 		t.Fatalf("list %+v", r)
-	}
-	if p := peak.Load(); p != 4 {
-		t.Errorf("peak %d checks at the same time, want 4", p)
 	}
 }
 

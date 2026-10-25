@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -294,9 +293,9 @@ func TestOneCallForEachPair(t *testing.T) {
 	h := newHarness(t)
 	addGroup(t, h, grp, "Family")
 	release := make(chan struct{})
-	var started atomic.Int32
+	entered := make(chan struct{}, 16)
 	h.members.Hook = func(ctx context.Context, _, _ int64) {
-		started.Add(1)
+		entered <- struct{}{}
 		select {
 		case <-release:
 		case <-ctx.Done():
@@ -308,9 +307,9 @@ func TestOneCallForEachPair(t *testing.T) {
 	for range n {
 		go func() { errs <- h.actor(grp) }()
 	}
-	// Wait until the first call is in flight, and the others have joined it.
-	waitFor(t, func() bool { return started.Load() == 1 })
-	time.Sleep(50 * time.Millisecond)
+	<-entered // the first call is in flight
+	// Wait until the other requests have joined the flight, then release.
+	waitFor(t, func() bool { return h.srv.members.waiters(pairKey{grp, idAnn}) == n })
 	close(release)
 	for range n {
 		if err := <-errs; err != nil {
@@ -324,7 +323,7 @@ func TestOneCallForEachPair(t *testing.T) {
 
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	for range 400 {
+	for range 1000 {
 		if cond() {
 			return
 		}
@@ -409,7 +408,7 @@ func TestGroupRouteErrors(t *testing.T) {
 	tok := h.signIn(userAnn)
 	addGroup(t, h, grp, "Family")
 	h.members.Set(grp, idAnn, tg.ChatMember{Status: tg.MemberMember})
-	if w := h.do("GET", "/api/chats/-1001/items", "", bearer(tok)); w.Code != http.StatusNotImplemented {
+	if w := h.do("GET", "/api/chats/-1001/items", "", bearer(tok)); w.Code != http.StatusOK {
 		t.Errorf("member: %d %s", w.Code, w.Body)
 	}
 	h.members.Set(grp, idAnn, tg.ChatMember{Status: tg.MemberKicked})
@@ -426,4 +425,66 @@ func TestGroupRouteErrors(t *testing.T) {
 
 func hintActorOf(user, chat int64) service.Actor {
 	return service.Actor{UserID: user, ChatID: chat, ChatKind: model.ChatGroup, ChatTitle: "Family"}
+}
+
+// When the node budget is used up, the grace rule does not apply: a user
+// who left must not keep access because someone drained the budget.
+func TestLimitGivesNoGrace(t *testing.T) {
+	h := newHarness(t)
+	addGroup(t, h, grp, "Family")
+	setRow(t, h, grp, idAnn, model.MemberYes)
+	h.clk.Advance(30 * time.Minute) // past the TTL, inside the grace window
+	for i := range memberCallsPerMin {
+		id := -2000 - int64(i)
+		addGroup(t, h, id, "G")
+		h.members.Set(id, idAnn, tg.ChatMember{Status: tg.MemberMember})
+		if err := h.actor(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantAE(t, h.actor(grp), 503, "membership_unverified")
+	// The same row is allowed when Telegram (not our budget) is down.
+	h.clk.Advance(time.Minute)
+	h.members.SetErr(grp, idAnn, &tg.APIError{Code: 500, Desc: "down"})
+	if err := h.actor(grp); err != nil {
+		t.Fatalf("grace on a Telegram outage: %v", err)
+	}
+}
+
+// The checks of GET /api/chats have their own budget.
+func TestListDoesNotUseTheActorBudget(t *testing.T) {
+	h := newHarness(t)
+	tok := h.signIn(userAnn)
+	for i := range 40 {
+		id := -4000 - int64(i)
+		addGroup(t, h, id, "G")
+		h.members.Set(id, idAnn, tg.ChatMember{Status: tg.MemberMember})
+	}
+	r := listChats(t, h, tok)
+	if len(r.Chats) != 1+listCallsPerMin || !r.Partial {
+		t.Fatalf("%d chats, partial %v; want %d chats", len(r.Chats), r.Partial, 1+listCallsPerMin)
+	}
+	if c := len(h.members.Calls()); c != listCallsPerMin {
+		t.Fatalf("%d calls, want %d", c, listCallsPerMin)
+	}
+	// The actor budget is untouched.
+	addGroup(t, h, grp, "Family")
+	h.members.Set(grp, idAnn, tg.ChatMember{Status: tg.MemberMember})
+	if err := h.actor(grp); err != nil {
+		t.Fatalf("groupActor after a list: %v", err)
+	}
+}
+
+// After the stop of the list, no new call starts.
+func TestNoNewCallAfterTheListStopped(t *testing.T) {
+	h := newHarness(t)
+	addGroup(t, h, grp, "Family")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := h.srv.askTelegram(context.Background(), ctx, h.srv.members.listCalls, idAnn, grp); !errors.Is(err, errTemp) {
+		t.Fatalf("err %v", err)
+	}
+	if n := len(h.members.Calls()); n != 0 {
+		t.Fatalf("%d calls", n)
+	}
 }

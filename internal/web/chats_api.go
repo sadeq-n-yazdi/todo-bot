@@ -119,7 +119,7 @@ func (s *Server) checkAll(ctx context.Context, uid int64, cands []model.Chat) (g
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				p, err := s.membership(ctx, wait, uid, cands[i].ID)
+				p, err := s.membership(ctx, wait, s.members.listCalls, uid, cands[i].ID)
 				res[i] = result{p, err}
 			}
 		}()
@@ -137,7 +137,7 @@ func (s *Server) checkAll(ctx context.Context, uid int64, cands []model.Chat) (g
 		switch {
 		case err == nil:
 			groups = append(groups, chatDTO{ID: c.ID, Kind: string(model.ChatGroup), Title: c.Title})
-		case errors.Is(err, errTemp), errors.As(err, &ae) && ae.Status != http.StatusInternalServerError:
+		case errors.Is(err, errTemp), errors.Is(err, errLimited), errors.As(err, &ae) && ae.Status != http.StatusInternalServerError:
 			// not_member, not_found, group_moved or a temporary error:
 			// the user does not see this group now.
 		default:

@@ -21,6 +21,9 @@ const (
 	memberGrace = time.Hour
 	// memberCallsPerMin is the limit of getChatMember calls on one node.
 	memberCallsPerMin = 30
+	// listCallsPerMin is the budget of the list checks on one node. It is
+	// separate from memberCallsPerMin.
+	listCallsPerMin = 10
 	// memberCallTimeout is the time limit of one getChatMember call.
 	memberCallTimeout = 3 * time.Second
 	// defaultMemberTTL is used when the configuration has no TTL.
@@ -32,10 +35,16 @@ const (
 // into errUnverified.
 var errTemp = errors.New("web: membership check failed for now")
 
+// errLimited is the answer when the budget of calls on this node is used
+// up. It is not "Telegram is down", so the grace rule does not cover it: the
+// client gets 503 membership_unverified and an old member row grants nothing.
+var errLimited = errors.New("web: membership call budget used up")
+
 // flight is one getChatMember call that other requests can wait for.
 type flight struct {
-	done chan struct{}
-	err  error // nil = member; an *apiError = final answer; or errTemp
+	done    chan struct{}
+	waiters int   // requests that wait for this call; for tests
+	err     error // nil = member; an *apiError = final answer; or errTemp
 }
 
 type pairKey struct{ chat, user int64 }
@@ -46,7 +55,10 @@ type pairKey struct{ chat, user int64 }
 type memberState struct {
 	mu      sync.Mutex
 	flights map[pairKey]*flight
-	calls   *limiter // memberCallsPerMin, one key
+	calls   *limiter // memberCallsPerMin, for the checks of groupActor
+	// listCalls is a smaller budget for the checks of GET /api/chats, so
+	// that a list cannot use up the budget of groupActor.
+	listCalls *limiter
 
 	// callTimeout limits one Telegram call; tests make it short.
 	callTimeout time.Duration
@@ -59,6 +71,7 @@ func (s *Server) initMembers() {
 	s.members = memberState{
 		flights:     map[pairKey]*flight{},
 		calls:       newLimiter(s.d.Clock, memberCallsPerMin, time.Minute),
+		listCalls:   newLimiter(s.d.Clock, listCallsPerMin, time.Minute),
 		callTimeout: memberCallTimeout,
 	}
 }
@@ -82,8 +95,8 @@ func (s *Server) groupActor(ctx context.Context, userID, chatID int64) (service.
 	case c.Kind != model.ChatGroup:
 		return service.Actor{}, errNotFound
 	}
-	if _, err := s.membership(ctx, ctx, userID, chatID); err != nil {
-		if errors.Is(err, errTemp) {
+	if _, err := s.membership(ctx, ctx, s.members.calls, userID, chatID); err != nil {
+		if errors.Is(err, errTemp) || errors.Is(err, errLimited) {
 			return service.Actor{}, errUnverified
 		}
 		return service.Actor{}, err
@@ -98,7 +111,7 @@ func (s *Server) groupActor(ctx context.Context, userID, chatID int64) (service.
 // long the call waits for Telegram. partial is true whenever Telegram had a
 // temporary error, also when the grace rule allowed the call; then
 // GET /api/chats says "partial".
-func (s *Server) membership(ctx, wait context.Context, userID, chatID int64) (partial bool, err error) {
+func (s *Server) membership(ctx, wait context.Context, budget *limiter, userID, chatID int64) (partial bool, err error) {
 	row, err := s.d.Web.Membership(ctx, chatID, userID)
 	haveRow := err == nil
 	if err != nil && !errors.Is(err, service.ErrNotFound) {
@@ -115,7 +128,10 @@ func (s *Server) membership(ctx, wait context.Context, userID, chatID int64) (pa
 			return false, errNotMember
 		}
 	}
-	err = s.askTelegram(ctx, wait, userID, chatID)
+	err = s.askTelegram(ctx, wait, budget, userID, chatID)
+	if errors.Is(err, errLimited) {
+		return true, err // no grace: our budget is used up, Telegram is not down
+	}
 	if !errors.Is(err, errTemp) {
 		return false, err
 	}
@@ -128,21 +144,26 @@ func (s *Server) membership(ctx, wait context.Context, userID, chatID int64) (pa
 // askTelegram shares one getChatMember call among all callers for the same
 // pair. The call runs on its own context, so a caller that goes away does
 // not stop it for the others. A caller stops waiting when wait is done.
-func (s *Server) askTelegram(ctx, wait context.Context, userID, chatID int64) error {
+func (s *Server) askTelegram(ctx, wait context.Context, budget *limiter, userID, chatID int64) error {
 	k := pairKey{chatID, userID}
 	s.members.mu.Lock()
 	f, ok := s.members.flights[k]
 	if !ok {
+		if wait.Err() != nil { // the caller stopped: start no new call
+			s.members.mu.Unlock()
+			return errTemp
+		}
 		f = &flight{done: make(chan struct{})}
 		s.members.flights[k] = f
 		go func() {
-			f.err = s.callTelegram(context.WithoutCancel(ctx), userID, chatID)
+			f.err = s.callTelegram(context.WithoutCancel(ctx), budget, userID, chatID)
 			s.members.mu.Lock()
 			delete(s.members.flights, k)
 			s.members.mu.Unlock()
 			close(f.done)
 		}()
 	}
+	f.waiters++
 	s.members.mu.Unlock()
 	select {
 	case <-f.done:
@@ -154,9 +175,9 @@ func (s *Server) askTelegram(ctx, wait context.Context, userID, chatID int64) er
 
 // callTelegram makes the call and writes the result (§4.4 steps 3 and 4).
 // It never holds a database transaction while it waits for Telegram.
-func (s *Server) callTelegram(ctx context.Context, userID, chatID int64) error {
-	if ok, _ := s.members.calls.allow("getChatMember"); !ok {
-		return errTemp
+func (s *Server) callTelegram(ctx context.Context, budget *limiter, userID, chatID int64) error {
+	if ok, _ := budget.allow("getChatMember"); !ok {
+		return errLimited
 	}
 	cctx, cancel := context.WithTimeout(ctx, s.members.callTimeout)
 	defer cancel()
@@ -209,7 +230,7 @@ func (s *Server) classifyError(ctx context.Context, userID, chatID int64, err er
 	case ae.MigrateTo != 0: // row a
 		if err := s.d.Svc.MigrateChat(ctx, chatID, ae.MigrateTo); err != nil {
 			s.log.Warn("web: migrate chat", "old", chatID, "new", ae.MigrateTo, "err", err)
-			return errTemp
+			return errUnverified // final: no grace for an old ID
 		}
 		if err := s.d.Web.ChatGone(ctx, chatID); err != nil {
 			s.log.Warn("web: mark the old chat gone", "chat", chatID, "err", err)
@@ -237,4 +258,14 @@ func containsAny(s string, subs []string) bool {
 		}
 	}
 	return false
+}
+
+// waiters is the number of requests that wait for the call of k, or 0.
+func (m *memberState) waiters(k pairKey) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if f := m.flights[k]; f != nil {
+		return f.waiters
+	}
+	return 0
 }

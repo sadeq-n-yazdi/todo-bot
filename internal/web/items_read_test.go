@@ -17,6 +17,7 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/service"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
 )
 
 const (
@@ -263,6 +264,7 @@ func TestListRefusals(t *testing.T) {
 	tok, _ := h.browser(idBob)
 	wantErr(t, h.do("GET", "/api/chats/"+fmt.Sprint(idAnn)+"/items", "", cookie(tok)), 404, "not_found") // another private chat
 	// A group the user is not a member of: 403 or 404 (the actor middleware).
+	h.members.Set(groupFamily, idBob, tg.ChatMember{Status: tg.MemberLeft})
 	w := h.do("GET", fmt.Sprintf("/api/chats/%d/items", groupFamily), "", cookie(tok))
 	if w.Code != 403 && w.Code != 404 {
 		t.Errorf("group: status %d, want 403 or 404: %s", w.Code, w.Body)
