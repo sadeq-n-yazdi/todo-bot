@@ -140,15 +140,3 @@ export function dismissIosHint(): void {
 function isStandalone(): boolean {
   return (navigator as Navigator & { standalone?: boolean }).standalone === true;
 }
-
-/**
- * The apple-touch-icon link. iOS reads it from the page. The HTML entry is not
- * in the files of this sub-issue, so the app adds the link at the start.
- */
-export function ensureTouchIcon(): void {
-  if (document.querySelector('link[rel="apple-touch-icon"]')) return;
-  const link = document.createElement("link");
-  link.rel = "apple-touch-icon";
-  link.href = "/icons/apple-touch-icon.png";
-  document.head.appendChild(link);
-}

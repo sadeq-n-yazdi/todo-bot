@@ -69,11 +69,6 @@
   border-color: var(--accent);
 }
 
-/* The row body is made of spans (a button holds only phrasing content). */
-.row-text {
-  display: block;
-}
-
 .row-open {
   display: block;
   padding: 0;

@@ -7,7 +7,6 @@ import {
   applyUpdate,
   checkIosHint,
   dismissIosHint,
-  ensureTouchIcon,
   getPwaState,
   promptInstall,
   registerServiceWorker,
@@ -177,15 +176,5 @@ describe("iOS hint", () => {
     checkIosHint("Mozilla/5.0 (X11; Linux x86_64) Chrome/130", false);
     checkIosHint(safari, true);
     expect(getPwaState().iosHint).toBe(false);
-  });
-});
-
-describe("apple-touch-icon", () => {
-  it("adds the link one time", () => {
-    ensureTouchIcon();
-    ensureTouchIcon();
-    const links = document.head.querySelectorAll('link[rel="apple-touch-icon"]');
-    expect(links).toHaveLength(1);
-    expect(links[0].getAttribute("href")).toBe("/icons/apple-touch-icon.png");
   });
 });

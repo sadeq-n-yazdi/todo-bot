@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"html"
 	"io"
 	"io/fs"
 	"mime"
@@ -13,7 +14,8 @@ import (
 
 // The static files come straight from Deps.Assets, the embedded fs.FS
 // (docs/WEB-DESIGN.md §8.5). The server does not copy them to memory and
-// does not compress them; Caddy and Cloudflare compress.
+// does not compress them; Caddy and Cloudflare compress. The PWA page is the
+// one exception: it is read into memory to add the bot name (withBotMeta).
 
 // handlePage serves the HTML page of the PWA ("/", "/index.html") or of the
 // Mini App ("/tg/"), with its CSP. A binary with the placeholder has no
@@ -21,15 +23,37 @@ import (
 func (s *Server) handlePage(miniApp bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := "index.html"
+		var edit func([]byte) []byte
 		if miniApp {
 			if _, err := fs.Stat(s.d.Assets, "tg/index.html"); err == nil {
 				name = "tg/index.html"
 			}
+		} else {
+			edit = s.withBotMeta
 		}
-		if !s.serveFile(w, r, name, func(h http.Header) { setPageHeaders(h, miniApp) }) {
+		if !s.serveFile(w, r, name, func(h http.Header) { setPageHeaders(h, miniApp) }, edit) {
 			http.NotFound(w, r)
 		}
 	}
+}
+
+// withBotMeta puts <meta name="todo-bot" content="<bot username>"> before the
+// first </head> of the PWA page. The login screen needs the name for its link
+// to the Mini App, before a sign-in (web/src/login/widget.tsx). The name is
+// HTML-escaped. A meta is not a script, so the CSP does not change. The page
+// has no-cache and no validator, and the service worker caches "/" from the
+// server, so its offline copy has the meta too. With no name, or with no
+// </head>, the page does not change.
+func (s *Server) withBotMeta(page []byte) []byte {
+	i := bytes.Index(page, []byte("</head>"))
+	if s.d.BotName == "" || i < 0 {
+		return page
+	}
+	meta := `<meta name="todo-bot" content="` + html.EscapeString(s.d.BotName) + `">`
+	out := make([]byte, 0, len(page)+len(meta))
+	out = append(out, page[:i]...)
+	out = append(out, meta...)
+	return append(out, page[i:]...)
 }
 
 // handleMiniAppRedirect sends "/tg" to "/tg/", with the same query.
@@ -50,15 +74,16 @@ func (s *Server) handleStatic(cacheControl string) http.HandlerFunc {
 		if !s.serveFile(w, r, name, func(h http.Header) {
 			h.Set("Cache-Control", cacheControl)
 			h.Set("Content-Security-Policy", cspPWA)
-		}) {
+		}, nil) {
 			http.NotFound(w, r)
 		}
 	}
 }
 
 // serveFile serves the regular file name of the assets. It returns false,
-// with nothing written, if there is no such file.
-func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string, headers func(http.Header)) bool {
+// with nothing written, if there is no such file. A non-nil edit changes the
+// body before it is served.
+func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string, headers func(http.Header), edit func([]byte) []byte) bool {
 	if s.d.Assets == nil || !fs.ValidPath(name) {
 		return false
 	}
@@ -72,10 +97,13 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string, 
 		return false
 	}
 	rs, ok := f.(io.ReadSeeker)
-	if !ok {
+	if !ok || edit != nil {
 		b, err := io.ReadAll(f)
 		if err != nil {
 			return false
+		}
+		if edit != nil {
+			b = edit(b)
 		}
 		rs = bytes.NewReader(b)
 	}
