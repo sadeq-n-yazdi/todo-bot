@@ -455,6 +455,74 @@ After a snooze the message becomes `💤 Snoozed until today 09:25` (`💤 تا 
 - `/whoami` is answered only in private chats.
 - The [step-by-step wizard](#step-by-step-task-new) works in groups. The bot asks its text questions as replies, and only the person who started the wizard can press its buttons.
 
+## The web app
+
+The bot also has a web app. You can use it in Telegram, as a Mini App. You can also use it in a browser, at the address that the owner gives you (for example `https://todo.sadeq.uk`). The web app shows the same lists as the bot. A change in the web app is also a change in the bot, and the opposite is also true.
+
+The web app is available only when the owner turned it on. The owner does a setup one time in @BotFather (see [Deployment](DEPLOYMENT.md#web-ui)). If the chat with the bot has no **Open** button, the web app is not on.
+
+### Open the web app in Telegram
+
+1. Open the chat with the bot.
+2. Tap the **Open** button. It is next to the message field, at the left of the field.
+
+The web app of the bot opens in Telegram. You do not have to sign in.
+
+### What you can do
+
+The web app has three tabs. The **Mine** tab shows the items of your private chat with the bot. The **Assigned to me** tab shows the items that other people gave to you, in all chats. The **Groups** tab shows the items of each group. A group shows there only when Telegram confirms that you are a member now.
+
+- To add an item, tap **+ Add**. Type the text as you type it for `/add`. An example is `buy milk tomorrow 18:00`. The web app shows the date that it found before you save the item. You can also select a person in **Assign to**.
+- To mark an item done, tap the done box of the item.
+- To see all the actions for an item, tap the item. You can then tap **Done**, **Remind later** or **Delete**. **Remind later** gives 10 minutes, 1 hour, tomorrow, or a time that you type.
+- To edit an item, use `/edit` in the bot. You cannot edit an item in the web app yet.
+
+If you complete an item that a group gave to you, the bot sends the "did" notice to that group. This is the same as in the bot.
+
+### Settings of the web app
+
+The web app has its own **Settings** menu. This menu is not the settings of Telegram.
+
+1. Open the web app.
+2. Tap the **⚙** button (**Settings**) at the top of the web app.
+
+In this menu you can:
+
+- change the language (English or Farsi) and the calendar (Gregorian or Jalali). The bot uses the same settings.
+- sign in a browser (only in Telegram).
+- log out, or log out everywhere.
+
+### Sign in a browser
+
+A browser does not know who you are. To sign in, you get a code from the web app in Telegram, and you type the code into the browser. You can do the two parts on two different devices.
+
+1. In the browser, open the address of the web app, for example `https://todo.sadeq.uk`. The browser shows the sign-in page, with a **Code** field.
+2. In Telegram, open the chat with the bot.
+3. Tap the **Open** button next to the message field. The web app of the bot opens.
+4. In the web app, tap the **⚙** button (**Settings**) at the top. Do not open the settings of Telegram.
+5. Tap **Sign in a browser**. The web app shows a code with 8 characters, for example `ABCD-EFGH`. It also shows how much time you have.
+6. In the browser, type the code into the **Code** field. Do this before the time ends. The code is good for 5 minutes.
+7. Tap **Sign in**.
+
+The code works only one time. If the time ends, tap **Get a new code**. If you do not need the code, tap **Cancel the code**.
+
+WARNING: TYPE THE CODE ONLY INTO YOUR OWN BROWSER. A PERSON WHO HAS THE CODE CAN SIGN IN AS YOU.
+
+After each sign-in in a browser, the bot sends you a message in Telegram. The message shows the country and the IP address of the browser. If you did not sign in, tap **Log out everywhere** on that message.
+
+A browser stays signed in for 30 days after you last used it, and for 90 days at most. To sign out, open **Settings** and tap **Log out**. **Log out everywhere** signs out all browsers and all copies of the web app in Telegram.
+
+### Install the web app
+
+In a browser, you can install the web app as an app on your phone or computer. When the browser lets you do this, the web app shows an **Install** button. On an iPhone, open the page in Safari, tap **Share**, then tap **Add to Home Screen**.
+
+### Groups in the web app
+
+The web app shows a group only to a member of the group. Telegram must confirm the membership. The bot asks Telegram again after 10 minutes. If you leave a group, the group goes away from the web app within 10 minutes.
+
+- If a group that you are in does not show, write a command in the group, for example `/list`. Then open the **Groups** tab again.
+- If Telegram cannot confirm your membership, ask the owner to make the bot an administrator of the group.
+
 ## If you are not on the allowlist
 
 The bot ignores you completely, in private chats and in groups, with one exception: in a private chat `/whoami` replies with your Telegram ID. Send it to the owner, who adds it to `TODO_ALLOWED_USERS` and restarts the service. Buttons pressed by non-allowlisted users do nothing.

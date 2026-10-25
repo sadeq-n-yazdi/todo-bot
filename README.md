@@ -24,6 +24,7 @@ You write an item the way you would say it, for example `buy milk tomorrow 18:00
 - **Daily digest.** Overdue and today's items at a time you choose, per chat. `/today` shows it on demand.
 - **English and Farsi (فارسی).** Per-user language. Farsi replies use Persian digits, and Persian digits are accepted as input.
 - **Gregorian and Jalali (هجری شمسی).** Per-user calendar for showing and parsing dates.
+- **Web app.** Use your lists in a Telegram Mini App, or in a browser. The web app can add items, mark them done, delete them and set a reminder. It is off by default. See [Web app](#web-app).
 - **Private by default.** Only the Telegram user IDs in `TODO_ALLOWED_USERS` can use the bot.
 - **Multi-node-ready.** Reminders, the update poller and pending prompts are coordinated through the database, not through memory. See [Architecture](docs/ARCHITECTURE.md) section 9. Version 0.1 runs on one host with SQLite.
 - **Small.** One static Go binary, run as a hardened systemd service with a soft Go memory limit of 40 MiB (`GOMEMLIMIT`) and a hard cap of 96M (`MemoryMax`).
@@ -93,6 +94,42 @@ calendar - Choose the calendar
 
 `/start` and `/whoami` work but are not in the menu.
 
+## Web app
+
+The bot can also serve a web app. In Telegram, the web app opens as a Mini App. In a browser, it opens at the address of your server, for example `https://todo.sadeq.uk`. The web app shows the same lists as the bot.
+
+### Owner setup in BotFather
+
+Do these steps one time. Without them, the chat with the bot has no **Open** button.
+
+1. Open [@BotFather](https://t.me/BotFather) and select the bot.
+2. Open **Bot Settings**.
+3. Open **Configure Mini App**.
+4. Turn on the Main Mini App with the URL `https://todo.sadeq.uk/tg/`.
+5. Go back to **Bot Settings** and open **Menu Button**.
+6. Set the URL `https://todo.sadeq.uk/tg/` and the title `Open`.
+
+Use your own host name. The server needs `TODO_WEB_ADDR` and `TODO_WEB_ORIGIN`, and a proxy with TLS in front of the bot. For all the steps for BotFather, Cloudflare, Caddy and the server, see [Deployment](docs/DEPLOYMENT.md#web-ui).
+
+### Open the web app in Telegram
+
+1. Open the chat with the bot.
+2. Tap the **Open** button next to the message field.
+
+The web app of the bot opens. You do not have to sign in.
+
+### Sign in a browser
+
+1. In the browser, open the address of the web app, for example `https://todo.sadeq.uk`.
+2. In Telegram, open the chat with the bot.
+3. Tap the **Open** button next to the message field. The web app of the bot opens.
+4. In the web app, tap the **⚙** button (**Settings**) at the top. Do not open the settings of Telegram.
+5. Tap **Sign in a browser**. The web app shows a code with 8 characters and the time that you have.
+6. In the browser, type the code into the **Code** field before the time ends.
+7. Tap **Sign in**.
+
+The code is good for 5 minutes, and it works only one time. After the sign-in, the bot sends you a message in Telegram. See [Usage](docs/USAGE.md#the-web-app).
+
 ## Configuration
 
 The bot reads environment variables, normally from `/etc/todo-bot/env` (lines of `KEY=value`, no quotes, no `export`). See [`deploy/env.example`](deploy/env.example). A mistake in any value is reported at startup, and the bot does not start.
@@ -115,6 +152,12 @@ The bot reads environment variables, normally from `/etc/todo-bot/env` (lines of
 | `TODO_LEASE_TTL` | no | `30s` | How long the node that polls Telegram holds its lease. Only matters with several nodes. |
 | `TODO_CLAIM_TTL` | no | `2m` | How long a node reserves a due reminder or digest while it sends it. The minimum is `20s`. |
 | `TODO_SCHED_MAX_SLEEP` | no | `5m` | Longest time the scheduler sleeps between checks. About `30s` is recommended with several nodes. |
+| `TODO_WEB_ADDR` | no | empty (web off) | The listen address of the web app, a loopback IP address with a port, for example `127.0.0.1:8088`. See [Web app](#web-app). |
+| `TODO_WEB_ORIGIN` | with `TODO_WEB_ADDR` | | The public `https://` URL of the web app, with no path, for example `https://todo.sadeq.uk`. |
+| `TODO_WEB_SESSION_TTL` | no | `720h` | The idle limit of a browser session, from `1h` to `2160h`. |
+| `TODO_WEB_SESSION_MAX` | no | `2160h` | The absolute limit of a browser session, equal to or more than `TODO_WEB_SESSION_TTL`. |
+| `TODO_WEB_MEMBER_TTL` | no | `10m` | The time that an answer of `getChatMember` (the membership of a group) stays valid, from `1m` to `1h`. |
+| `TODO_WEB_TRUSTED_PROXIES` | no | `127.0.0.1/32,::1/128` | The CIDR list of the proxies whose forwarded headers the web app reads. |
 | `GOMEMLIMIT` | no | | Go memory limit. The systemd unit in `deploy/` sets `40MiB`. |
 
 Durations use Go syntax (`30s`, `2m`). Digits in `TODO_ALLOWED_USERS` and `TODO_DEFAULT_TIME` may be Persian.
