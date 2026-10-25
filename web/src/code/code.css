@@ -1,0 +1,76 @@
+/* The login screens. Only logical properties, and no inline styles (CSP). */
+
+.login,
+.codescreen {
+  max-inline-size: 28rem;
+  margin-inline: auto;
+}
+
+.login h1,
+.codescreen h1 {
+  font-size: 1.25rem;
+  margin-block: 0 var(--gap);
+}
+
+.steps {
+  white-space: pre-line;
+  color: var(--hint);
+}
+
+.codefield {
+  display: block;
+  inline-size: 100%;
+  margin-block: var(--gap);
+  padding: 12px;
+  border: 1px solid var(--hint);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 600 1.5rem/1.2 ui-monospace, Menlo, Consolas, monospace;
+  letter-spacing: 0.15em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.btn {
+  display: inline-block;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn[disabled] {
+  opacity: 0.6;
+}
+
+.btn.plain {
+  background: var(--bg2);
+  color: var(--fg);
+}
+
+.bigcode {
+  margin-block: var(--gap);
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--bg2);
+  font: 700 2rem/1.2 ui-monospace, Menlo, Consolas, monospace;
+  letter-spacing: 0.12em;
+  text-align: center;
+  user-select: all;
+}
+
+.warning {
+  color: var(--danger);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  margin-block: var(--gap);
+}
