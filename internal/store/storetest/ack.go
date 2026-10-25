@@ -41,6 +41,13 @@ func testMarkReminderAcked(t *testing.T, open func() store.Store) {
 	if _, ok, err := d.NextReminderAt(ctx); err != nil || ok {
 		t.Fatalf("next after ack: ok=%v err=%v", ok, err)
 	}
+	// UpdateReminder on an acked reminder does not clear the mark.
+	if err := d.UpdateReminder(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := d.MarkReminderAcked(ctx, r.ID, *tp(4)); err != nil || ok {
+		t.Fatalf("ack after UpdateReminder: ok=%v err=%v", ok, err)
+	}
 
 	// Pending, cancelled and missing reminders are not acked, and a failed
 	// ack does not change a pending reminder: it is still claimable.

@@ -111,7 +111,7 @@ type Store interface {
 	// already acked. Of several concurrent callers, exactly one gets
 	// ok=true. service.AckReminder uses it for repeating items (#157).
 	// It changes no field of model.Reminder (SQL providers keep the mark
-	// in claim_until, which is unused once a row is sent).
+	// in reminders.acked_at), and UpdateReminder does not clear the mark.
 	MarkReminderAcked(ctx context.Context, id int64, at time.Time) (ok bool, err error)
 	// NextReminderAt returns the earliest time a pending reminder becomes
 	// claimable: MIN(max(fire_at, claim_until)). ok=false if none.

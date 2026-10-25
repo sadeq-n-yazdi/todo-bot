@@ -87,13 +87,12 @@ WHERE id = ? AND state = 'pending'`, nullInt(int64(msgID)), at.Unix(), id)
 	return n > 0, err
 }
 
-// MarkReminderAcked marks a sent reminder as acked, one time. The mark is
-// claim_until != 0: MarkReminderSent sets it to 0, and only the claim
-// paths, which need state = 'pending', use it otherwise.
+// MarkReminderAcked marks a sent reminder as acked, one time: it sets
+// acked_at (0 = not acked) only while it is still 0.
 func (d *DB) MarkReminderAcked(ctx context.Context, id int64, at time.Time) (bool, error) {
 	res, err := d.q.ExecContext(ctx, `
-UPDATE reminders SET claim_until = ?
-WHERE id = ? AND state = 'sent' AND claim_until = 0`, max(at.Unix(), 1), id)
+UPDATE reminders SET acked_at = ?
+WHERE id = ? AND state = 'sent' AND acked_at = 0`, max(at.Unix(), 1), id)
 	n, err := affected(res, err, fmt.Sprintf("mark reminder %d acked", id))
 	return n > 0, err
 }
