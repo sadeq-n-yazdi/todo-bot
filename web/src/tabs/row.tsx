@@ -8,9 +8,11 @@ import type { Item } from "./model";
  * ("tomorrow") is out of date. They have no buttons; the actions of the
  * later sub-issues must check the same flag.
  */
-export function Row(props: { item: Item; offline: boolean; showChat: boolean }) {
+export function Row(props: { item: Item; offline: boolean; showChat: boolean; viewerId: number }) {
   const it = props.item;
   const due = props.offline ? it.due_full : it.due_text;
+  // In "Assigned to me" every item is for the viewer, so the arrow adds nothing.
+  const showAssignee = it.assignee !== null && !props.showChat && it.assignee.id !== props.viewerId;
   return (
     <li class="row" data-id={it.id}>
       <span class="row-num">{num(it.num)}</span>
@@ -26,7 +28,7 @@ export function Row(props: { item: Item; offline: boolean; showChat: boolean }) 
               <bdi>{it.recur_text}</bdi>
             </span>
           ) : null}
-          {it.assignee ? (
+          {showAssignee && it.assignee ? (
             <span class="assignee">
               <span class="arrow" aria-hidden="true">
                 →{" "}

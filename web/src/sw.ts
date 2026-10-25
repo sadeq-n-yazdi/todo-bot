@@ -77,7 +77,16 @@ sw.addEventListener("fetch", ((e: FetchEv) => {
   if (req.mode === "navigate") {
     if (url.pathname !== "/" && url.pathname !== "/index.html") return;
     e.respondWith(
-      fetch(req).catch(async () => (await caches.match("/", { cacheName: CACHE })) ?? Response.error()),
+      (async () => {
+        const saved = () => caches.match("/", { cacheName: CACHE });
+        try {
+          const res = await fetch(req);
+          // A 5xx, for example a proxy error during a deploy: use the saved page if there is one.
+          return res.status >= 500 ? ((await saved()) ?? res) : res;
+        } catch {
+          return (await saved()) ?? Response.error();
+        }
+      })(),
     );
     return;
   }

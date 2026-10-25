@@ -18,6 +18,7 @@ function makeWorker(shell = { version: "v1", files: ["/assets/app-abc.js", "/ass
   const key = (x: string | { url: string }) => new URL(typeof x === "string" ? x : x.url, origin).pathname;
   const fetched: string[] = [];
   let online = true;
+  let status = 200;
 
   const caches = {
     open: async (name: string) => {
@@ -55,7 +56,7 @@ function makeWorker(shell = { version: "v1", files: ["/assets/app-abc.js", "/ass
   const fetchFn = async (r: { url: string }) => {
     fetched.push(key(r));
     if (!online) throw new TypeError("offline");
-    return new Response("net " + r.url);
+    return new Response("net " + r.url, { status });
   };
 
   const code = stripTypeScriptTypes(source).replace('"__SHELL_JSON__"', JSON.stringify(JSON.stringify(shell)));
@@ -77,7 +78,7 @@ function makeWorker(shell = { version: "v1", files: ["/assets/app-abc.js", "/ass
     handlers[type]({ waitUntil: (p: Promise<unknown>) => waits.push(p) });
     return Promise.all(waits);
   }
-  return { store, self, handlers, fetched, fetchEvent, lifecycle, setOnline: (v: boolean) => (online = v) };
+  return { store, self, handlers, fetched, fetchEvent, lifecycle, setOnline: (v: boolean) => (online = v), setStatus: (v: number) => (status = v) };
 }
 
 describe("service worker", () => {
@@ -136,6 +137,21 @@ describe("service worker", () => {
     w.setOnline(false);
     expect(await w.fetchEvent("/", { mode: "navigate" }).text()).toBe("shell https://todo.test/");
     expect(await w.fetchEvent("/?a=1", { mode: "navigate" }).text()).toBe("shell https://todo.test/");
+  });
+
+  it("uses the saved page when the network answer is a 5xx, for example a proxy error", async () => {
+    const w = makeWorker();
+    await w.lifecycle("install");
+    w.setStatus(502);
+    expect(await w.fetchEvent("/", { mode: "navigate" }).text()).toBe("shell https://todo.test/");
+    w.setStatus(404);
+    expect(await w.fetchEvent("/", { mode: "navigate" }).text()).toBe("net https://todo.test/");
+  });
+
+  it("keeps the 5xx answer when there is no saved page", async () => {
+    const w = makeWorker();
+    w.setStatus(502);
+    expect(await w.fetchEvent("/", { mode: "navigate" }).text()).toBe("net https://todo.test/");
   });
 
   it("serves hashed files from the cache first", async () => {

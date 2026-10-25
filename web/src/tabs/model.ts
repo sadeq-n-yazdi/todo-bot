@@ -3,7 +3,8 @@
 export interface Item {
   id: number;
   chat_id: number;
-  chat_title?: string;
+  /** Always present. "" when the list is not "Assigned to me" or the chat has no title. */
+  chat_title: string;
   num: number;
   text: string;
   due_at: string | null;

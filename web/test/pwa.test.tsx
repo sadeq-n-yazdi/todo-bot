@@ -25,6 +25,7 @@ class FakeWorker extends EventTarget {
 class FakeRegistration extends EventTarget {
   waiting: FakeWorker | null = null;
   installing: FakeWorker | null = null;
+  update = vi.fn(async () => {});
 }
 
 class FakeContainer extends EventTarget {
@@ -90,6 +91,21 @@ describe("service worker registration", () => {
     w.state = "installed";
     w.dispatchEvent(new Event("statechange"));
     expect(getPwaState().updateReady).toBe(false);
+  });
+
+  it("looks for a new version each time the page becomes visible", async () => {
+    const c = new FakeContainer();
+    await registerServiceWorker(asContainer(c));
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(c.reg.update).not.toHaveBeenCalled();
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(c.reg.update).toHaveBeenCalledOnce();
+    // A second registration call adds no second listener.
+    await registerServiceWorker(asContainer(c));
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(c.reg.update).toHaveBeenCalledTimes(2);
   });
 
   it("tells the waiting worker to take over, and reloads when it has", async () => {

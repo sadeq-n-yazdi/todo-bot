@@ -8,6 +8,7 @@ export function item(over: Partial<Item> = {}): Item {
   return {
     id: 42,
     chat_id: 11111,
+    chat_title: "",
     num: 3,
     text: "buy milk",
     due_at: "2026-10-25T17:00:00Z",

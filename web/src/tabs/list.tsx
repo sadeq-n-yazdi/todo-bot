@@ -185,7 +185,7 @@ export function ItemList(props: {
       ) : (
         <ul class="rows">
           {state.items.map((it) => (
-            <Row key={`${it.chat_id}:${it.id}`} item={it} offline={offline} showChat={props.showChat === true} />
+            <Row key={`${it.chat_id}:${it.id}`} item={it} offline={offline} showChat={props.showChat === true} viewerId={props.user.id} />
           ))}
         </ul>
       )}

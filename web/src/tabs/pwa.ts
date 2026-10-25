@@ -15,6 +15,7 @@ export interface PwaState {
 let state: PwaState = { updateReady: false, canInstall: false, iosHint: false };
 const listeners = new Set<() => void>();
 let waiting: ServiceWorker | null = null;
+let watching = false;
 let deferredPrompt: (Event & { prompt(): Promise<void> }) | null = null;
 
 function set(patch: Partial<PwaState>): void {
@@ -30,6 +31,7 @@ export function getPwaState(): PwaState {
 export function resetPwa(): void {
   state = { updateReady: false, canInstall: false, iosHint: false };
   waiting = null;
+  watching = false;
   deferredPrompt = null;
 }
 
@@ -90,6 +92,13 @@ export async function registerServiceWorker(
       set({ updateReady: true });
     }
   };
+  // A PWA can stay open for days, so look for a new version each time it comes back.
+  if (!watching) {
+    watching = true;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") reg.update().catch(() => {});
+    });
+  }
   flag(reg.waiting);
   reg.addEventListener("updatefound", () => {
     const w = reg.installing;
