@@ -38,7 +38,7 @@ func TestWidgetStringsBothLanguages(t *testing.T) {
 		}
 	}
 	// Each code of the redirect has its text.
-	for _, c := range []string{widgetBadRequest, widgetBadSignature, widgetExpired, widgetNotAllowed, widgetUsed, widgetInternal} {
+	for _, c := range []string{widgetBadRequest, widgetBadSignature, widgetExpired, widgetNotAllowed, widgetUsed, widgetInternal, widgetRestart, widgetOtherUser} {
 		for _, lang := range []i18n.Lang{i18n.En, i18n.Fa} {
 			if !hasKey(lang, "web.widget.error_"+c) {
 				t.Errorf("no %s string for web.widget.error_%s", lang, c)
@@ -87,11 +87,37 @@ func signWidget(token string, f map[string]string) string {
 	return q.Encode()
 }
 
-// widget sends the redirect of Telegram to endpoint 24, from a new IP.
+// testNonce is a nonce of the right form, as the start request gives.
+var testNonce = strings.Repeat("N", widgetNonceLen)
+
+func nonce(v string) reqOpt {
+	return func(r *http.Request) { r.AddCookie(&http.Cookie{Name: widgetCookie, Value: v}) }
+}
+
+// widget sends the redirect of Telegram to endpoint 24, from a new IP, from
+// a browser that started the widget (it has the nonce cookie).
 func (h *harness) widget(query string, opts ...reqOpt) *httptest.ResponseRecorder {
 	h.t.Helper()
 	defer h.srv.codes.notices.Wait() // the notice goes out in the background
-	return h.do("GET", "/auth/telegram?"+query, "", append([]reqOpt{peer(nextIP())}, opts...)...)
+	return h.do("GET", "/auth/telegram?"+query, "", append([]reqOpt{peer(nextIP()), nonce(testNonce)}, opts...)...)
+}
+
+// cookiesOf returns the cookies that w sets, by name.
+func cookiesOf(w *httptest.ResponseRecorder) map[string]*http.Cookie {
+	m := map[string]*http.Cookie{}
+	for _, c := range w.Result().Cookies() {
+		m[c.Name] = c
+	}
+	return m
+}
+
+// wantNonceCleared checks that w deletes the nonce cookie.
+func wantNonceCleared(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	c := cookiesOf(w)[widgetCookie]
+	if c == nil || c.MaxAge >= 0 || c.Value != "" {
+		t.Errorf("the nonce is not cleared: %+v", c)
+	}
 }
 
 // wantLoginError checks a 303 to /#login-error=<code> with no cookie.
@@ -103,9 +129,10 @@ func wantLoginError(t *testing.T, w *httptest.ResponseRecorder, code string) {
 	if got, want := w.Header().Get("Location"), "/#login-error="+code; got != want {
 		t.Fatalf("Location %q, want %q", got, want)
 	}
-	if len(w.Result().Cookies()) != 0 {
-		t.Errorf("an error sets a cookie: %v", w.Result().Cookies())
+	if c := cookiesOf(w)[cookieName]; c != nil {
+		t.Errorf("an error sets the session cookie: %+v", c)
 	}
+	wantNonceCleared(t, w)
 }
 
 func TestWidgetSignsIn(t *testing.T) {
@@ -117,11 +144,13 @@ func TestWidgetSignsIn(t *testing.T) {
 	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Errorf("Cache-Control %q", cc)
 	}
-	cs := w.Result().Cookies()
-	if len(cs) != 1 || cs[0].Name != cookieName || !tokenRE.MatchString(cs[0].Value) ||
-		!cs[0].Secure || !cs[0].HttpOnly || cs[0].SameSite != http.SameSiteStrictMode || cs[0].Path != "/" {
-		t.Fatalf("cookie %+v", cs)
+	wantNonceCleared(t, w)
+	sc := cookiesOf(w)[cookieName]
+	if len(w.Result().Cookies()) != 2 || sc == nil || !tokenRE.MatchString(sc.Value) ||
+		!sc.Secure || !sc.HttpOnly || sc.SameSite != http.SameSiteStrictMode || sc.Path != "/" {
+		t.Fatalf("cookies %+v", w.Result().Cookies())
 	}
+	cs := []*http.Cookie{sc}
 	ws, err := h.svc.WebSession(context.Background(), cs[0].Value, time.Hour)
 	if err != nil || ws.Kind != model.WebBrowser || ws.UserID != idAnn || ws.Device != "Firefox" {
 		t.Fatalf("session %+v, %v", ws, err)
@@ -192,7 +221,7 @@ func TestWidgetConcurrentProof(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			w := h.do("GET", "/auth/telegram?"+q, "", peer(ip))
+			w := h.do("GET", "/auth/telegram?"+q, "", peer(ip), nonce(testNonce))
 			locs[i] = w.Header().Get("Location")
 		}()
 	}
@@ -279,7 +308,6 @@ func TestWidgetSignature(t *testing.T) {
 		"mini app key":  miniKey,
 		"changed id":    mutate(func(v url.Values) { v.Set("id", strconv.Itoa(idBob)) }),
 		"changed name":  mutate(func(v url.Values) { v.Set("username", "eve") }),
-		"added field":   mutate(func(v url.Values) { v.Set("extra", "1") }),
 		"removed field": mutate(func(v url.Values) { v.Del("photo_url") }),
 		"no hash":       mutate(func(v url.Values) { v.Del("hash") }),
 		"empty hash":    mutate(func(v url.Values) { v.Set("hash", "") }),
@@ -373,5 +401,134 @@ func TestWidgetKeepsFieldsOutOfLog(t *testing.T) {
 		if strings.Contains(w.Header().Get("Location"), s) {
 			t.Errorf("the redirect holds %q", s)
 		}
+	}
+}
+
+// TestWidgetOnlyKnownFields: the check string and the user come from the
+// documented fields only. A signed proof with any other key, or with a line
+// feed in a key or a value, is refused.
+func TestWidgetOnlyKnownFields(t *testing.T) {
+	h := newHarness(t)
+	now := h.clk.Now()
+	with := func(k, v string) string {
+		f := widgetFields(idAnn, now)
+		f[k] = v
+		return signWidget(testToken, f)
+	}
+	for name, q := range map[string]string{
+		"extra field":       with("extra", "1"),
+		"user field":        with("user", `{"id":43}`),
+		"line feed in name": with("first_name", "Ann\nid=43"),
+		"return in name":    with("last_name", "Lee\r"),
+		"line feed in key":  with("first_name\nid", "43"),
+		"signature field":   with("signature", "x"),
+	} {
+		t.Run(name, func(t *testing.T) { wantLoginError(t, h.widget(q), "bad_request") })
+	}
+	// Only the documented fields, some of them missing: it works.
+	f := widgetFields(idBob, now)
+	delete(f, "last_name")
+	delete(f, "photo_url")
+	delete(f, "username")
+	if w := h.widget(signWidget(testToken, f)); w.Header().Get("Location") != "/" {
+		t.Errorf("minimal fields: %q", w.Header().Get("Location"))
+	}
+}
+
+// TestWidgetNeedsTheNonce: a link with a fresh proof does not sign in a
+// browser that did not start the widget (login CSRF).
+func TestWidgetNeedsTheNonce(t *testing.T) {
+	h := newHarness(t)
+	q := signWidget(testToken, widgetFields(idAnn, h.clk.Now()))
+	for name, opt := range map[string]reqOpt{
+		"no nonce":   func(*http.Request) {},
+		"empty":      nonce(""),
+		"short":      nonce("abc"),
+		"not base64": nonce(strings.Repeat("*", widgetNonceLen)),
+		"too long":   nonce(strings.Repeat("N", widgetNonceLen+1)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantLoginError(t, h.do("GET", "/auth/telegram?"+q, "", peer(nextIP()), opt), "restart")
+		})
+	}
+	// The refusals did not use the proof.
+	if w := h.widget(q); w.Header().Get("Location") != "/" {
+		t.Errorf("with the nonce: %q", w.Header().Get("Location"))
+	}
+	if n := len(h.send.Messages()); n != 1 {
+		t.Errorf("%d notices, want 1", n)
+	}
+}
+
+func TestWidgetStart(t *testing.T) {
+	h := newHarness(t)
+	start := func(opts ...reqOpt) *httptest.ResponseRecorder {
+		base := []reqOpt{peer(nextIP()), header("X-Todo-Request", "1"), header("Sec-Fetch-Site", "same-origin")}
+		return h.do("GET", "/auth/telegram?start=1", "", append(base, opts...)...)
+	}
+	w := start()
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	c := cookiesOf(w)[widgetCookie]
+	if c == nil || !validNonce(c.Value) || c.MaxAge != 600 || !c.Secure || !c.HttpOnly ||
+		c.SameSite != http.SameSiteLaxMode || c.Path != "/" || c.Domain != "" {
+		t.Fatalf("nonce cookie %+v", c)
+	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control %q", cc)
+	}
+	if other := cookiesOf(start())[widgetCookie]; other == nil || other.Value == c.Value {
+		t.Error("two nonces are equal")
+	}
+	// The nonce of the start request works for the redirect.
+	q := signWidget(testToken, widgetFields(idAnn, h.clk.Now()))
+	if w := h.do("GET", "/auth/telegram?"+q, "", peer(nextIP()), nonce(c.Value)); w.Header().Get("Location") != "/" {
+		t.Errorf("redirect with the nonce: %q", w.Header().Get("Location"))
+	}
+	h.srv.codes.notices.Wait()
+
+	// A cross-site page cannot get a nonce: no custom header, or not same-origin.
+	for name, opts := range map[string][]reqOpt{
+		"no header":  {delHeader("X-Todo-Request")},
+		"cross-site": {header("Sec-Fetch-Site", "cross-site")},
+		"same-site":  {header("Sec-Fetch-Site", "same-site")},
+		"no fetch":   {delHeader("Sec-Fetch-Site")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := start(opts...)
+			wantErr(t, w, 403, "csrf")
+			if cookiesOf(w)[widgetCookie] != nil {
+				t.Error("a nonce went out")
+			}
+		})
+	}
+	// A browser that is signed in gets no nonce. A dead session does not count.
+	btok, _ := h.browser(idBob)
+	w = start(cookie(btok))
+	wantErr(t, w, 403, "wrong_session")
+	if cookiesOf(w)[widgetCookie] != nil {
+		t.Error("a signed-in browser got a nonce")
+	}
+	if w := start(cookie("tb1_" + strings.Repeat("Z", 43))); w.Code != http.StatusNoContent {
+		t.Errorf("with a dead session: %d", w.Code)
+	}
+}
+
+// TestWidgetKeepsTheSessionOfAnotherUser: a browser that sends the session
+// of another user keeps it. The same user can sign in again.
+func TestWidgetKeepsTheSessionOfAnotherUser(t *testing.T) {
+	h := newHarness(t)
+	btok, _ := h.browser(idBob)
+	wantLoginError(t, h.widget(signWidget(testToken, widgetFields(idAnn, h.clk.Now())), cookie(btok)), "other_user")
+	if !live(h, btok) {
+		t.Error("the session of Bob ended")
+	}
+	if len(h.send.Messages()) != 0 {
+		t.Error("a notice went out")
+	}
+	h.clk.Advance(time.Second)
+	if w := h.widget(signWidget(testToken, widgetFields(idBob, h.clk.Now())), cookie(btok)); w.Header().Get("Location") != "/" {
+		t.Errorf("the same user: %q", w.Header().Get("Location"))
 	}
 }

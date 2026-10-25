@@ -92,7 +92,8 @@ describe("Login", () => {
     meta.content = "todo_bot";
     document.head.append(meta);
     render(<Login onSignedIn={() => {}} />);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // The widget also sends its start request now; count the catalog loads only.
+    await waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).startsWith("/api/i18n"))).toHaveLength(2));
     expect(screen.getByText("Open the app in Telegram").getAttribute("href")).toBe("https://t.me/todo_bot?startapp=code");
   });
 

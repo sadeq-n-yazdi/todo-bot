@@ -3,14 +3,15 @@
 // GET /auth/telegram, and the server answers 303 to "/" with the session
 // cookie, or to "/#login-error=<code>".
 
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { api } from "../api";
 import { getLang, t } from "../i18n";
 
 /** The widget script. Section 11.2 allows https://telegram.org in script-src on "/" only. */
 export const WIDGET_SRC = "https://telegram.org/js/telegram-widget.js?22";
 
 // The codes of /#login-error=<code> (internal/web/auth_widget.go).
-const CODES = ["bad_request", "bad_signature", "expired", "not_allowed", "used", "internal"];
+const CODES = ["bad_request", "bad_signature", "expired", "not_allowed", "used", "internal", "restart", "other_user"];
 
 // Used until the catalog arrives, or when it has no such key.
 const english: Record<string, string> = {
@@ -21,6 +22,8 @@ const english: Record<string, string> = {
   "web.widget.error_not_allowed": "This Telegram account cannot use this app. Ask the owner to add it.",
   "web.widget.error_used": "This sign-in was already used. Sign in again.",
   "web.widget.error_internal": "Something went wrong with the sign-in. Try again.",
+  "web.widget.error_restart": "Start the sign-in with Telegram again from this page.",
+  "web.widget.error_other_user": "This browser is already signed in with a different account. Log out first.",
 };
 
 function wt(key: string): string {
@@ -63,26 +66,48 @@ export function loginErrorText(code: string): string {
   return wt("web.widget.error_" + (CODES.includes(code) ? code : "internal"));
 }
 
-/** The widget button of Telegram, in the redirect mode. */
+/** The request that gives this browser the nonce cookie of the widget sign-in. */
+export const WIDGET_START = "/auth/telegram?start=1";
+
+/**
+ * The widget button of Telegram, in the redirect mode. First the start request
+ * sets a nonce cookie (10 minutes). The server accepts the redirect of Telegram
+ * only with it, so a link with the proof of another person signs nobody in.
+ * If the start request fails, the widget does not show.
+ */
 export function Widget(props: { bot: string }) {
   const box = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    api("GET", WIDGET_START).then(
+      () => live && setReady(true),
+      () => {
+        /* no widget */
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [props.bot]);
 
   useEffect(() => {
     const el = box.current;
-    if (!el) return;
+    if (!ready || !el) return;
     const s = document.createElement("script");
     s.async = true;
     s.src = WIDGET_SRC;
     s.setAttribute("data-telegram-login", props.bot);
     s.setAttribute("data-size", "large");
     s.setAttribute("data-auth-url", location.origin + "/auth/telegram");
-    s.setAttribute("data-request-access", "write");
     s.setAttribute("data-lang", getLang().startsWith("fa") ? "fa" : "en");
     el.append(s);
     // The script puts its iframe next to itself. Remove both.
     return () => el.replaceChildren();
-  }, [props.bot]);
+  }, [ready, props.bot]);
 
+  if (!ready) return null;
   return (
     <section class="widget">
       <p>{wt("web.widget.hint")}</p>

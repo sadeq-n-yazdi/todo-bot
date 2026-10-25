@@ -15,6 +15,8 @@ func init() {
 		"web.widget.error_not_allowed":   "This Telegram account cannot use this app. Ask the owner to add it.",
 		"web.widget.error_used":          "This sign-in was already used. Sign in again.",
 		"web.widget.error_internal":      "Something went wrong with the sign-in. Try again.",
+		"web.widget.error_restart":       "Start the sign-in with Telegram again from this page.",
+		"web.widget.error_other_user":    "This browser is already signed in with a different account. Log out first.",
 	})
 	i18n.Register(i18n.Fa, map[string]string{
 		"web.widget.hint":                "در رایانه می\u200cتوانید با حساب تلگرام خود هم وارد شوید:",
@@ -24,5 +26,7 @@ func init() {
 		"web.widget.error_not_allowed":   "این حساب تلگرام اجازهٔ استفاده از این برنامه را ندارد. از مالک بخواهید آن را اضافه کند.",
 		"web.widget.error_used":          "از این ورود قبلاً استفاده شده است. دوباره وارد شوید.",
 		"web.widget.error_internal":      "در ورود مشکلی پیش آمد. دوباره امتحان کنید.",
+		"web.widget.error_restart":       "ورود با تلگرام را دوباره از همین صفحه شروع کنید.",
+		"web.widget.error_other_user":    "این مرورگر با حساب دیگری وارد شده است. اول خارج شوید.",
 	})
 }
