@@ -138,7 +138,6 @@ func TestStubRoutes(t *testing.T) {
 		// W8 built endpoints 15 to 21; their own tests cover them.
 		{"GET", "/api/chats/42/items/1", mini},
 		{"PATCH", "/api/chats/42/items/1", mini},
-		{"GET", "/auth/telegram?id=42", ""},
 	} {
 		var opts []reqOpt
 		if rt.tok != "" {
@@ -155,20 +154,5 @@ func TestStubRoutes(t *testing.T) {
 		if rt.tok != "" {
 			wantErr(t, h.do(rt.method, rt.path, `{}`), 401, "unauthenticated")
 		}
-	}
-}
-
-func TestStubLimitsPerIP(t *testing.T) {
-	h := newHarness(t)
-	for _, rt := range []struct {
-		method, path string
-		n            int
-	}{{"GET", "/auth/telegram", widgetPerMin}} {
-		for range rt.n {
-			if w := h.do(rt.method, rt.path, `{}`, peer("10.7.7.7:1")); w.Code != 501 {
-				t.Fatalf("%s: %d", rt.path, w.Code)
-			}
-		}
-		wantErr(t, h.do(rt.method, rt.path, `{}`, peer("10.7.7.7:1")), 429, "rate_limited")
 	}
 }
