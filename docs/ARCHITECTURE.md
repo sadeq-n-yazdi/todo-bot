@@ -89,6 +89,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
   - `Sender{Send, Edit, AnswerCallback}`.
   - `APIError{Code, Desc, RetryAfter, MigrateTo}` and `IsPermanent(err)`.
   - Web (§14): `Button.URL` and `Button.WebAppURL` give `url` and `web_app` buttons. `MemberChecker{ChatMember(ctx, chatID, userID)}` calls `getChatMember` and returns `ChatMember{Status, IsMember}` with a `MemberStatus`. `*tgbot.Bot` implements it, and `tgtest.FakeMembers` is its fake. `Sender` does not change.
+  - Web (§14): `(*tgbot.Bot).SetMenuButton(ctx, text, webAppURL)` calls `setChatMenuButton`. It sets the default menu button of private chats to a `web_app` button. The URL must be https. The polling leader calls it after `SetCommands`, only when the web UI is on. It is not part of `Sender`, so `tgtest.FakeSender` does not change.
 - **ui**:
   - `Action{Kind, ID, Arg}` with `Encode` (at most 64 bytes) and `Decode`.
   - `TodoList`, `ReminderMsg`, `Digest` and `FormatWhen`.
@@ -107,6 +108,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
 - **handler**:
   - `Deps{Svc, Send, Parser, Clock, Allowed, BotUsername, Log}`.
   - `New(Deps)` and `Handle(ctx, Update)`.
+  - Web (§14): `SetWebApp(origin)` turns on the "Open app" button under `/start` and `/help`. An empty origin turns it off. In a private chat, the button is a `web_app` button to `/tg/`. In a group, it is a `url` button to `https://t.me/<bot>?startapp=g<chatID>`.
 
 ## 3a. Languages and calendars
 

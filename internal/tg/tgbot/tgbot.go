@@ -168,6 +168,26 @@ func (b *Bot) SetCommands(ctx context.Context, cmds []Command, lang string) erro
 	return b.mapErr(err)
 }
 
+// SetMenuButton sets the default menu button of every private chat to a
+// web_app button with the label text that opens the Mini App at webAppURL.
+// The URL must be https, because Telegram refuses other schemes.
+func (b *Bot) SetMenuButton(ctx context.Context, text, webAppURL string) error {
+	if text == "" {
+		return errors.New("tgbot: SetMenuButton: empty text")
+	}
+	if u, err := url.Parse(webAppURL); err != nil || u.Scheme != "https" || u.Host == "" {
+		return errors.New("tgbot: SetMenuButton: the URL must be https with a host")
+	}
+	_, err := b.b.SetChatMenuButton(ctx, &bot.SetChatMenuButtonParams{
+		MenuButton: models.MenuButtonWebApp{
+			Type:   models.MenuButtonTypeWebApp,
+			Text:   text,
+			WebApp: models.WebAppInfo{URL: webAppURL},
+		},
+	})
+	return b.mapErr(err)
+}
+
 // Send sends m (HTML) to chatID and returns the new message's ID.
 func (b *Bot) Send(ctx context.Context, chatID int64, m tg.OutMessage) (int, error) {
 	if err := validate(m); err != nil {

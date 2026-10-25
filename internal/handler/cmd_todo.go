@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -23,14 +24,73 @@ import (
 // 4096 UTF-16 units and does not split them, so one item must stay small.
 const maxTodoChars = 1000
 
+// webOrigin is the public https origin of the web UI, without a trailing
+// "/". It is empty while the web is off. It is configuration, set once at
+// start, so every node has the same value (no state is shared).
+var webOrigin atomic.Value // string
+
+// SetWebApp turns on the "Open app" button under /start and /help (#131).
+// origin is the public https origin of the web UI (TODO_WEB_ORIGIN). An empty
+// origin turns the button off. Call it before Handle runs. Handler.Deps
+// cannot carry it, because router.go is frozen.
+func SetWebApp(origin string) {
+	webOrigin.Store(strings.TrimRight(origin, "/"))
+}
+
+// webAppURL is the URL of the Mini App, or "" while the web is off.
+func webAppURL() string {
+	o, _ := webOrigin.Load().(string)
+	if o == "" {
+		return ""
+	}
+	return o + "/tg/"
+}
+
 // cmdStart and cmdHelp always carry the "➕ New task" keyboard in a private
-// chat, so a user who removed it can get it back.
+// chat, so a user who removed it can get it back. With the web on they also
+// give an "Open app" button.
 func (h *Handler) cmdStart(ctx context.Context, m *tg.Message, r req, args string) error {
-	return h.sayWithKeyboard(ctx, m, r.Prefs.Locale, r.Prefs.Locale.T("todo.help"))
+	return h.sayHelp(ctx, m, r.Prefs.Locale)
 }
 
 func (h *Handler) cmdHelp(ctx context.Context, m *tg.Message, r req, args string) error {
-	return h.sayWithKeyboard(ctx, m, r.Prefs.Locale, r.Prefs.Locale.T("todo.help"))
+	return h.sayHelp(ctx, m, r.Prefs.Locale)
+}
+
+// sayHelp sends the help. Telegram takes one reply markup per message, so in
+// a private chat the "Open app" button comes in a second message and the help
+// keeps the reply keyboard. A group has no reply keyboard, so the button goes
+// under the help.
+func (h *Handler) sayHelp(ctx context.Context, m *tg.Message, lc i18n.Locale) error {
+	help := lc.T("todo.help")
+	kb := h.openAppKeyboard(m, lc)
+	if m.ChatKind == model.ChatPrivate || kb == nil {
+		if err := h.sayWithKeyboard(ctx, m, lc, help); err != nil || kb == nil {
+			return err
+		}
+		return h.reply(ctx, m, tg.OutMessage{Text: lc.T("todo.app.hint"), Keyboard: kb})
+	}
+	return h.reply(ctx, m, h.threaded(m, tg.OutMessage{Text: help, Keyboard: kb}))
+}
+
+// openAppKeyboard is the "Open app" button, or nil while the web is off.
+// Telegram allows web_app inline buttons only in private chats. In a group
+// the button is a link that opens the Mini App with start_param g<chatID>.
+func (h *Handler) openAppKeyboard(m *tg.Message, lc i18n.Locale) [][]tg.Button {
+	u := webAppURL()
+	if u == "" {
+		return nil
+	}
+	b := tg.Button{Text: lc.T("todo.app.open")}
+	switch {
+	case m.ChatKind == model.ChatPrivate:
+		b.WebAppURL = u
+	case h.BotUsername != "":
+		b.URL = "https://t.me/" + h.BotUsername + "?startapp=g" + strconv.FormatInt(m.ChatID, 10)
+	default:
+		return nil // no link to the bot without its username
+	}
+	return [][]tg.Button{{b}}
 }
 
 func (h *Handler) cmdAdd(ctx context.Context, m *tg.Message, r req, args string) error {

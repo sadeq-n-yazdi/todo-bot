@@ -197,6 +197,7 @@ func setTelegram(t *testing.T, u string) {
 type tgCall struct {
 	token, method, lang string
 	at                  time.Time
+	menu                string // the menu_button field of setChatMenuButton
 }
 
 // mockTelegram is an httptest Bot API that records calls.
@@ -218,7 +219,7 @@ func newMockTelegram(t *testing.T) *mockTelegram {
 		token, method, _ := strings.Cut(rest, "/")
 		_ = r.ParseMultipartForm(1 << 20)
 		m.mu.Lock()
-		m.calls = append(m.calls, tgCall{token, method, r.Form.Get("language_code"), time.Now()})
+		m.calls = append(m.calls, tgCall{token: token, method: method, lang: r.Form.Get("language_code"), at: time.Now(), menu: r.Form.Get("menu_button")})
 		m.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		switch method {
@@ -272,6 +273,19 @@ func (m *mockTelegram) first(token, method string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// menu returns the menu_button of the token's last setChatMenuButton call.
+func (m *mockTelegram) menu(token string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	got := ""
+	for _, c := range m.calls {
+		if c.token == token && c.method == "setChatMenuButton" {
+			got = c.menu
+		}
+	}
+	return got
 }
 
 func (m *mockTelegram) sequence(token string) []string {
@@ -798,6 +812,21 @@ func TestWebStartsPrunesAndStops(t *testing.T) {
 		t.Errorf("prune at start: user 999 has %d sessions, user 1 has %d", countSessions(t, db, 999), countSessions(t, db, 1))
 	}
 	waitUntil(t, 5*time.Second, "polling", func() bool { _, ok := mock.first("tokW1", "getUpdates"); return ok })
+	// With the web on, the leader also sets the menu button to the Mini App.
+	wantSeq := []string{"getMe", "deleteWebhook", "setMyCommands:", "setMyCommands:fa", "setChatMenuButton", "getUpdates"}
+	if got := mock.sequence("tokW1"); strings.Join(got, ",") != strings.Join(wantSeq, ",") {
+		t.Errorf("leader call sequence %v, want %v", got, wantSeq)
+	}
+	var menu struct {
+		Type, Text string
+		WebApp     struct{ URL string } `json:"web_app"`
+	}
+	if err := json.Unmarshal([]byte(mock.menu("tokW1")), &menu); err != nil {
+		t.Fatalf("menu_button: %v", err)
+	}
+	if menu.Type != "web_app" || menu.Text != "Open" || menu.WebApp.URL != "https://todo.example.com/tg/" {
+		t.Errorf("menu_button = %+v", menu)
+	}
 
 	start := time.Now()
 	n.cancel()
