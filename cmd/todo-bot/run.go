@@ -343,7 +343,11 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 	defer timeout.Stop()
 	// The web stops at the same time as the lease loop, inside the same
 	// budget: it gets no time of its own.
+	// webErr is set before webDone closes. Shutdown returns an error when its
+	// deadline ends while a request still runs: then the web did not stop,
+	// although webDone is closed.
 	webDone := make(chan struct{})
+	var webErr error
 	if webSrv == nil {
 		close(webDone)
 	} else {
@@ -351,8 +355,8 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 			defer close(webDone)
 			wctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(shutdownTimeout))
 			defer cancel()
-			if err := webSrv.Shutdown(wctx); err != nil {
-				log.Warn("stop web server", "err", err)
+			if webErr = webSrv.Shutdown(wctx); webErr != nil {
+				log.Warn("stop web server", "err", webErr)
 			}
 		}()
 	}
@@ -372,7 +376,7 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 	if !waitFor(schedDone, timeout.C) {
 		return fail("scheduler")
 	}
-	if !waitFor(webDone, timeout.C) {
+	if !waitFor(webDone, timeout.C) || webErr != nil {
 		return fail("web server")
 	}
 	return nil
