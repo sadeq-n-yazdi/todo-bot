@@ -245,7 +245,7 @@ func TestConcurrentRedeem(t *testing.T) {
 	h := newHarness(t)
 	tok := h.signIn(userAnn)
 	code := h.newCode(tok, userAnn)
-	const n = 24
+	const n = nodeFailMax // each request reserves one failure before the attempt
 	var wg sync.WaitGroup
 	codes := make([]int, n)
 	cookies := make([]int, n)
@@ -288,19 +288,27 @@ func TestConcurrentRedeem(t *testing.T) {
 	}
 }
 
+// The owner decisions of #141: 3 failures per IP in 1 hour, and 22 per
+// node in 1 hour.
+func TestRedeemFailureLimitValues(t *testing.T) {
+	if ipFailMax != 3 || ipFailWindow != time.Hour || nodeFailMax != 22 || nodeFailWindow != time.Hour {
+		t.Errorf("limits %d/%v per IP, %d/%v per node", ipFailMax, ipFailWindow, nodeFailMax, nodeFailWindow)
+	}
+}
+
 func TestRedeemFailureLimitPerIP(t *testing.T) {
 	h := newHarness(t)
 	tok := h.signIn(userAnn)
 	const ip = "198.51.100.7:4000"
-	for i := range ipFailMax {
+	for range 3 {
 		wantErr(t, h.redeem("ZZZZ-ZZZZ", peer(ip)), 401, "bad_code")
-		_ = i
+		h.clk.Advance(time.Minute) // stay below the route limit of 10 a minute
 	}
-	// The sixth is refused, also with a good code.
+	// The fourth is refused, also with a good code.
 	code := h.newCode(tok, userAnn)
 	w := h.redeem(code, peer(ip))
 	wantErr(t, w, 429, "rate_limited")
-	if ra, _ := strconv.Atoi(w.Header().Get("Retry-After")); ra < 1 || ra > 600 {
+	if ra, _ := strconv.Atoi(w.Header().Get("Retry-After")); ra < 1 || ra > 3600 {
 		t.Errorf("Retry-After %q", w.Header().Get("Retry-After"))
 	}
 	// Another IP is free, and the code still works.
@@ -308,9 +316,13 @@ func TestRedeemFailureLimitPerIP(t *testing.T) {
 	if other.Code != 200 {
 		t.Fatalf("other IP: %d %s", other.Code, other.Body)
 	}
-	// After 10 minutes the IP is free again.
-	h.clk.Advance(ipFailWindow)
+	// The window is 1 hour from the first failure: 10 minutes is not enough.
+	h.clk.Advance(10 * time.Minute)
+	wantErr(t, h.redeem("ZZZZ-ZZZZ", peer(ip)), 429, "rate_limited")
+	// 1 hour after the first failure, one slot is free again.
+	h.clk.Advance(time.Hour - 13*time.Minute)
 	wantErr(t, h.redeem("ZZZZ-ZZZZ", peer(ip)), 401, "bad_code")
+	wantErr(t, h.redeem("ZZZZ-ZZZZ", peer(ip)), 429, "rate_limited")
 }
 
 func TestRedeemSuccessDoesNotCount(t *testing.T) {
@@ -328,15 +340,17 @@ func TestRedeemSuccessDoesNotCount(t *testing.T) {
 func TestRedeemFailureLimitPerNode(t *testing.T) {
 	h := newHarness(t)
 	tok := h.signIn(userAnn)
-	for i := range nodeFailMax {
+	for range 22 {
 		wantErr(t, h.redeem("ZZZZ-ZZZZ"), 401, "bad_code") // a new IP each time
-		_ = i
 	}
+	// The 23rd is refused for every client, also with a good code.
 	code := h.newCode(tok, userAnn)
-	w := h.redeem(code)
-	wantErr(t, w, 429, "rate_limited")
-	if ra, _ := strconv.Atoi(w.Header().Get("Retry-After")); ra < 1 || ra > 3600 {
-		t.Errorf("Retry-After %q", w.Header().Get("Retry-After"))
+	for _, ip := range []string{"198.51.100.20:1", "[2001:db8:9::1]:1"} {
+		w := h.redeem(code, peer(ip))
+		wantErr(t, w, 429, "rate_limited")
+		if ra, _ := strconv.Atoi(w.Header().Get("Retry-After")); ra < 1 || ra > 3600 {
+			t.Errorf("Retry-After %q", w.Header().Get("Retry-After"))
+		}
 	}
 	// The limit ends with the hour.
 	h.clk.Advance(nodeFailWindow)
@@ -468,7 +482,7 @@ func TestCodeStateReserve(t *testing.T) {
 		}
 	}
 	if ok, retry := c.reserve("a", now); ok || retry != ipFailWindow {
-		t.Errorf("sixth: %v %v", ok, retry)
+		t.Errorf("one above the limit: %v %v", ok, retry)
 	}
 	c.release("a", now)
 	if ok, _ := c.reserve("a", now); !ok {
@@ -502,14 +516,48 @@ func TestFailKeyIPv6Prefix(t *testing.T) {
 	}
 }
 
-// Addresses of one /64 share the failure limit.
+// Addresses of one /64 share the failure limit; another /64 does not.
 func TestRedeemFailureLimitIPv6Prefix(t *testing.T) {
 	h := newHarness(t)
-	for i := range ipFailMax {
+	for i := range 3 {
 		wantErr(t, h.redeem("ZZZZ-ZZZZ", peer("[2001:db8:1:2::"+strconv.Itoa(i+1)+"]:1")), 401, "bad_code")
 	}
 	wantErr(t, h.redeem("ZZZZ-ZZZZ", peer("[2001:db8:1:2:ffff::9]:1")), 429, "rate_limited")
 	wantErr(t, h.redeem("ZZZZ-ZZZZ", peer("[2001:db8:1:3::1]:1")), 401, "bad_code")
+}
+
+// IPv4 and IPv4-mapped addresses keep a key for each address.
+func TestRedeemFailureLimitIPv4PerAddress(t *testing.T) {
+	h := newHarness(t)
+	for range 3 {
+		wantErr(t, h.redeem("ZZZZ-ZZZZ", peer("198.51.100.30:1")), 401, "bad_code")
+	}
+	wantErr(t, h.redeem("ZZZZ-ZZZZ", peer("198.51.100.30:1")), 429, "rate_limited")
+	wantErr(t, h.redeem("ZZZZ-ZZZZ", peer("198.51.100.31:1")), 401, "bad_code")
+	wantErr(t, h.redeem("ZZZZ-ZZZZ", peer("[::ffff:198.51.100.32]:1")), 401, "bad_code")
+}
+
+// The route limit of 10 requests a minute uses the same /64 key as the
+// failure limit. A request with an empty code is not a failed guess.
+func TestRedeemRouteLimitIPv6Prefix(t *testing.T) {
+	h := newHarness(t)
+	for i := range redeemPerMin {
+		ip := "[2001:db8:5:6::" + strconv.Itoa(i+1) + "]:1"
+		wantErr(t, h.do("POST", "/api/auth/code/redeem", `{"code":""}`, peer(ip)), 400, "bad_request")
+	}
+	wantErr(t, h.do("POST", "/api/auth/code/redeem", `{"code":""}`, peer("[2001:db8:5:6:ffff::1]:1")), 429, "rate_limited")
+	wantErr(t, h.do("POST", "/api/auth/code/redeem", `{"code":""}`, peer("[2001:db8:5:7::1]:1")), 400, "bad_request")
+}
+
+// The route limit keeps a key for each IPv4 address.
+func TestRedeemRouteLimitIPv4PerAddress(t *testing.T) {
+	h := newHarness(t)
+	for range redeemPerMin {
+		wantErr(t, h.do("POST", "/api/auth/code/redeem", `{"code":""}`, peer("10.8.8.8:1")), 400, "bad_request")
+	}
+	wantErr(t, h.do("POST", "/api/auth/code/redeem", `{"code":""}`, peer("10.8.8.8:1")), 429, "rate_limited")
+	wantErr(t, h.do("POST", "/api/auth/code/redeem", `{"code":""}`, peer("10.8.8.9:1")), 400, "bad_request")
+	wantErr(t, h.do("POST", "/api/auth/code/redeem", `{"code":""}`, peer("[::ffff:10.8.8.10]:1")), 400, "bad_request")
 }
 
 // A slow Telegram does not hold the response.
