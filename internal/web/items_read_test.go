@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -20,11 +19,9 @@ import (
 	"github.com/sadeq-n-yazdi/todo-bot/internal/service"
 )
 
-var update = flag.Bool("update", false, "rewrite the golden files in testdata/api")
-
 const (
 	groupFamily = -1001234567890
-	groupNoRow  = -1009999999999 // a group with an empty title
+	groupNoRow  = -1009999999999 // a group whose chats row has an empty title (todos need a chats row, so a missing row cannot happen)
 )
 
 // setUser sets the language, calendar and time zone of a user.
@@ -93,7 +90,7 @@ func (h *harness) seedFixture() {
 	h.addTodo(model.Todo{ChatID: idAnn, Text: "send the report", DueAt: at(2026, 3, 4, 9, 0), AssigneeID: idBob, CreatedBy: idAnn})
 	h.addTodo(model.Todo{ChatID: idAnn, Text: "ask the neighbour", AssigneeID: 777, CreatedBy: idAnn}) // no username known
 	// A group item that repeats each month on the 1st, in the Jalali calendar.
-	h.addTodo(model.Todo{ChatID: groupFamily, Text: "pay the rent", DueAt: at(2026, 3, 21, 8, 30),
+	h.addTodo(model.Todo{ChatID: groupFamily, Text: "pay the rent", DueAt: at(2026, 3, 21, 4, 30),
 		Recur: "monthly 1 08:00 jalali", TZ: "Asia/Tehran", CreatedBy: idBob})
 	// Assigned to Ann: from the group, from a group with no title, and one
 	// that is done (not listed).
@@ -133,12 +130,12 @@ func pretty(t *testing.T, raw []byte) []byte {
 }
 
 // golden compares the body with testdata/api/<name>.json, or rewrites it
-// with -update.
+// with -update-golden.
 func golden(t *testing.T, name string, body []byte) {
 	t.Helper()
 	path := filepath.Join("testdata", "api", name+".json")
 	got := pretty(t, body)
-	if *update {
+	if *updateGolden {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -149,7 +146,7 @@ func golden(t *testing.T, name string, body []byte) {
 	}
 	want, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("%v (run: go test ./internal/web -run Golden -update)", err)
+		t.Fatalf("%v (run: go test ./internal/web -run Golden -update-golden)", err)
 	}
 	if !bytes.Equal(got, want) {
 		t.Errorf("%s differs from the golden file:\n--- got\n%s--- want\n%s", name, got, want)
@@ -310,7 +307,6 @@ func TestETag(t *testing.T) {
 			t.Errorf("%s: headers %v", path, hd)
 		}
 		// rendered_at moves, the ETag stays, and the tag gives 304.
-		h.clk.Advance(0) // same instant is not the test: advance a little
 		h.clk.Advance(time.Second)
 		w2 := h.do("GET", path, "", cookie(tok), header("If-None-Match", tag))
 		if w2.Code != http.StatusNotModified || w2.Body.Len() != 0 {
