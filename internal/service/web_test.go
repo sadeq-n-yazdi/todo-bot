@@ -51,7 +51,9 @@ func (e *env) raw() *sql.DB {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite", "file:"+u.Path)
+	// url.URL escapes "#", "?" and "%" in the path, so SQLite reads them as
+	// part of the file name and not as a fragment or a query.
+	db, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: u.Path}).String())
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -101,6 +103,18 @@ func TestStartWebSessionTokenAndRow(t *testing.T) {
 	if tok2 == tok {
 		t.Fatal("two sessions got the same token")
 	}
+}
+
+// raw must open the file of the store, also when the path of t.TempDir()
+// holds characters that have a meaning in a file: URI.
+func TestRawOpensTheStoreFile(t *testing.T) {
+	t.Run("name with # and ?", func(t *testing.T) {
+		e := newEnv(t)
+		tok, _ := e.startSession(7, model.WebBrowser, idle30d, max90d)
+		if ids := e.column("SELECT id FROM web_sessions"); len(ids) != 1 || ids[0] != sha(tok) {
+			t.Fatalf("web_sessions.id = %v, want the hash of the token", ids)
+		}
+	})
 }
 
 func TestWebSessionStoresOnlyHashes(t *testing.T) {
