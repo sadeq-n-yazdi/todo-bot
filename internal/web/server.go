@@ -266,10 +266,11 @@ func decodeJSON(r *http.Request, v any) error {
 	return nil
 }
 
-// ipLimit applies a limit per client IP.
+// ipLimit applies a limit per client IP, with the key of failKey (the /64
+// prefix for IPv6).
 func (s *Server) ipLimit(l *limiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if ok, retry := l.allow(s.clientIP(r).String()); !ok {
+		if ok, retry := l.allow(failKey(s.clientIP(r))); !ok {
 			s.fail(w, r, errRateLimited.retry(retry))
 			return
 		}
