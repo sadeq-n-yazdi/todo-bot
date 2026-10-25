@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -94,27 +93,11 @@ func (s *Svc) updateTodoTx(ctx context.Context, tx store.Store, a Actor, todoID 
 		if err != nil {
 			return model.Todo{}, err
 		}
-		loc := s.locOrDefault(u.TZ)
-		r := *p.When
-		t.DueAt, t.Recur, t.TZ = nil, "", u.TZ
-		if r.Due != nil {
-			d := r.Due.UTC()
-			t.DueAt = &d
+		t.DueAt, t.Recur, newDue, err = scheduleOf(*p.When, s.locOrDefault(u.TZ), now)
+		if err != nil {
+			return model.Todo{}, err
 		}
-		if r.Rule != nil {
-			t.Recur = r.Rule.String()
-			if t.DueAt == nil || !t.DueAt.After(now) {
-				next := r.Rule.Next(now, loc)
-				if next.IsZero() {
-					return model.Todo{}, fmt.Errorf("service: recurrence %q has no next occurrence", t.Recur)
-				}
-				next = next.UTC()
-				t.DueAt = &next
-			}
-		}
-		if t.DueAt != nil && t.DueAt.After(now) && (r.Rule != nil || !dateOnlySentinel(r, loc, now)) {
-			newDue = t.DueAt
-		}
+		t.TZ = u.TZ
 	}
 	t.UpdatedAt = now
 	if err := tx.UpdateTodo(ctx, t); err != nil {
