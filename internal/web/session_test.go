@@ -204,7 +204,7 @@ func TestMiniAppOnlyRoutes(t *testing.T) {
 		wantErr(t, h.do(rt.method, rt.path, `{}`), 401, "unauthenticated")
 	}
 	mini := h.signIn(userAnn)
-	wantErr(t, h.do("POST", "/api/auth/code", `{}`, bearer(mini)), 501, "not_implemented")
+	wantErr(t, h.do("POST", "/api/auth/code", `{}`, bearer(mini)), 401, "bad_signature")
 }
 
 func TestUserRateLimit(t *testing.T) {
@@ -235,7 +235,7 @@ func TestCodeRouteLimit(t *testing.T) {
 	h := newHarness(t)
 	tok := h.signIn(userAnn)
 	for range codePer10Min {
-		wantErr(t, h.do("POST", "/api/auth/code", `{}`, bearer(tok)), 501, "not_implemented")
+		wantErr(t, h.do("POST", "/api/auth/code", `{}`, bearer(tok)), 401, "bad_signature")
 	}
 	wantErr(t, h.do("POST", "/api/auth/code", `{}`, bearer(tok)), 429, "rate_limited")
 	if w := h.do("GET", "/api/me", "", bearer(tok)); w.Code != 200 {

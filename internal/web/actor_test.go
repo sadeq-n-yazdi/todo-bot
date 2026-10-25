@@ -129,9 +129,6 @@ func TestStubRoutes(t *testing.T) {
 	}{
 		{"GET", "/api/chats/42/items", mini},
 		{"GET", "/api/assigned", mini},
-		{"POST", "/api/auth/code", mini},
-		{"POST", "/api/auth/code/redeem", ""},
-		{"DELETE", "/api/auth/code", mini},
 		{"POST", "/api/parse", mini},
 		{"GET", "/api/chats/42/members", mini},
 		{"POST", "/api/chats/42/items", mini},
@@ -166,7 +163,7 @@ func TestStubLimitsPerIP(t *testing.T) {
 	for _, rt := range []struct {
 		method, path string
 		n            int
-	}{{"POST", "/api/auth/code/redeem", redeemPerMin}, {"GET", "/auth/telegram", widgetPerMin}} {
+	}{{"GET", "/auth/telegram", widgetPerMin}} {
 		for range rt.n {
 			if w := h.do(rt.method, rt.path, `{}`, peer("10.7.7.7:1")); w.Code != 501 {
 				t.Fatalf("%s: %d", rt.path, w.Code)
