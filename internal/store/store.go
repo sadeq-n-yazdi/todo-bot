@@ -67,6 +67,13 @@ type Store interface {
 	// UpdateTodo rewrites every mutable column of t.ID, AssigneeID included
 	// (AssigneeName is ignored).
 	UpdateTodo(ctx context.Context, t model.Todo) error
+	// UpdateOpenTodo writes t like UpdateTodo, but only WHERE the stored
+	// row is still open and, if the stored row repeats (recur set), its
+	// due_at still equals due (nil matches NULL). ok=false means nothing
+	// was written: the row is missing, not open, or has another due date.
+	// Of several concurrent callers with the same due, exactly one gets
+	// ok=true. service.Complete uses it (#147).
+	UpdateOpenTodo(ctx context.Context, t model.Todo, due *time.Time) (ok bool, err error)
 	// ListRecurringByCreator returns open recurring todos created by userID.
 	ListRecurringByCreator(ctx context.Context, userID int64) ([]model.Todo, error)
 	// ListAssigned returns the open todos assigned to userID, in every chat,

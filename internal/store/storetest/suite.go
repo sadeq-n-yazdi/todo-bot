@@ -30,6 +30,8 @@ func Run(t *testing.T, f Factory) {
 		{"UserRoundTrip", testUserRoundTrip},
 		{"ChatsAndDigest", testChatsAndDigest},
 		{"TodoCRUD", testTodoCRUD},
+		{"UpdateOpenTodo", testUpdateOpenTodo},
+		{"UpdateOpenTodoConcurrent", testUpdateOpenTodoConcurrent},
 		{"InsertTodoConcurrent", testInsertTodoConcurrent},
 		{"Reminders", testReminders},
 		{"WithTx", testWithTx},
