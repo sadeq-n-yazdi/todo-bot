@@ -9,6 +9,7 @@ import (
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/i18n"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
+	"github.com/sadeq-n-yazdi/todo-bot/internal/tg"
 )
 
 func TestMe(t *testing.T) {
@@ -55,7 +56,8 @@ func TestErrorMessageInUserLanguage(t *testing.T) {
 func TestChatsPrivateOnly(t *testing.T) {
 	h := newHarness(t)
 	tok := h.signIn(userBob)
-	// A group the bot knows does not show yet (W4).
+	// A group the bot knows, where Telegram says the user left, does not show.
+	h.members.Set(-100, idBob, tg.ChatMember{Status: tg.MemberLeft})
 	if err := h.st.EnsureChat(context.Background(), model.Chat{ID: -100, Kind: model.ChatGroup, Title: "Family", CreatedAt: testNow}); err != nil {
 		t.Fatal(err)
 	}
