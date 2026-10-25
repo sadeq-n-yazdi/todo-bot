@@ -9,6 +9,7 @@ import { ShownError } from "./actions/sheet";
 import { useBackButton } from "./actions/telegram";
 import { CodeScreen } from "./code/index";
 import { Edit } from "./edit/index";
+import { onListsChanged, startPoll } from "./live";
 import { Login } from "./login/index";
 import { LOGOUT_EVENT, Tabs } from "./tabs/index";
 import { ensureTouchIcon, registerServiceWorker } from "./tabs/pwa";
@@ -143,6 +144,21 @@ export function App(props: { mode: Mode; initData?: string; screen?: "signout" }
     setCodeOpen(false);
     setState((s) => (s.phase === "ready" ? { ...s, start: "" } : s));
   });
+
+  // Live updates (docs/WEB-DESIGN.md section 7.6): poll the current list while
+  // the tabs show, and load the lists again after a change on the server or a
+  // save in the edit form.
+  const pollUser = state.phase === "ready" && !state.offline && !showCode && !props.screen ? state.user.id : null;
+  useEffect(() => {
+    if (pollUser === null) return;
+    const reload = () => setRev((n) => n + 1);
+    const stop = startPoll(pollUser, reload);
+    const off = onListsChanged(reload);
+    return () => {
+      stop();
+      off();
+    };
+  }, [pollUser]);
 
   // The settings menu: apply the answer of PUT /api/me/settings at once.
   const saved = async (me: Me) => {
