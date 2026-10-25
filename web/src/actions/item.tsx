@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api";
+import { openEdit } from "../edit/index";
 import { t } from "../i18n";
 import type { Item } from "../tabs/model";
 import { errText, Sheet, useLive } from "./sheet";
@@ -130,6 +131,17 @@ export function ItemSheet(props: {
               {t("web.actions.remind_custom")}
             </button>
           </fieldset>
+          <button
+            type="button"
+            class="btn plain"
+            disabled={busy}
+            onClick={() => {
+              props.onClose();
+              openEdit(it, props.chat, props.miniapp);
+            }}
+          >
+            {t("web.edit.open")}
+          </button>
           <button type="button" class="btn danger" disabled={busy} onClick={() => setStep("confirm")}>
             {t("web.actions.delete")}
           </button>
