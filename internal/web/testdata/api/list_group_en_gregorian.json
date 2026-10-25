@@ -1,0 +1,40 @@
+{
+  "items": [
+    {
+      "id": 8,
+      "chat_id": -1001234567890,
+      "chat_title": "",
+      "num": 2,
+      "text": "book the flight",
+      "due_at": "2026-03-09T07:00:00Z",
+      "due_text": "Mon 9 Mar 10:30",
+      "due_full": "Mon 9 Mar 2026 10:30",
+      "overdue": false,
+      "recur": "",
+      "recur_text": "",
+      "assignee": {
+        "id": 42,
+        "username": ""
+      },
+      "created_by": 43
+    },
+    {
+      "id": 7,
+      "chat_id": -1001234567890,
+      "chat_title": "",
+      "num": 1,
+      "text": "pay the rent",
+      "due_at": "2026-03-21T04:30:00Z",
+      "due_text": "Sat 21 Mar 08:00",
+      "due_full": "Sat 21 Mar 2026 08:00",
+      "overdue": false,
+      "recur": "monthly 1 08:00 jalali",
+      "recur_text": "every Jalali month on the 1st",
+      "assignee": null,
+      "created_by": 43
+    }
+  ],
+  "page": 0,
+  "pages": 1,
+  "rendered_at": "2026-03-01T12:00:00Z"
+}
