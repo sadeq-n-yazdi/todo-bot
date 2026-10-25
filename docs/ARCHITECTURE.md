@@ -108,7 +108,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
 - **handler**:
   - `Deps{Svc, Send, Parser, Clock, Allowed, BotUsername, Log}`.
   - `New(Deps)` and `Handle(ctx, Update)`.
-  - Web (§14): `SetWebApp(origin)` turns on the "Open app" button under `/start` and `/help`. An empty origin turns it off. In a private chat, the button is a `web_app` button to `/tg/`. In a group, it is a `url` button to `https://t.me/<bot>?startapp=g<chatID>`.
+  - Web (§14): `SetWebApp(origin)` adds the "Open app" button under `/start` and `/help`. If the origin is empty, the handler does not show the button. In a private chat, the button is a `web_app` button to `/tg/`. In a group, it is a `url` button to `https://t.me/<bot>?startapp=g<chatID>`.
 
 ## 3a. Languages and calendars
 
