@@ -675,7 +675,10 @@ In the Mini App, the Add sheet uses `Telegram.WebApp.MainButton`, and the sheets
   - The CSS uses only logical properties (`margin-inline-start`, `padding-inline`, `inset-inline-end`, `text-align: start`).
   - Arrow icons turn around under `[dir=rtl]`.
   - Item text has `dir="auto"`, because users mix Farsi and English.
-- **Fonts.** The app uses the system fonts: `system-ui, "Segoe UI", Roboto, "Noto Sans Arabic", Tahoma, sans-serif`. The binary embeds no font file, to keep the size small.
+- **Fonts.** The app uses the Vazirmatn font from Google Fonts (owner decision, #145). The binary embeds no font file, to keep the size small.
+  - `font.ts` adds the stylesheet link at start, so the first paint does not wait for the font. The URL has `display=swap`.
+  - `--font` is `"Vazirmatn", system-ui, "Segoe UI", Roboto, "Noto Sans Arabic", Tahoma, sans-serif`. Until the font arrives, and without the network, the app uses the system fonts.
+  - Google receives the IP address of each user that loads the font. The service worker does not keep the font, because it keeps only files from the same origin. The browser cache keeps it.
 - **Theme.**
   - All colors are CSS tokens on `:root`. A dark set applies under `prefers-color-scheme: dark`.
   - In the Mini App, the tokens use the `--tg-theme-*` variables that Telegram sets, with the PWA colors as fallback values. The app follows the `themeChanged` event.
@@ -859,9 +862,10 @@ A Go-only contributor runs `make ci` as today, and needs no Node.
 `/` (the PWA):
 
 ```
-default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;
-connect-src 'self'; manifest-src 'self'; worker-src 'self'; font-src 'self';
-base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com;
+img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self';
+font-src 'self' https://fonts.gstatic.com; base-uri 'none'; form-action 'self';
+frame-ancestors 'none'
 ```
 
 In phase 4, the login screen needs the widget. W13 then adds `https://telegram.org` to `script-src` and `frame-src https://oauth.telegram.org`. Only `/` gets them.
@@ -869,12 +873,14 @@ In phase 4, the login screen needs the widget. W13 then adds `https://telegram.o
 `/tg/` (the Mini App):
 
 ```
-default-src 'none'; script-src 'self' https://telegram.org; style-src 'self';
-img-src 'self' data:; connect-src 'self'; font-src 'self'; base-uri 'none';
-form-action 'self'; frame-ancestors https://web.telegram.org
+default-src 'none'; script-src 'self' https://telegram.org;
+style-src 'self' https://fonts.googleapis.com; img-src 'self' data:; connect-src 'self';
+font-src 'self' https://fonts.gstatic.com; base-uri 'none'; form-action 'self';
+frame-ancestors https://web.telegram.org
 ```
 
 - Telegram Web runs the Mini App in an iframe on `https://web.telegram.org` (the K and A versions). The Telegram apps use a webview, which `frame-ancestors` does not affect. W3 checks both Telegram Web versions by hand. If one of them uses another host, W3 adds that host.
+- Both pages allow `https://fonts.googleapis.com` for the font stylesheet and `https://fonts.gstatic.com` for the font files (§7.4). They allow no other Google host.
 - No page uses inline scripts or inline styles. Preact and the Telegram script set styles through the CSSOM, which `style-src` does not block.
 - Telegram changes `telegram-web-app.js` without notice, so the page cannot use Subresource Integrity for it. Only `/tg/` loads it.
 

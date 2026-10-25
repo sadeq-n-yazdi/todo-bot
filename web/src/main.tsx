@@ -1,5 +1,6 @@
 import { render } from "preact";
 import { App, type Mode } from "./app";
+import { loadFont } from "./font";
 import { applyLang, dirFor } from "./i18n";
 import { applyTheme } from "./theme";
 import "./styles.css";
@@ -21,6 +22,7 @@ declare global {
 }
 
 function start(): void {
+  loadFont();
   const tg = window.Telegram?.WebApp;
   // /tg/ is the Mini App. The PWA at / never loads the Telegram script.
   const mode: Mode = location.pathname.startsWith("/tg/") ? "miniapp" : "pwa";
