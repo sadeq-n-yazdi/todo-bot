@@ -71,18 +71,22 @@ export const WIDGET_START = "/auth/telegram?start=1";
 
 /**
  * The widget button of Telegram, in the redirect mode. First the start request
- * sets a nonce cookie (10 minutes). The server accepts the redirect of Telegram
- * only with it, so a link with the proof of another person signs nobody in.
+ * sets a nonce cookie (10 minutes) and gives the same nonce in its body. The
+ * auth URL holds it as n. The server accepts the redirect of Telegram only when
+ * n equals the cookie, so a link with the proof of another person signs nobody in.
  * If the start request fails, the widget does not show.
  */
 export function Widget(props: { bot: string }) {
   const box = useRef<HTMLDivElement>(null);
-  const [ready, setReady] = useState(false);
+  // The nonce of the start request; "" until it comes.
+  const [nonce, setNonce] = useState("");
 
   useEffect(() => {
     let live = true;
-    api("GET", WIDGET_START).then(
-      () => live && setReady(true),
+    api<{ n?: unknown }>("GET", WIDGET_START).then(
+      (r) => {
+        if (live && typeof r?.n === "string" && r.n !== "") setNonce(r.n);
+      },
       () => {
         /* no widget */
       },
@@ -94,20 +98,22 @@ export function Widget(props: { bot: string }) {
 
   useEffect(() => {
     const el = box.current;
-    if (!ready || !el) return;
+    if (!nonce || !el) return;
     const s = document.createElement("script");
     s.async = true;
     s.src = WIDGET_SRC;
     s.setAttribute("data-telegram-login", props.bot);
     s.setAttribute("data-size", "large");
-    s.setAttribute("data-auth-url", location.origin + "/auth/telegram");
+    // The same nonce as the cookie (double submit): the server accepts the
+    // redirect only when both are equal.
+    s.setAttribute("data-auth-url", location.origin + "/auth/telegram?n=" + encodeURIComponent(nonce));
     s.setAttribute("data-lang", getLang().startsWith("fa") ? "fa" : "en");
     el.append(s);
     // The script puts its iframe next to itself. Remove both.
     return () => el.replaceChildren();
-  }, [ready, props.bot]);
+  }, [nonce, props.bot]);
 
-  if (!ready) return null;
+  if (!nonce) return null;
   return (
     <section class="widget">
       <p>{wt("web.widget.hint")}</p>

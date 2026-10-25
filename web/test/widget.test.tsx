@@ -10,6 +10,7 @@ function json(status: number, body: unknown): Response {
 }
 
 const fetchMock = vi.fn();
+const NONCE = "nonce_-AZ09";
 
 function nameBot(name: string): void {
   const meta = document.createElement("meta");
@@ -33,7 +34,7 @@ beforeEach(() => {
   setStandalone(undefined);
   fetchMock.mockImplementation(async (url: string) => {
     if (url.startsWith("/api/i18n")) return json(200, { lang: "en", dir: "ltr", messages: {} });
-    if (url === WIDGET_START) return new Response(null, { status: 204 });
+    if (url === WIDGET_START) return json(200, { n: NONCE });
     throw new Error("unexpected " + url);
   });
 });
@@ -58,7 +59,8 @@ describe("Login Widget", () => {
     expect(s.src).toBe("https://telegram.org/js/telegram-widget.js?22");
     expect(s.async).toBe(true);
     expect(s.dataset.telegramLogin).toBe("todo_bot");
-    expect(s.dataset.authUrl).toBe(location.origin + "/auth/telegram");
+    // The nonce of the start request goes into the auth URL (double submit).
+    expect(s.dataset.authUrl).toBe(location.origin + "/auth/telegram?n=" + NONCE);
     // The redirect mode only: no popup callback.
     expect(s.dataset.onauth).toBeUndefined();
     expect(screen.getByTestId("widget").contains(s)).toBe(true);
@@ -68,6 +70,18 @@ describe("Login Widget", () => {
     const [, init] = starts()[0];
     expect(init.method).toBe("GET");
     expect(new Headers(init.headers).get("X-Todo-Request")).toBe("1");
+  });
+
+  it("does not show without a nonce in the answer", async () => {
+    nameBot("todo_bot");
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/i18n")) return json(200, { lang: "en", dir: "ltr", messages: {} });
+      return json(200, {});
+    });
+    render(<Login onSignedIn={() => {}} />);
+    await waitFor(() => expect(starts()).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(widgetScript()).toBeNull();
   });
 
   it("does not show when the start request fails", async () => {

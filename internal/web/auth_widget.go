@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -38,6 +39,9 @@ const (
 	// widgetNonceAge is the life of the nonce cookie.
 	widgetNonceAge = 10 * time.Minute
 	widgetNonceLen = 43 // 32 random bytes as base64url, no padding
+	// widgetNonceParam is the query field of the auth URL that holds the
+	// nonce (the double-submit copy of the cookie).
+	widgetNonceParam = "n"
 )
 
 // The error codes of the widget. They go to the login screen in the URL
@@ -79,13 +83,9 @@ type widgetUser struct {
 // "key=value" lines; the secret key is SHA256(botToken); hash is the hex
 // HMAC-SHA256 of the data-check string. It accepts only the documented
 // fields, each one time, with no line feed. It returns one of the widget
-// error codes, or "".
-func verifyWidget(rawQuery, botToken string, now time.Time) (widgetUser, string) {
-	if rawQuery == "" || len(rawQuery) > maxWidgetQuery {
-		return widgetUser{}, widgetBadRequest
-	}
-	values, err := url.ParseQuery(rawQuery)
-	if err != nil {
+// error codes, or "". values must not hold the nonce field n any more.
+func verifyWidget(values url.Values, botToken string, now time.Time) (widgetUser, string) {
+	if len(values) == 0 {
 		return widgetUser{}, widgetBadRequest
 	}
 	fields := make(map[string]string, len(values))
@@ -156,12 +156,29 @@ func (s *Server) handleWidget(w http.ResponseWriter, r *http.Request) {
 	// The nonce works one time: clear it on every answer.
 	nonce, err := r.Cookie(widgetCookie)
 	s.setWidgetCookie(w, "", -1)
-	if err != nil || !validNonce(nonce.Value) {
+	raw := r.URL.RawQuery
+	if raw == "" || len(raw) > maxWidgetQuery {
+		widgetRedirect(w, widgetBadRequest)
+		return
+	}
+	values, perr := url.ParseQuery(raw)
+	if perr != nil {
+		widgetRedirect(w, widgetBadRequest)
+		return
+	}
+	// Double submit: the auth URL of the widget holds the nonce as n, and it
+	// must equal the cookie. Another site cannot read the nonce, so a link
+	// with the proof of another person never holds the nonce of this browser.
+	// n is not a Telegram field and is not in the HMAC.
+	n := values[widgetNonceParam]
+	values.Del(widgetNonceParam)
+	if err != nil || !validNonce(nonce.Value) || len(n) != 1 ||
+		subtle.ConstantTimeCompare([]byte(n[0]), []byte(nonce.Value)) != 1 {
 		widgetRedirect(w, widgetRestart)
 		return
 	}
 	now := s.now()
-	u, code := verifyWidget(r.URL.RawQuery, s.d.Token, now)
+	u, code := verifyWidget(values, s.d.Token, now)
 	if code != "" {
 		widgetRedirect(w, code)
 		return
@@ -217,7 +234,9 @@ func (s *Server) handleWidget(w http.ResponseWriter, r *http.Request) {
 
 // handleWidgetStart is GET /auth/telegram?start=1. The login screen calls it
 // with fetch before it shows the widget. It sets the nonce cookie and
-// answers 204. A cross-site page cannot send it: it needs the header
+// answers 200 {"n": nonce}; the page puts the same nonce in the auth URL of
+// the widget (double submit). A cross-site page cannot send it or read the
+// answer: it needs the header
 // X-Todo-Request (no CORS preflight is ever answered) and Sec-Fetch-Site:
 // same-origin. A browser that is signed in gets no nonce (403
 // wrong_session), because the login screen shows only without a session.
@@ -238,8 +257,13 @@ func (s *Server) handleWidgetStart(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	s.setWidgetCookie(w, base64.RawURLEncoding.EncodeToString(b), int(widgetNonceAge/time.Second))
-	w.WriteHeader(http.StatusNoContent)
+	n := base64.RawURLEncoding.EncodeToString(b)
+	s.setWidgetCookie(w, n, int(widgetNonceAge/time.Second))
+	writeJSON(w, http.StatusOK, widgetStartResponse{Nonce: n})
+}
+
+type widgetStartResponse struct {
+	Nonce string `json:"n"`
 }
 
 // sessionUser is the user of a live browser session cookie of r, or 0. The
@@ -265,7 +289,7 @@ func (s *Server) sessionUser(r *http.Request) (int64, error) {
 
 // validNonce reports whether v has the form of a nonce. The browser keeps
 // the cookie for 10 minutes only, and no other site can set a __Host-
-// cookie for this host, so the form is enough.
+// cookie for this host. The redirect also compares it with the n field.
 func validNonce(v string) bool {
 	if len(v) != widgetNonceLen {
 		return false

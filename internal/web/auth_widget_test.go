@@ -99,7 +99,15 @@ func nonce(v string) reqOpt {
 func (h *harness) widget(query string, opts ...reqOpt) *httptest.ResponseRecorder {
 	h.t.Helper()
 	defer h.srv.codes.notices.Wait() // the notice goes out in the background
-	return h.do("GET", "/auth/telegram?"+query, "", append([]reqOpt{peer(nextIP()), nonce(testNonce)}, opts...)...)
+	return h.do("GET", "/auth/telegram?"+withN(query, testNonce), "", append([]reqOpt{peer(nextIP()), nonce(testNonce)}, opts...)...)
+}
+
+// withN adds the nonce field n of the auth URL to query.
+func withN(query, n string) string {
+	if query == "" {
+		return "n=" + url.QueryEscape(n)
+	}
+	return query + "&n=" + url.QueryEscape(n)
 }
 
 // cookiesOf returns the cookies that w sets, by name.
@@ -221,7 +229,7 @@ func TestWidgetConcurrentProof(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			w := h.do("GET", "/auth/telegram?"+q, "", peer(ip), nonce(testNonce))
+			w := h.do("GET", "/auth/telegram?"+withN(q, testNonce), "", peer(ip), nonce(testNonce))
 			locs[i] = w.Header().Get("Location")
 		}()
 	}
@@ -467,10 +475,14 @@ func TestWidgetStart(t *testing.T) {
 		return h.do("GET", "/auth/telegram?start=1", "", append(base, opts...)...)
 	}
 	w := start()
-	if w.Code != http.StatusNoContent {
+	if w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	c := cookiesOf(w)[widgetCookie]
+	// The body gives the same nonce, for the auth URL of the widget.
+	if body := decodeBody[widgetStartResponse](t, w); c == nil || body.Nonce != c.Value {
+		t.Fatalf("body nonce %q, cookie %+v", body.Nonce, c)
+	}
 	if c == nil || !validNonce(c.Value) || c.MaxAge != 600 || !c.Secure || !c.HttpOnly ||
 		c.SameSite != http.SameSiteLaxMode || c.Path != "/" || c.Domain != "" {
 		t.Fatalf("nonce cookie %+v", c)
@@ -483,7 +495,7 @@ func TestWidgetStart(t *testing.T) {
 	}
 	// The nonce of the start request works for the redirect.
 	q := signWidget(testToken, widgetFields(idAnn, h.clk.Now()))
-	if w := h.do("GET", "/auth/telegram?"+q, "", peer(nextIP()), nonce(c.Value)); w.Header().Get("Location") != "/" {
+	if w := h.do("GET", "/auth/telegram?"+withN(q, c.Value), "", peer(nextIP()), nonce(c.Value)); w.Header().Get("Location") != "/" {
 		t.Errorf("redirect with the nonce: %q", w.Header().Get("Location"))
 	}
 	h.srv.codes.notices.Wait()
@@ -510,7 +522,7 @@ func TestWidgetStart(t *testing.T) {
 	if cookiesOf(w)[widgetCookie] != nil {
 		t.Error("a signed-in browser got a nonce")
 	}
-	if w := start(cookie("tb1_" + strings.Repeat("Z", 43))); w.Code != http.StatusNoContent {
+	if w := start(cookie("tb1_" + strings.Repeat("Z", 43))); w.Code != http.StatusOK {
 		t.Errorf("with a dead session: %d", w.Code)
 	}
 }
@@ -530,5 +542,39 @@ func TestWidgetKeepsTheSessionOfAnotherUser(t *testing.T) {
 	h.clk.Advance(time.Second)
 	if w := h.widget(signWidget(testToken, widgetFields(idBob, h.clk.Now())), cookie(btok)); w.Header().Get("Location") != "/" {
 		t.Errorf("the same user: %q", w.Header().Get("Location"))
+	}
+}
+
+// TestWidgetNonceBinding: the n field of the auth URL must equal the nonce
+// cookie. A victim who has a fresh nonce of its own, and who opens the link
+// of an attacker (with the proof of the attacker), is not signed in.
+func TestWidgetNonceBinding(t *testing.T) {
+	h := newHarness(t)
+	victim := strings.Repeat("V", widgetNonceLen)
+	attacker := strings.Repeat("A", widgetNonceLen)
+	q := signWidget(testToken, widgetFields(idAnn, h.clk.Now()))
+	for name, query := range map[string]string{
+		"other n":         withN(q, attacker),
+		"no n":            q,
+		"empty n":         withN(q, ""),
+		"two n":           withN(withN(q, victim), victim),
+		"n in lower case": withN(q, strings.ToLower(victim)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantLoginError(t, h.do("GET", "/auth/telegram?"+query, "", peer(nextIP()), nonce(victim)), "restart")
+		})
+	}
+	if len(h.send.Messages()) != 0 {
+		t.Error("a notice went out")
+	}
+	// A good n with a changed proof is still a bad signature.
+	v, _ := url.ParseQuery(q)
+	v.Set("id", strconv.Itoa(idBob))
+	wantLoginError(t, h.do("GET", "/auth/telegram?"+withN(v.Encode(), victim), "", peer(nextIP()), nonce(victim)), "bad_signature")
+	// The good case: the n of this browser, and the proof is not used yet.
+	w := h.do("GET", "/auth/telegram?"+withN(q, victim), "", peer(nextIP()), nonce(victim))
+	h.srv.codes.notices.Wait()
+	if w.Header().Get("Location") != "/" || cookiesOf(w)[cookieName] == nil {
+		t.Fatalf("good case: %q %v", w.Header().Get("Location"), w.Result().Cookies())
 	}
 }
