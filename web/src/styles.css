@@ -12,7 +12,7 @@
   --accent-fg: var(--tg-theme-button-text-color, #ffffff);
   --danger: var(--tg-theme-destructive-text-color, #c0392b);
   --gap: 12px;
-  --font: system-ui, "Segoe UI", Roboto, "Noto Sans Arabic", Tahoma, sans-serif;
+  --font: "Vazirmatn", system-ui, "Segoe UI", Roboto, "Noto Sans Arabic", Tahoma, sans-serif;
   color-scheme: light dark;
 }
 

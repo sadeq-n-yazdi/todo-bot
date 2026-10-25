@@ -3,16 +3,20 @@ package web
 import "net/http"
 
 // Content Security Policies (docs/WEB-DESIGN.md §11.1, §11.2). W13 adds the
-// widget hosts to cspPWA.
+// widget hosts to cspPWA. Both pages load the Vazirmatn font from Google
+// Fonts: the stylesheet from fontsCSS and the font files from fontsFiles.
 const (
+	fontsCSS   = "https://fonts.googleapis.com"
+	fontsFiles = "https://fonts.gstatic.com"
+
 	// cspPWA is the policy of "/" and of the other static files.
-	cspPWA = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-		"connect-src 'self'; manifest-src 'self'; worker-src 'self'; font-src 'self'; " +
+	cspPWA = "default-src 'none'; script-src 'self'; style-src 'self' " + fontsCSS + "; img-src 'self' data:; " +
+		"connect-src 'self'; manifest-src 'self'; worker-src 'self'; font-src 'self' " + fontsFiles + "; " +
 		"base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 	// cspMiniApp is the policy of "/tg/". Telegram Web frames the Mini App
 	// from web.telegram.org (the K and A versions both use this host).
-	cspMiniApp = "default-src 'none'; script-src 'self' https://telegram.org; style-src 'self'; " +
-		"img-src 'self' data:; connect-src 'self'; font-src 'self'; base-uri 'none'; " +
+	cspMiniApp = "default-src 'none'; script-src 'self' https://telegram.org; style-src 'self' " + fontsCSS + "; " +
+		"img-src 'self' data:; connect-src 'self'; font-src 'self' " + fontsFiles + "; base-uri 'none'; " +
 		"form-action 'self'; frame-ancestors https://web.telegram.org"
 	// cspAPI is the policy of every response that is not a static file.
 	cspAPI = "default-src 'none'; frame-ancestors 'none'"
