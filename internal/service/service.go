@@ -84,7 +84,11 @@ type Service interface {
 	// unless its ChatID equals a.ChatID or a.UserID is its assignee acting
 	// from their own private chat (a.ChatID == a.UserID).
 	Todo(ctx context.Context, a Actor, id int64) (model.Todo, error)
-	Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, error)
+	// Complete (ARCHITECTURE §5) returns the item and changed: true only
+	// if this call changed it (done, or the next occurrence). Of several
+	// concurrent calls on one open item exactly one gets changed=true; the
+	// "did" notice is sent only then.
+	Complete(ctx context.Context, a Actor, todoID int64) (t model.Todo, changed bool, err error)
 	Delete(ctx context.Context, a Actor, todoID int64) error
 	Edit(ctx context.Context, a Actor, todoID int64, text string) (model.Todo, error)
 	// Remind adds a 'custom' reminder; at must be in the future.

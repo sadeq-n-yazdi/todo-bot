@@ -169,11 +169,13 @@ func (h *Handler) cmdDone(ctx context.Context, m *tg.Message, r req, args string
 	if !ok {
 		return err
 	}
-	done, err := h.Svc.Complete(ctx, r.Actor, td.ID)
+	done, changed, err := h.Svc.Complete(ctx, r.Actor, td.ID)
 	if err != nil {
 		return h.todoErr(ctx, m, lc, err)
 	}
-	h.notifyDid(ctx, r, done)
+	if changed { // one notice, also when two /done race (#147)
+		h.notifyDid(ctx, r, done)
+	}
 	text := lc.T("todo.done", lc.Num(done.Num), echo(done.Text))
 	// A recurring item stays open with its next due time.
 	if done.Status == model.TodoOpen && done.DueAt != nil {

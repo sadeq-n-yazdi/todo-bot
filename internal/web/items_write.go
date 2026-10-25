@@ -155,35 +155,19 @@ func (s *Server) handleDoneItem(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, itemErr(err))
 		return
 	}
-	done, err := s.d.Svc.Complete(r.Context(), a, id)
+	done, changed, err := s.d.Svc.Complete(r.Context(), a, id)
 	if err != nil {
 		s.fail(w, r, itemErr(err))
 		return
 	}
-	// Known issue: two Done requests at the same moment (for example on two
-	// nodes) can both see the item open and both send the notice. A fix
-	// needs Complete to report whether this call changed the row, which is
-	// a change of the service contract (a follow-up).
-	if changedByDone(before, done) && shouldNotifyDid(a, done) {
+	// Complete changes the row for one call only, also when two Done
+	// requests come at the same moment on two nodes (#147). Only that
+	// call sends the notice. A repeating item that is due more than 12
+	// hours later does not change.
+	if changed && shouldNotifyDid(a, done) {
 		s.notifyDid(r, done)
 	}
 	writeJSON(w, http.StatusOK, doneResponse{Item: s.viewOf(r).toItem(done, ""), StillOpen: done.Status == model.TodoOpen})
-}
-
-// changedByDone tells if Complete changed the item that was open in
-// before: it is done now, or it repeats and has a new date. A repeating
-// item that is due more than 12 hours later does not change.
-func changedByDone(before, after model.Todo) bool {
-	if after.Status != model.TodoOpen {
-		return true
-	}
-	switch {
-	case before.DueAt == nil && after.DueAt == nil:
-		return false
-	case before.DueAt == nil || after.DueAt == nil:
-		return true
-	}
-	return !before.DueAt.Equal(*after.DueAt)
 }
 
 // decodeEmpty accepts a request with no body, or a body of "{}".

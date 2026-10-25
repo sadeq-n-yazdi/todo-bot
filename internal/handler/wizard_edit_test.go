@@ -284,7 +284,7 @@ func TestEditGoneItemEndsDraft(t *testing.T) {
 			e.editText(wzAlice, "y")
 			var err error
 			if how == "done" {
-				_, err = e.svc.Complete(context.Background(), actorFor(wzAlice, wzAlice), td.ID)
+				_, _, err = e.svc.Complete(context.Background(), actorFor(wzAlice, wzAlice), td.ID)
 			} else {
 				err = e.svc.Delete(context.Background(), actorFor(wzAlice, wzAlice), td.ID)
 			}
@@ -317,7 +317,7 @@ func TestEditForeignChatRefused(t *testing.T) {
 func TestEditDoneItemRefused(t *testing.T) {
 	e := newWz(t)
 	td := e.add(wzAlice, "x", nil, "", 0)
-	if _, err := e.svc.Complete(context.Background(), actorFor(wzAlice, wzAlice), td.ID); err != nil {
+	if _, _, err := e.svc.Complete(context.Background(), actorFor(wzAlice, wzAlice), td.ID); err != nil {
 		t.Fatal(err)
 	}
 	if toast := e.pressEditBtn(wzAlice, wzAlice, td); toast != e.lc(wzAlice).T("settings.cb.gone") {

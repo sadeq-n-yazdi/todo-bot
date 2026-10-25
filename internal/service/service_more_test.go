@@ -173,7 +173,7 @@ func TestDigestViewRules(t *testing.T) {
 	e.add(alice, "late tonight", at(22, 30), nil) // 00:30 Berlin tomorrow: not today
 	e.add(alice, "someday", nil, nil)
 	done := e.add(alice, "finished", at(6, 0), nil)
-	_, err := e.svc.Complete(ctx, alice, done.ID)
+	_, _, err := e.svc.Complete(ctx, alice, done.ID)
 	e.must(err)
 
 	v, err := e.svc.DigestView(ctx, 7, e.clk.Now())
@@ -272,7 +272,7 @@ func TestDeleteEditAndTodo(t *testing.T) {
 		t.Fatalf("Todo(missing) = %v", err)
 	}
 	d := e.add(alice, "done one", nil, nil)
-	_, err = e.svc.Complete(ctx, alice, d.ID)
+	_, _, err = e.svc.Complete(ctx, alice, d.ID)
 	e.must(err)
 	got, err = e.svc.Todo(ctx, alice, d.ID)
 	e.must(err)
@@ -639,7 +639,7 @@ func TestWakeOnMutations(t *testing.T) {
 		{"Remind", func() { e.mustRemind(td.ID, t0.Add(time.Hour)) }},
 		{"SetDigest", func() { e.must(e.svc.SetDigest(ctx, alice, "09:00")) }},
 		{"SetTZ", func() { e.must(e.svc.SetTZ(ctx, 7, "Asia/Tehran")) }},
-		{"Complete", func() { _, err := e.svc.Complete(ctx, alice, td.ID); e.must(err) }},
+		{"Complete", func() { _, _, err := e.svc.Complete(ctx, alice, td.ID); e.must(err) }},
 		{"Delete", func() { e.must(e.svc.Delete(ctx, alice, td.ID)) }},
 	}
 	for _, st := range steps {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/model"
 	"github.com/sadeq-n-yazdi/todo-bot/internal/store"
@@ -192,6 +193,30 @@ WHERE id = ?`,
 		t.Text, string(t.Status), nullTime(t.DueAt), nullString(t.Recur), t.TZ,
 		unixOrNow(t.UpdatedAt), nullTime(t.DoneAt), nullInt(t.AssigneeID), t.ID)
 	return checkAffected(res, err, "update", "todo", t.ID)
+}
+
+// UpdateOpenTodo is UpdateTodo with a condition: the row is still open and,
+// if it repeats, its due_at is still due.
+func (d *DB) UpdateOpenTodo(ctx context.Context, t model.Todo, due *time.Time) (bool, error) {
+	cond, args := "due_at IS NULL", []any{}
+	if due != nil {
+		cond, args = "due_at = ?", []any{due.Unix()}
+	}
+	args = append([]any{
+		t.Text, string(t.Status), nullTime(t.DueAt), nullString(t.Recur), t.TZ,
+		unixOrNow(t.UpdatedAt), nullTime(t.DoneAt), nullInt(t.AssigneeID), t.ID,
+	}, args...)
+	res, err := d.q.ExecContext(ctx, `
+UPDATE todos SET text = ?, status = ?, due_at = ?, recur = ?, tz = ?, updated_at = ?, done_at = ?, assignee_id = ?
+WHERE id = ? AND status = 'open' AND (recur IS NULL OR `+cond+`)`, args...)
+	if err != nil {
+		return false, fmt.Errorf("sqlstore: update open todo %d: %w", t.ID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("sqlstore: update open todo %d: %w", t.ID, err)
+	}
+	return n == 1, nil
 }
 
 // ListRecurringByCreator returns open recurring todos created by userID.

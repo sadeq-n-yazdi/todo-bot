@@ -267,7 +267,7 @@ func TestEditDoneOrDeletedKeepsDraft(t *testing.T) {
 			td := e.add(alice, "milk", at(15, 0), nil)
 			d := e.startEdit(alice, 5)
 			if kind == "done" {
-				_, err := e.svc.Complete(ctx, alice, td.ID)
+				_, _, err := e.svc.Complete(ctx, alice, td.ID)
 				e.must(err)
 			} else {
 				e.must(e.svc.Delete(ctx, alice, td.ID))

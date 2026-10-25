@@ -108,16 +108,18 @@ func (f *fakeAssign) ByNum(_ context.Context, _ int64, num int) (model.Todo, err
 	}
 	return model.Todo{}, service.ErrNotFound
 }
-func (f *fakeAssign) Complete(_ context.Context, a service.Actor, id int64) (model.Todo, error) {
+func (f *fakeAssign) Complete(_ context.Context, a service.Actor, id int64) (model.Todo, bool, error) {
 	t, err := f.allowed(a, id)
 	if err != nil {
-		return model.Todo{}, err
+		return model.Todo{}, false, err
 	}
+	changed := t.Status == model.TodoOpen
 	t.Status = model.TodoDone
-	return *t, nil
+	return *t, changed, nil
 }
 func (f *fakeAssign) AckReminder(_ context.Context, a service.Actor, rid int64) (model.Todo, error) {
-	return f.Complete(context.Background(), a, f.rems[rid])
+	t, _, err := f.Complete(context.Background(), a, f.rems[rid])
+	return t, err
 }
 
 const (
