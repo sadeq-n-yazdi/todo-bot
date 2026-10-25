@@ -435,6 +435,51 @@ func TestDeleteWebhook(t *testing.T) {
 	}
 }
 
+func TestSetMenuButton(t *testing.T) {
+	f := newFakeAPI(t)
+	b := f.newBot(t)
+	if err := b.SetMenuButton(context.Background(), "Open", "https://todo.example.com/tg/"); err != nil {
+		t.Fatal(err)
+	}
+	cs := f.callsTo("setChatMenuButton")
+	if len(cs) != 1 {
+		t.Fatalf("calls = %d, want 1", len(cs))
+	}
+	if id := cs[0].Form.Get("chat_id"); id != "" {
+		t.Errorf("chat_id = %q, want none (the default menu button)", id)
+	}
+	var got struct {
+		Type   string `json:"type"`
+		Text   string `json:"text"`
+		WebApp struct {
+			URL string `json:"url"`
+		} `json:"web_app"`
+	}
+	if err := json.Unmarshal([]byte(cs[0].Form.Get("menu_button")), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Type != "web_app" || got.Text != "Open" || got.WebApp.URL != "https://todo.example.com/tg/" {
+		t.Errorf("menu_button = %+v", got)
+	}
+}
+
+func TestSetMenuButtonRefusesBadInput(t *testing.T) {
+	f := newFakeAPI(t)
+	b := f.newBot(t)
+	for _, c := range []struct{ text, url string }{
+		{"Open", ""},
+		{"", "https://todo.example.com/tg/"},
+		{"Open", "http://todo.example.com/tg/"},
+	} {
+		if err := b.SetMenuButton(context.Background(), c.text, c.url); err == nil {
+			t.Errorf("SetMenuButton(%q, %q): no error", c.text, c.url)
+		}
+	}
+	if n := len(f.callsTo("setChatMenuButton")); n != 0 {
+		t.Errorf("calls = %d, want 0", n)
+	}
+}
+
 func TestSetCommands(t *testing.T) {
 	f := newFakeAPI(t)
 	b := f.newBot(t)

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/sadeq-n-yazdi/todo-bot/internal/clock"
@@ -290,6 +291,13 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 	if webSrv != nil {
 		handle = web.Observe(handle, svc, cfg.AllowedUsers, log)
 	}
+	// The "Open app" buttons under /start and /help exist only with the web
+	// UI on. An empty origin turns them off.
+	appOrigin := ""
+	if webSrv != nil {
+		appOrigin = cfg.WebOrigin
+	}
+	handler.SetWebApp(appOrigin)
 
 	// lead runs while this node holds the poller lease. The lease loop may call
 	// it again for the same epoch, so every step is safe to repeat.
@@ -302,6 +310,9 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 			return
 		}
 		setCommands(lctx, bot, log)
+		if webSrv != nil { // with the web off, the menu button does not change
+			setChatMenuButton(lctx, bot, cfg.WebOrigin, log)
+		}
 		if err := bot.Poller().Run(lctx, handle); err != nil && lctx.Err() == nil {
 			log.Error("poller stopped", "err", err)
 		}
@@ -487,5 +498,15 @@ func setCommands(ctx context.Context, bot *tgbot.Bot, log *slog.Logger) {
 		if err := bot.SetCommands(ctx, cmds, l.lang); err != nil {
 			log.Warn("set commands", "lang", l.lang, "err", err)
 		}
+	}
+}
+
+// setChatMenuButton sets the default menu button of private chats to open
+// the Mini App at origin + "/tg/". The menu button has no language, so its
+// title is English. A failure is only logged: the bot works without it.
+func setChatMenuButton(ctx context.Context, bot *tgbot.Bot, origin string, log *slog.Logger) {
+	title := i18n.Locale{Lang: i18n.En}.T("todo.app.menu")
+	if err := bot.SetMenuButton(ctx, title, strings.TrimRight(origin, "/")+"/tg/"); err != nil && ctx.Err() == nil {
+		log.Warn("set menu button", "err", err)
 	}
 }

@@ -310,7 +310,7 @@ Each pair of user and group causes at most one `getChatMember` call per `TODO_WE
 - **Errors.** `{"error": {"code": "not_member", "message": "<text in the user's language>"}}`. The `message` comes from the `web.err.<code>` strings.
 - **Locale.** The server reads `Service.Prefs` of the user on each request. All display strings use the user's language, calendar and time zone.
 - **`{chat}` is the chat of the actor.** It is the user's own ID for **Mine** and for **Assigned to me**, and a group ID for **Groups**. The actor middleware of §5.5 resolves it. For an assigned item, the actor is the user's private chat, because §11 allows the assignee to act only from there (`a.ChatID == a.UserID`).
-- **Auth column.** "S" means that a session is necessary. "C" means that the CSRF guard of §3.6 applies. Every unsafe method has it. "MA" means that the endpoint accepts only a `miniapp` session.
+- **Auth column.** "S" means that a session is necessary. "C" means that the CSRF guard of §3.6 applies. Every unsafe method has it. "MA" means that the endpoint accepts only a `miniapp` session. A `browser` session that calls an "MA" endpoint gets 403 `wrong_session`.
 - **Cache.** API responses have `Cache-Control: no-store`, except the lists. The lists have `Cache-Control: private, no-cache`, a weak `ETag` and `Vary: Authorization, Cookie`. A request with an `If-None-Match` equal to the ETag gets `304`. The ETag is the first 16 hex characters of the SHA-256 of `items`, `page` and `pages`. It does not include `rendered_at`.
 
 ### 5.2 The item object
@@ -358,9 +358,9 @@ A list response is `{"items": [...], "page": 0, "pages": 3, "rendered_at": "<RFC
 | 9 | `GET /api/chats` | S | – | 200 `{"chats": [{"id", "kind", "title"}], "partial": false}`. The private chat is first. | 401 | `Web.GroupChats`, `Web.MembershipsOf`, `MemberChecker`, `Web.RecordMembership` | 1 (private only), 2 |
 | 10 | `GET /api/chats/{chat}/items?page=N` | S | – | list | the actor errors | `chatActor`, `List` | 2 |
 | 11 | `GET /api/assigned` | S | – | list, without paging, at most 200 items | 401 | `ListAssigned`, `Web.Chat` (titles) | 2 |
-| 12 | `POST /api/auth/code` | S, MA, C | `{"init_data"}` | 201 `{"code", "expires_at"}` | 401 `bad_signature`, 401 `expired`, 403 `wrong_user`, 403 `not_allowed`, 429, 503 `too_many_codes` | verify `initData`, `Web.NewLoginCode` | 2 |
+| 12 | `POST /api/auth/code` | S, MA, C | `{"init_data"}` | 201 `{"code", "expires_at"}` | 401 `bad_signature`, 401 `expired`, 403 `wrong_user`, 403 `wrong_session`, 403 `not_allowed`, 429, 503 `too_many_codes` | verify `initData`, `Web.NewLoginCode` | 2 |
 | 13 | `POST /api/auth/code/redeem` | C | `{"code"}` | 200 `{"user", "expires_at"}` and `Set-Cookie` | 400 `bad_request`, 401 `bad_code`, 403 `not_allowed`, 429 | `Web.RedeemLoginCode`, `Web.StartWebSession`, the sign-in notice | 2 |
-| 14 | `DELETE /api/auth/code` | S, MA, C | – | 204 | 401 | `Web.CancelLoginCodes` | 2 |
+| 14 | `DELETE /api/auth/code` | S, MA, C | – | 204 | 401, 403 `wrong_session` | `Web.CancelLoginCodes` | 2 |
 | 15 | `POST /api/parse` | S, C | `{"text"}` | 200 `{"text", "due_at", "due_text", "recur", "recur_text"}` | 422 `empty_text`, 422 `too_long` | `nlparse.Parser.Parse` only | 3 |
 | 16 | `GET /api/chats/{chat}/members` | S | – | 200 `{"members": [{"id", "username"}]}` | the actor errors | `chatActor`, `NamedUsers` and the allowlist | 3 |
 | 17 | `POST /api/chats/{chat}/items` | S, C | `{"text", "assignee_id"}` (`assignee_id` is optional, 0 = nobody) | 201 item | 422 `empty_text`, `too_long`, `unknown_assignee`; the actor errors | `chatActor`, `AddTodoFor` | 3 |
@@ -918,7 +918,7 @@ frame-ancestors https://web.telegram.org
 | 7 | Read of a group by a person who is not a member | A request with another group ID | The actor middleware calls `groupActor` for every route under `{chat}`, with a `getChatMember` answer at most 10 min old; the hint never grants access | Low |
 | 8 | Access after the owner removes a user from the allowlist | An old session | Allowlist check on every request; sessions deleted; pruned at start | None after the restart |
 | 9 | Access after a user leaves a group | A cached `member` row | `TODO_WEB_MEMBER_TTL` of 10 min, and 1 h of grace during a Telegram outage | Medium for at most 1 h |
-| 10 | Guess of a login code | Brute force on redeem | 40-bit code; one use; 5 min life; at most 100 live codes; 3 failures per IP (or IPv6 /64) in 1 h; 22 failures per node in 1 h | Low for a correct guess. Medium for denial of service. The window slides. Thus an attacker with about 8 IP addresses (or /64 prefixes) can keep redeem at 429 for all users of a node while the attack continues. Real sign-ins work again at most 1 h after the attack stops. |
+| 10 | Guess of a login code | Brute force on redeem | 40-bit code; one use; 5 min life; at most 100 live codes; 3 failures per IP (or IPv6 /64) in 1 h; 22 failures per node in 1 h | Low for a correct guess. Medium for denial of service. The window slides. Thus an attacker with about 8 IP addresses (or /64 prefixes) can keep redeem at 429 for all users of a node while the attack continues. Real sign-ins work again at most 1 h after the attack stops. The Mini App is not affected: its sign-in (endpoint 4) has a different limit, and sessions that exist continue to work. |
 | 11 | Phishing with a login code | The attacker asks the victim to send a code from the Mini App | The user types the code by hand, and no link signs anyone in; the warning "Never send it to another person"; no text chosen by the attacker on any screen; the sign-in notice with "Log out everywhere" | Medium. It needs a mistake by the user, and the notice shows the sign-in at once. |
 | 12 | False client IP | A false `CF-Connecting-IP` | The server reads forwarded headers only from trusted proxies; Caddy accepts only Cloudflare | Low. The IP controls only rate limits. |
 | 13 | Direct access to the port, or DNS rebinding | A local process, or a page that points a host name at 127.0.0.1 | Loopback bind only; the `Host` check | Low |
@@ -1142,6 +1142,8 @@ type Deps struct {
   - `internal/web/headers.go`: W3, then W13.
   - `web/vite.config.ts`: W2, then W6.
   - `web/src/app.tsx`: W2, then W9, then W12.
+  - `web/src/tabs/row.tsx`: W6, then W9.
+  - `web/src/actions/item.tsx`: W9, then W12.
   - `web/src/login/index.tsx`: W2 (stub), then W7, then W13.
 - **Owner checks.** An acceptance line that starts with **Owner check** needs the owner, because it needs a real device, BotFather or a real Telegram account. The developer writes the steps in the PR. The owner does the check and ticks the line.
 - Each sub-issue copies its acceptance criteria into its PR as a checklist, and `make ci` must pass. A sub-issue that touches `web/` must also pass `make web-test`.
@@ -1400,7 +1402,9 @@ The Main Mini App is necessary for the `t.me/<bot>?startapp=…` links of §3.3 
 
 ### 16.2 Cloudflare
 
-1. Add an `A` record `todo` for the IP of vps03. Set it to **Proxied**.
+Use the procedure `docs/TODO-BOT-MOVE.md` of the edge repository for the DNS records. That procedure adds the DNS records only after the health check passes. It also adds the `AAAA` record. The steps below give the settings that the web UI needs.
+
+1. Make sure that the two records for `todo` (`A` and `AAAA`) point to vps03. Both records must have the **Proxied** setting.
 2. Set **SSL/TLS** to **Full (strict)**.
 3. Turn off **Rocket Loader**, **Email Obfuscation** and **Auto Minify** for `todo.sadeq.uk`. They add scripts that the CSP blocks.
 4. Add a cache rule: bypass the cache for `todo.sadeq.uk/api/*`, `/auth/*` and `/sw.js`.
@@ -1414,6 +1418,8 @@ The Main Mini App is necessary for the `t.me/<bot>?startapp=…` links of §3.3 
 
 ### 16.4 vps03 and the bot
 
+Use the procedure `docs/TODO-BOT-MOVE.md` of the edge repository for the move to vps03. The steps below give only the parts that the web UI needs.
+
 1. Move the bot from vps00 to vps03 as a separate operations step. Stop the bot on vps00 before you start it on vps03. Two pollers with one token get 409, and two hosts cannot share one SQLite file.
 2. Run `scripts/deploy.sh` with `HOST` set to the root SSH address of vps03. The default `HOST` is vps00.
 3. Add `TODO_WEB_ADDR=127.0.0.1:8088` and `TODO_WEB_ORIGIN=https://todo.sadeq.uk` to `/etc/todo-bot/env`.
@@ -1423,5 +1429,7 @@ The Main Mini App is necessary for the `t.me/<bot>?startapp=…` links of §3.3 
 
 1. Get a new token with BotFather `/revoke`, and put it in `/etc/todo-bot/env`.
 2. Stop the service.
-3. Delete all web sessions: `sqlite3 /var/lib/todo-bot/todo.db "DELETE FROM web_sessions;"`.
+3. Delete all web sessions as the service user: `runuser -u todo-bot -- sqlite3 /var/lib/todo-bot/todo.db "DELETE FROM web_sessions;"`. Do not run `sqlite3` as root. If you do, root owns the new `-wal` and `-shm` files, and the service cannot open them.
+
+   **Note:** `sqlite3` must be installed on vps03. Before you need this step, make sure that `command -v sqlite3` gives a path. If it does not, install the `sqlite3` package. The bot has no subcommand that deletes the web sessions.
 4. Start the service.
