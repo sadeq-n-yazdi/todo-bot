@@ -25,9 +25,11 @@ beforeEach(() => {
     throw new Error("unexpected " + url);
   });
 });
-afterEach(() => {
-  cleanup();
+afterEach(async () => {
   vi.useRealTimers();
+  // Let the pending requests of the screen end before jsdom goes.
+  await new Promise((r) => setTimeout(r, 0));
+  cleanup();
   vi.unstubAllGlobals();
   delete window.Telegram;
 });
@@ -70,8 +72,9 @@ describe("Login", () => {
     await waitFor(() => expect((screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement).disabled).toBe(false));
   });
 
-  it("does not send an empty code, and sets the field left to right", () => {
+  it("does not send an empty code, and sets the field left to right", async () => {
     render(<Login onSignedIn={() => {}} />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const field = screen.getByLabelText("Code") as HTMLInputElement;
     expect(field.getAttribute("dir")).toBe("ltr");
     expect(field.autocomplete).toBe("off");
@@ -79,8 +82,9 @@ describe("Login", () => {
     expect(calls("/api/auth/code/redeem")).toHaveLength(0);
   });
 
-  it("links to the Mini App only when the page names the bot", () => {
+  it("links to the Mini App only when the page names the bot", async () => {
     render(<Login onSignedIn={() => {}} />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("Open the app in Telegram")).toBeNull();
     cleanup();
     const meta = document.createElement("meta");
@@ -88,6 +92,7 @@ describe("Login", () => {
     meta.content = "todo_bot";
     document.head.append(meta);
     render(<Login onSignedIn={() => {}} />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(screen.getByText("Open the app in Telegram").getAttribute("href")).toBe("https://t.me/todo_bot?startapp=code");
   });
 

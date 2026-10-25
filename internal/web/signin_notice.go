@@ -20,19 +20,26 @@ const noticeTimeout = 5 * time.Second
 // The text holds the country and the client IP only, never a value that the
 // browser chose. The button opens the sign-out screen of the Mini App.
 //
+// The send runs in a goroutine, so a slow Telegram does not hold the response.
 // A send error gives only a warning in the log. The session stays valid.
 func (s *Server) sendSignInNotice(r *http.Request, userID int64, loc i18n.Locale) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), noticeTimeout)
-	defer cancel()
+	// Read everything from the request now: it ends when the handler returns.
 	text := loc.T("web.tg.signin", html.EscapeString(s.clientCountry(r)), html.EscapeString(s.clientIP(r).String()))
-	_, err := s.d.Send.Send(ctx, userID, tg.OutMessage{
+	msg := tg.OutMessage{
 		Text: text,
 		Keyboard: [][]tg.Button{{{
 			Text:      loc.T("web.tg.signin_logout"),
 			WebAppURL: strings.TrimRight(s.d.Config.WebOrigin, "/") + "/tg/?a=signout",
 		}}},
-	})
-	if err != nil {
-		s.log.Warn("web: sign-in notice", "user", userID, "err", err)
 	}
+	base := context.WithoutCancel(r.Context())
+	s.codes.notices.Add(1)
+	go func() {
+		defer s.codes.notices.Done()
+		ctx, cancel := context.WithTimeout(base, noticeTimeout)
+		defer cancel()
+		if _, err := s.d.Send.Send(ctx, userID, msg); err != nil {
+			s.log.Warn("web: sign-in notice", "user", userID, "err", err)
+		}
+	}()
 }

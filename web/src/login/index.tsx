@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { ApiError, api } from "../api";
 import "../code/code.css";
 import { tr } from "../code/text";
@@ -21,9 +21,17 @@ export function Login(props: { onSignedIn: () => void }) {
 
   // The catalog is public. Load it, so that the screen has its text before a session exists.
   useEffect(() => {
+    let live = true;
     const l = getLang().slice(0, 2);
-    void loadCatalog(l === "fa" ? "fa" : "en").then(() => setReady((n) => n + 1));
+    void loadCatalog(l === "fa" ? "fa" : "en").then(() => live && setReady((n) => n + 1));
+    return () => {
+      live = false;
+    };
   }, []);
+
+  // A request that ends after the screen is gone must not set state.
+  const mounted = useRef(true);
+  useEffect(() => () => void (mounted.current = false), []);
 
   async function submit(e: SubmitEvent) {
     e.preventDefault();
@@ -33,9 +41,11 @@ export function Login(props: { onSignedIn: () => void }) {
     try {
       // The code goes only in the JSON body, never in a URL.
       await api("POST", "/api/auth/code/redeem", { code });
+      if (!mounted.current) return;
       setCode("");
       props.onSignedIn();
     } catch (err) {
+      if (!mounted.current) return;
       setError(err instanceof ApiError ? err.message : tr("web.app.error"));
       setBusy(false);
     }

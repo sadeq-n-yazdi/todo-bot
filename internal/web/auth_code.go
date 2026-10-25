@@ -3,6 +3,7 @@ package web
 import (
 	"errors"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,9 @@ type codeState struct {
 	mu   sync.Mutex
 	byIP map[string][]time.Time
 	node []time.Time
+
+	// notices counts the sign-in notices that are in flight (tests wait on it).
+	notices sync.WaitGroup
 }
 
 // initCodes sets up s.codes. New calls it.
@@ -108,6 +112,15 @@ func (c *codeState) dropOld(now time.Time) {
 		}
 		delete(c.byIP, k)
 	}
+}
+
+// failKey is the key of the failure counter of a client: the IP, and for
+// IPv6 the /64 prefix, because one client often owns a whole /64.
+func failKey(a netip.Addr) string {
+	if a.Is6() && !a.Is4In6() {
+		return netip.PrefixFrom(a, 64).Masked().Addr().String()
+	}
+	return a.String()
 }
 
 type codeResponse struct {
@@ -185,7 +198,7 @@ func (s *Server) handleRedeemCode(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, errBadRequest)
 		return
 	}
-	ip, now := s.clientIP(r).String(), s.now()
+	ip, now := failKey(s.clientIP(r)), s.now()
 	if ok, retry := s.codes.reserve(ip, now); !ok {
 		s.fail(w, r, errRateLimited.retry(retry))
 		return
@@ -223,7 +236,8 @@ func (s *Server) handleRedeemCode(w http.ResponseWriter, r *http.Request) {
 	ri.sess = &session{WebSession: ws, prefs: prefs} // for the log line: the user ID only
 	s.setCookie(w, token, ws.ExpiresAt)
 	writeJSON(w, http.StatusOK, redeemResponse{User: miniAppUser{ID: c.UserID}, ExpiresAt: ws.ExpiresAt.UTC()})
-	// A send error gives only a warning; the session stays valid.
+	// The notice goes out in the background. A send error gives only a
+	// warning; the session stays valid.
 	s.sendSignInNotice(r, c.UserID, prefs.Locale)
 }
 

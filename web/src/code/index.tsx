@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { ApiError, api } from "../api";
 import { forgetToken } from "../auth";
 import { num } from "../i18n";
@@ -29,6 +29,16 @@ function clock(ms: number): string {
 
 function message(e: unknown): string {
   return e instanceof ApiError ? e.message : tr("web.app.error");
+}
+
+/** A ref that is false after the screen is gone, so that late requests set no state. */
+function useMounted() {
+  const m = useRef(true);
+  useEffect(() => {
+    m.current = true;
+    return () => void (m.current = false);
+  }, []);
+  return m;
 }
 
 /** Mini App screens: the login code (Settings or start_param=code), and the sign-out of the sign-in notice. */
@@ -66,12 +76,13 @@ function ShowCode() {
     return () => clearInterval(id);
   }, [state]);
 
+  const mounted = useMounted();
   async function cancel() {
     try {
       await api("DELETE", "/api/auth/code");
-      setState({ phase: "canceled" });
+      if (mounted.current) setState({ phase: "canceled" });
     } catch (e) {
-      setState({ phase: "error", message: message(e) });
+      if (mounted.current) setState({ phase: "error", message: message(e) });
     }
   }
 
@@ -132,16 +143,19 @@ function SignOut() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const mounted = useMounted();
   async function confirm() {
     setBusy(true);
     setError("");
     try {
       await api("POST", "/api/auth/logout-all");
       forgetToken(); // the session of this Mini App is gone too
-      setDone(true);
+      if (mounted.current) setDone(true);
     } catch (e) {
-      setError(message(e));
-      setBusy(false);
+      if (mounted.current) {
+        setError(message(e));
+        setBusy(false);
+      }
     }
   }
 

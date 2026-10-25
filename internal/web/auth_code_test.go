@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,6 +42,7 @@ func codeBody(code string) string {
 
 func (h *harness) redeem(code string, opts ...reqOpt) *httptest.ResponseRecorder {
 	h.t.Helper()
+	defer h.srv.codes.notices.Wait() // the notice goes out in the background
 	return h.do("POST", "/api/auth/code/redeem", codeBody(code), append([]reqOpt{peer(nextIP())}, opts...)...)
 }
 
@@ -260,6 +262,7 @@ func TestConcurrentRedeem(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
+	h.srv.codes.notices.Wait()
 	wins, losses := 0, 0
 	for i := range n {
 		switch codes[i] {
@@ -372,6 +375,9 @@ func TestSignInNotice(t *testing.T) {
 	if !strings.Contains(m.Text, "DE") || !strings.Contains(m.Text, "203.0.113.50") || strings.Contains(m.Text, "Evil") {
 		t.Errorf("text %q", m.Text)
 	}
+	if !strings.Contains(m.Text, "\u2066DE\u2069") || !strings.Contains(m.Text, "\u2066203.0.113.50\u2069") {
+		t.Errorf("the Farsi text does not isolate the values: %q", m.Text)
+	}
 	want := [][]tg.Button{{{Text: "خروج از همه\u200cجا", WebAppURL: testOrigin + "/tg/?a=signout"}}}
 	if len(m.Keyboard) != 1 || len(m.Keyboard[0]) != 1 || m.Keyboard[0][0] != want[0][0] {
 		t.Errorf("keyboard %+v, want %+v", m.Keyboard, want)
@@ -481,4 +487,47 @@ func TestRedeemRouteLimit(t *testing.T) {
 		wantErr(t, h.do("POST", "/api/auth/code/redeem", `{"code":""}`, peer("10.7.7.7:1")), 400, "bad_request")
 	}
 	wantErr(t, h.do("POST", "/api/auth/code/redeem", `{"code":""}`, peer("10.7.7.7:1")), 429, "rate_limited")
+}
+
+func TestFailKeyIPv6Prefix(t *testing.T) {
+	for in, want := range map[string]string{
+		"203.0.113.9":                   "203.0.113.9",
+		"::ffff:203.0.113.9":            "::ffff:203.0.113.9",
+		"2001:db8:1:2:aaaa:bbbb:c:d":    "2001:db8:1:2::",
+		"2001:db8:1:2:ffff:ffff:ffff:1": "2001:db8:1:2::",
+	} {
+		if got := failKey(netip.MustParseAddr(in)); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
+	}
+}
+
+// Addresses of one /64 share the failure limit.
+func TestRedeemFailureLimitIPv6Prefix(t *testing.T) {
+	h := newHarness(t)
+	for i := range ipFailMax {
+		wantErr(t, h.redeem("ZZZZ-ZZZZ", peer("[2001:db8:1:2::"+strconv.Itoa(i+1)+"]:1")), 401, "bad_code")
+	}
+	wantErr(t, h.redeem("ZZZZ-ZZZZ", peer("[2001:db8:1:2:ffff::9]:1")), 429, "rate_limited")
+	wantErr(t, h.redeem("ZZZZ-ZZZZ", peer("[2001:db8:1:3::1]:1")), 401, "bad_code")
+}
+
+// A slow Telegram does not hold the response.
+func TestSignInNoticeDoesNotBlockResponse(t *testing.T) {
+	h := newHarness(t)
+	release := make(chan struct{})
+	h.send.ErrFn = func(int64, tg.OutMessage) error { <-release; return nil }
+	code := h.newCode(h.signIn(userAnn), userAnn)
+	done := make(chan *httptest.ResponseRecorder)
+	go func() { done <- h.do("POST", "/api/auth/code/redeem", codeBody(code), peer(nextIP())) }()
+	select {
+	case w := <-done:
+		if w.Code != 200 {
+			t.Errorf("%d", w.Code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the response waits for the notice")
+	}
+	close(release)
+	h.srv.codes.notices.Wait()
 }
