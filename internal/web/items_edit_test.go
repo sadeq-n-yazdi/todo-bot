@@ -190,7 +190,7 @@ func TestEditNotMember(t *testing.T) {
 	}
 }
 
-// pendingIDs gives the pending reminders of an item by kind.
+// pendingByKind gives the pending reminders of an item by kind.
 func (e *writeEnv) pendingByKind(todoID int64) map[model.ReminderKind][]model.Reminder {
 	out := map[model.ReminderKind][]model.Reminder{}
 	for _, r := range e.pending(todoID) {
@@ -384,5 +384,17 @@ func TestRulePhraseHasNoPhraseForEveryN(t *testing.T) {
 		if got := ordinal(n); got != want {
 			t.Errorf("ordinal(%d) = %q, want %q", n, got, want)
 		}
+	}
+}
+
+// Both routes need a session, and PATCH has the CSRF guard (§5.3).
+func TestEditNeedsSessionAndCSRF(t *testing.T) {
+	e := newWriteEnv(t)
+	p := itemPath(idAnn, itemBuyMilk)
+	wantErr(t, e.do("GET", p, ""), 401, "unauthenticated")
+	wantErr(t, e.do("PATCH", p, `{"text":"x"}`), 401, "unauthenticated")
+	wantErr(t, e.do("PATCH", p, `{"text":"x"}`, bearer(e.ann), delHeader("X-Todo-Request")), 403, "csrf")
+	if td := e.todo(itemBuyMilk); td.Text != "buy milk" {
+		t.Errorf("text %q", td.Text)
 	}
 }
