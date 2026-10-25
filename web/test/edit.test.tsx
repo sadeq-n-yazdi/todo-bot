@@ -409,6 +409,22 @@ describe("the web.edit strings", () => {
     for (const k of keys) expect(web.includes(`"${k}"`) || server.includes(`"${k}"`), k).toBe(true);
   });
 
+  it("calls only keys that the server registers, in en and fa", () => {
+    const registered = walk(join(root, "internal"))
+      .filter((f) => /\/messages[^/]*\.go$/.test(f))
+      .map((f) => readFileSync(f, "utf8"))
+      .join("\n");
+    const form = walk(join(root, "web", "src", "edit"))
+      .map((f) => readFileSync(f, "utf8"))
+      .join("\n");
+    const used = [...form.matchAll(/\bt\("([a-z_.]+)"/g)].map((m) => m[1]);
+    expect(used.length).toBeGreaterThan(5);
+    for (const k of used) {
+      const n = registered.split(`"${k}":`).length - 1;
+      expect(n, k).toBeGreaterThanOrEqual(2);
+    }
+  });
+
   it("uses no web.actions key for the labels of the form", () => {
     const form = readFileSync(join(root, "web", "src", "edit", "index.tsx"), "utf8");
     expect(form).not.toMatch(/"web\.actions\.(text|assignee)"/);
