@@ -99,7 +99,7 @@ The Go source in `internal/*` is the authoritative version of these contracts. W
   - `Backend` is implemented by the service.
   - `New(b, sender, clock, log)`, plus `Run`, `Tick` and `Wake`.
 - **config**: `Config`. The web (§14) adds `WebAddr`, `WebOrigin`, `WebSessionTTL`, `WebSessionMax`, `WebMemberTTL` and `WebTrustedProxies`.
-- **web** (§14). These parts of `internal/web` are frozen. `cmd/todo-bot/run.go` and the e2e tests use them.
+- **web** (§14). This is the frozen API of `internal/web`. `cmd/todo-bot/run.go` and the e2e tests use it.
   - `Deps{Svc, Web, Send, Members, Parser, Clock, Allowed, Token, BotName, Config, Assets, Log}`. `Members` is a `tg.MemberChecker`, and `Token` is the bot token for the HMAC checks.
   - `New(Deps) *Server`. `*Server` is an `http.Handler`, and it has `Serve(l)`, `Shutdown(ctx)` and `Close()`.
   - `Observe(next, svc, allowed, log) tg.Handler` wraps the handler and writes the membership hints (WEB-DESIGN §4.3).

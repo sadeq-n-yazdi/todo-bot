@@ -464,7 +464,7 @@ The web app is available only when the owner turned it on. The owner does a setu
 ### Open the web app in Telegram
 
 1. Open the chat with the bot.
-2. Tap the **Open** button. It is next to the message field, at the left of the field.
+2. Tap the **Open** button next to the message field.
 
 The web app of the bot opens in Telegram. You do not have to sign in.
 
@@ -477,7 +477,7 @@ The web app has three tabs. The **Mine** tab shows the items of your private cha
 - To see all the actions for an item, tap the item. You can then tap **Done**, **Remind later** or **Delete**. **Remind later** gives 10 minutes, 1 hour, tomorrow, or a time that you type.
 - To edit an item, use `/edit` in the bot. You cannot edit an item in the web app yet.
 
-If you complete an item that a group gave to you, the bot sends the "did" notice to that group. This is the same as in the bot.
+If a group gave you an item and you complete it from **Assigned to me**, the bot sends the "did" notice to that group.
 
 ### Settings of the web app
 

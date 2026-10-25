@@ -455,4 +455,10 @@ func TestWebEndToEnd(t *testing.T) {
 	if got := m.count(isReminder); got != 1 {
 		t.Errorf("%d reminders to alice at the end, want 1", got)
 	}
+	if got := m.count(isSignIn); got != 1 {
+		t.Errorf("%d sign-in notices at the end, want 1", got)
+	}
+	if got := m.count(isDid); got != 1 {
+		t.Errorf("%d did notices at the end, want 1", got)
+	}
 }
