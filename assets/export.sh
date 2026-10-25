@@ -35,4 +35,21 @@ magick -size 1280x640 xc:'#F6F3EC' \
   social-tag.tmp.png -geometry +606+346 -composite \
   social-preview.png
 
+# PWA icons (docs/WEB-DESIGN.md section 7.5). The art fills the square and keeps
+# all important shapes in the central 70% circle, so the same render is also the
+# maskable icon (its safe zone is the central 80% circle). They go to assets/ and
+# to web/public/icons/, where the web build picks them up. The web icons use 128
+# colors with no alpha, to stay inside the size budget of section 8.5.
+for spec in icon-192:192 icon-maskable-512:512 apple-touch-icon:180; do
+  name=${spec%%:*}
+  size=${spec##*:}
+  inkscape icon.svg --export-type=png --export-filename="$name.tmp.png" -w "$size" -h "$size"
+  magick "$name.tmp.png" -alpha off -strip -dither FloydSteinberg -colors 128 \
+    -define png:compression-level=9 "PNG8:$name.png"
+  rm -f "$name.tmp.png"
+done
+mkdir -p ../web/public/icons
+cp icon-192.png icon-maskable-512.png apple-touch-icon.png ../web/public/icons/
+cp icon-maskable-512.png ../web/public/icons/icon-512.png
+
 rm -f round.tmp.png social-icon.tmp.png social-name.tmp.png social-tag.tmp.png

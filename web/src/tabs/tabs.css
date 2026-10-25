@@ -1,0 +1,151 @@
+/* Styles of the tabs. Same rules as styles.css: tokens only, logical
+   properties only, no inline styles. */
+
+.tabs {
+  display: flex;
+  flex-direction: column;
+}
+
+.tablist {
+  display: flex;
+  gap: 4px;
+  padding-inline: 16px;
+  background: var(--bg2);
+  border-block-end: 1px solid var(--hint);
+}
+
+.tab {
+  flex: 1;
+  padding: 10px 8px;
+  border: 0;
+  border-block-end: 3px solid transparent;
+  background: transparent;
+  color: var(--hint);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab.on {
+  color: var(--fg);
+  font-weight: 600;
+  border-block-end-color: var(--accent);
+}
+
+.panel {
+  padding: 8px 16px 24px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-block: 8px;
+}
+
+.chip {
+  padding: 6px 14px;
+  border: 1px solid var(--hint);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  gap: var(--gap);
+  padding-block: 10px;
+  border-block-end: 1px solid var(--bg2);
+}
+
+.row-num {
+  min-inline-size: 2em;
+  color: var(--hint);
+  text-align: start;
+}
+
+.row-body {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.row-text {
+  overflow-wrap: anywhere;
+}
+
+.row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--hint);
+  font-size: 0.875em;
+}
+
+.row-meta .overdue {
+  color: var(--danger);
+}
+
+.row-meta .arrow {
+  display: inline-block;
+}
+
+.empty {
+  padding-block: 32px;
+  color: var(--hint);
+  text-align: center;
+}
+
+.banner {
+  margin-block: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--bg2);
+}
+
+.banner.error {
+  color: var(--danger);
+}
+
+.tabs > .banner {
+  margin-inline: 16px;
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--link);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.more {
+  display: block;
+  margin-block: 16px;
+  margin-inline: auto;
+  padding: 8px 20px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.more:disabled {
+  opacity: 0.6;
+}
