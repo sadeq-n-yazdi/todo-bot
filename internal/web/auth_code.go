@@ -21,9 +21,9 @@ const (
 
 	// Failed redeems: at most ipFailMax in ipFailWindow for one IP, and at
 	// most nodeFailMax in nodeFailWindow for all IPs of this node.
-	ipFailMax      = 5
-	ipFailWindow   = 10 * time.Minute
-	nodeFailMax    = 60
+	ipFailMax      = 3
+	ipFailWindow   = time.Hour
+	nodeFailMax    = 22
 	nodeFailWindow = time.Hour
 
 	// maxFailKeys is the number of IPs that the failure counter keeps.
@@ -114,8 +114,10 @@ func (c *codeState) dropOld(now time.Time) {
 	}
 }
 
-// failKey is the key of the failure counter of a client: the IP, and for
-// IPv6 the /64 prefix, because one client often owns a whole /64.
+// failKey is the key of a client in the failure counter and in the limits
+// per IP (ipLimit): the IP, and for IPv6 the /64 prefix, because one client
+// often owns a whole /64. IPv4 and IPv4-mapped addresses keep the full
+// address.
 func failKey(a netip.Addr) string {
 	if a.Is6() && !a.Is4In6() {
 		return netip.PrefixFrom(a, 64).Masked().Addr().String()

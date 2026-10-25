@@ -138,11 +138,12 @@ The Login Widget is weak in an installed PWA on iOS. The PWA there has its own s
 **Attempt limits.** A wrong code points to no row, so the server cannot count the failures of one code. These limits apply instead:
 
 - Each code works one time, for 5 minutes.
-- An IP gets at most 5 failed redeems in 10 minutes.
-- A node accepts at most 60 failed redeems in 1 hour, for all IPs together. Above that limit, redeem answers 429 to all clients until the hour ends.
+- An IP gets at most 3 failed redeems in 1 hour. For IPv6, this limit applies to the /64 prefix, because one client often has a full /64. An IPv4 address or an IPv4-mapped address has its own limit.
+- A node accepts at most 22 failed redeems in 1 hour, for all IPs together. Above that limit, redeem answers 429 to all clients.
+- The window of the two limits slides. Each failure counts for 1 hour after it occurs.
 - At most 100 codes are live, and at most 1 for each user.
 
-With 100 live codes and 40 bits, the chance of one guess is less than 1 in 10,000,000,000. The node limit permits at most 60 guesses in 1 hour.
+With 100 live codes and 40 bits, the chance of one guess is less than 1 in 10,000,000,000. The node limit permits at most 22 guesses in 1 hour, and thus at most 528 guesses in 1 day. In 1 day, the chance of a correct guess is less than 1 in 20,000,000.
 
 #### 3.3.1 The sign-in notice
 
@@ -879,14 +880,14 @@ form-action 'self'; frame-ancestors https://web.telegram.org
 
 ### 11.3 Limits and input rules
 
-- **Rate limits.** Each node keeps token buckets in memory (§10). The map holds at most 10,000 keys, and the server removes the oldest keys first.
+- **Rate limits.** Each node keeps token buckets in memory (§10). The map holds at most 10,000 keys, and the server removes the oldest keys first. A limit per IP uses the /64 prefix as the key for IPv6. It uses the full address for IPv4 and for IPv4-mapped addresses.
 
   | Endpoint | Limit |
   |---|---|
   | `GET /readyz` | 60 per minute per IP |
   | `POST /api/auth/miniapp` | 10 per minute per IP |
   | `POST /api/auth/code` | 5 per 10 minutes per user |
-  | `POST /api/auth/code/redeem` | 10 per minute per IP. Failures: 5 per 10 minutes per IP, and 60 per hour per node. |
+  | `POST /api/auth/code/redeem` | 10 per minute per IP. Failures: 3 per hour per IP, and 22 per hour per node. |
   | `GET /auth/telegram` | 10 per minute per IP |
   | all other `/api/*` with a session | 300 per minute per user |
 
@@ -911,7 +912,7 @@ form-action 'self'; frame-ancestors https://web.telegram.org
 | 7 | Read of a group by a person who is not a member | A request with another group ID | The actor middleware calls `groupActor` for every route under `{chat}`, with a `getChatMember` answer at most 10 min old; the hint never grants access | Low |
 | 8 | Access after the owner removes a user from the allowlist | An old session | Allowlist check on every request; sessions deleted; pruned at start | None after the restart |
 | 9 | Access after a user leaves a group | A cached `member` row | `TODO_WEB_MEMBER_TTL` of 10 min, and 1 h of grace during a Telegram outage | Medium for at most 1 h |
-| 10 | Guess of a login code | Brute force on redeem | 40-bit code; one use; 5 min life; at most 100 live codes; 5 failures per IP in 10 min; 60 failures per node in 1 h | Low. During an attack, the node limit can stop real sign-ins for at most 1 h. |
+| 10 | Guess of a login code | Brute force on redeem | 40-bit code; one use; 5 min life; at most 100 live codes; 3 failures per IP (or IPv6 /64) in 1 h; 22 failures per node in 1 h | Low for a correct guess. Medium for denial of service. The window slides. Thus an attacker with about 8 IP addresses (or /64 prefixes) can keep redeem at 429 for all users of a node while the attack continues. Real sign-ins work again at most 1 h after the attack stops. |
 | 11 | Phishing with a login code | The attacker asks the victim to send a code from the Mini App | The user types the code by hand, and no link signs anyone in; the warning "Never send it to another person"; no text chosen by the attacker on any screen; the sign-in notice with "Log out everywhere" | Medium. It needs a mistake by the user, and the notice shows the sign-in at once. |
 | 12 | False client IP | A false `CF-Connecting-IP` | The server reads forwarded headers only from trusted proxies; Caddy accepts only Cloudflare | Low. The IP controls only rate limits. |
 | 13 | Direct access to the port, or DNS rebinding | A local process, or a page that points a host name at 127.0.0.1 | Loopback bind only; the `Host` check | Low |
