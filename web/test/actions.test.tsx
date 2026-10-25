@@ -49,14 +49,9 @@ beforeEach(() => {
   closeSheet();
 });
 
-// Preact runs the effect cleanups of unmounted components after the next
-// frame (at most 35 ms). Wait for them, so that none runs after the test.
-const settle = () => new Promise((r) => setTimeout(r, 60));
-
-afterEach(async () => {
+afterEach(() => {
   cleanup();
   closeSheet();
-  await settle();
   vi.unstubAllGlobals();
   delete (window as unknown as { Telegram?: unknown }).Telegram;
 });
@@ -353,6 +348,38 @@ describe("the item sheet", () => {
     openItem(item({ chat_id: GROUP }), GROUP);
     fireEvent.click(await screen.findByRole("button", { name: "web.actions.done" }));
     expect((await screen.findByRole("alert")).textContent).toBe("You are not in this group.");
+  });
+
+  it("sends one Done request for two fast taps", async () => {
+    let finish: (r: Response) => void = () => {};
+    routes[`POST ${base}/done`] = () => new Promise<Response>((r) => (finish = r));
+    renderActions();
+    openItem(item(), user.id);
+    const done = await screen.findByRole("button", { name: "web.actions.done" });
+    fireEvent.click(done);
+    fireEvent.click(done);
+    await waitFor(() => expect((done as HTMLButtonElement).disabled).toBe(true));
+    expect(screen.getByRole("button", { name: "web.actions.delete" }).hasAttribute("disabled")).toBe(true);
+    expect(sent(`POST ${base}/done`)).toHaveLength(1);
+    finish(json({ item: item(), still_open: false }));
+    await screen.findByText("web.actions.done_ok");
+  });
+
+  it("tells the parent of the change when the sheet closed during the request", async () => {
+    let finish: (r: Response) => void = () => {};
+    routes[`POST ${base}/done`] = () => new Promise<Response>((r) => (finish = r));
+    addRoutes();
+    const { onChanged } = renderActions();
+    openItem(item(), user.id);
+    fireEvent.click(await screen.findByRole("button", { name: "web.actions.done" }));
+    await waitFor(() => expect(sent(`POST ${base}/done`)).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "web.actions.close" }));
+    // The user opens the add sheet meanwhile. The late answer must not close it.
+    openAdd();
+    await screen.findByRole("option", { name: "@wife" });
+    finish(json({ item: item(), still_open: false }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("add-sheet")).toBeTruthy();
   });
 
   it("shows a local text for a network error", async () => {

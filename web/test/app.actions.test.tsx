@@ -64,12 +64,9 @@ beforeEach(() => {
   document.documentElement.dir = "ltr";
 });
 
-const settle = () => new Promise((r) => setTimeout(r, 60));
-
-afterEach(async () => {
+afterEach(() => {
   cleanup();
   closeSheet();
-  await settle();
   vi.unstubAllGlobals();
   delete (window as unknown as { Telegram?: unknown }).Telegram;
 });
@@ -151,6 +148,23 @@ describe("the settings menu", () => {
   });
 });
 
+describe("a start_param=code launch", () => {
+  it("shows the code screen, and the BackButton leaves it for the tabs", async () => {
+    const clicks = new Set<() => void>();
+    const back = { show: vi.fn(), hide: vi.fn(), onClick: (f: () => void) => clicks.add(f), offClick: (f: () => void) => clicks.delete(f) };
+    (window as unknown as { Telegram: unknown }).Telegram = { WebApp: { initData: "query_id=Q&hash=h", BackButton: back } };
+    routes["POST /api/auth/miniapp"] = () => json({ token: "tb1_tok", expires_at: "x", user: { id: base.id }, start: "code" });
+    routes["GET /api/me"] = () => json(me({}, "miniapp"));
+    routes["POST /api/auth/code"] = () => json({ code: "WXYZ-5678", expires_at: new Date(Date.now() + 600000).toISOString() }, 201);
+    render(<App mode="miniapp" initData="query_id=Q&hash=h" />);
+    await screen.findByText("WXYZ-5678");
+    await waitFor(() => expect(clicks.size).toBe(1));
+    clicks.forEach((f) => f());
+    await screen.findByText("buy milk");
+    expect(screen.queryByTestId("code-screen")).toBeNull();
+  });
+});
+
 describe("the Add button", () => {
   it("adds an item and loads the list again", async () => {
     routes["GET /api/chats"] = () => json({ chats: [{ id: base.id, kind: "private", title: "" }] });
@@ -203,6 +217,8 @@ describe("logout", () => {
     routes["POST /api/auth/logout"] = () => new Response(null, { status: 204 });
     await start("miniapp");
     expect(sessionStorage.getItem("todo.token")).toBe("tb1_tok");
+    // The Mini App has no offline start, so it stores no user.
+    expect(localStorage.getItem("todo.me")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "web.actions.settings" }));
     fireEvent.click(screen.getByRole("button", { name: "web.actions.logout" }));
     expect((await screen.findByRole("status")).textContent).toBe("web.actions.logged_out");
@@ -214,8 +230,9 @@ describe("logout", () => {
     down = true;
     fireEvent.click(screen.getByRole("button", { name: "web.actions.settings" }));
     fireEvent.click(screen.getByRole("button", { name: "web.actions.logout" }));
-    expect((await screen.findByRole("alert")).textContent).toBe("web.actions.offline");
+    expect((await screen.findByRole("alert")).textContent).toBe("web.actions.logout_offline");
     expect(localStorage.getItem("todo.me")).not.toBeNull();
+    expect(screen.getByText("buy milk")).toBeTruthy();
   });
 });
 
