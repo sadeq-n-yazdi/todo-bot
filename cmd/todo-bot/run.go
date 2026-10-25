@@ -284,6 +284,13 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 		return err
 	}
 
+	// With the web UI on, the observer notes which allowlisted users write in
+	// which groups. It wraps the handler and never grants access (§4.3).
+	handle := h.Handle
+	if webSrv != nil {
+		handle = web.Observe(handle, svc, cfg.AllowedUsers, log)
+	}
+
 	// lead runs while this node holds the poller lease. The lease loop may call
 	// it again for the same epoch, so every step is safe to repeat.
 	lead := func(lctx context.Context, epoch int64) {
@@ -295,7 +302,7 @@ func runBot(ctx context.Context, env func(string) string, stderr io.Writer) erro
 			return
 		}
 		setCommands(lctx, bot, log)
-		if err := bot.Poller().Run(lctx, h.Handle); err != nil && lctx.Err() == nil {
+		if err := bot.Poller().Run(lctx, handle); err != nil && lctx.Err() == nil {
 			log.Error("poller stopped", "err", err)
 		}
 	}

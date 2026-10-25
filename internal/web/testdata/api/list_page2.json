@@ -1,0 +1,37 @@
+{
+  "items": [
+    {
+      "id": 11,
+      "chat_id": 42,
+      "chat_title": "",
+      "num": 11,
+      "text": "item 11",
+      "due_at": null,
+      "due_text": null,
+      "due_full": null,
+      "overdue": false,
+      "recur": "",
+      "recur_text": "",
+      "assignee": null,
+      "created_by": 42
+    },
+    {
+      "id": 12,
+      "chat_id": 42,
+      "chat_title": "",
+      "num": 12,
+      "text": "item 12",
+      "due_at": null,
+      "due_text": null,
+      "due_full": null,
+      "overdue": false,
+      "recur": "",
+      "recur_text": "",
+      "assignee": null,
+      "created_by": 42
+    }
+  ],
+  "page": 1,
+  "pages": 2,
+  "rendered_at": "2026-03-01T12:00:00Z"
+}

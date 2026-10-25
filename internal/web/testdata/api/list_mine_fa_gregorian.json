@@ -1,0 +1,103 @@
+{
+  "items": [
+    {
+      "id": 3,
+      "chat_id": 42,
+      "chat_title": "",
+      "num": 3,
+      "text": "water the plants",
+      "due_at": "2026-02-22T14:30:00Z",
+      "due_text": "یکشنبه ۲۲ فوریه ۱۸:۰۰",
+      "due_full": "یکشنبه ۲۲ فوریه ۲۰۲۶ ۱۸:۰۰",
+      "overdue": true,
+      "recur": "weekly sun 18:00",
+      "recur_text": "هر یکشنبه",
+      "assignee": null,
+      "created_by": 42
+    },
+    {
+      "id": 1,
+      "chat_id": 42,
+      "chat_title": "",
+      "num": 1,
+      "text": "buy milk",
+      "due_at": "2026-03-02T14:30:00Z",
+      "due_text": "فردا ۱۸:۰۰",
+      "due_full": "دوشنبه ۲ مارس ۲۰۲۶ ۱۸:۰۰",
+      "overdue": false,
+      "recur": "",
+      "recur_text": "",
+      "assignee": null,
+      "created_by": 42
+    },
+    {
+      "id": 5,
+      "chat_id": 42,
+      "chat_title": "",
+      "num": 5,
+      "text": "send the report",
+      "due_at": "2026-03-04T09:00:00Z",
+      "due_text": "چهارشنبه ۴ مارس ۱۲:۳۰",
+      "due_full": "چهارشنبه ۴ مارس ۲۰۲۶ ۱۲:۳۰",
+      "overdue": false,
+      "recur": "",
+      "recur_text": "",
+      "assignee": {
+        "id": 43,
+        "username": "bob"
+      },
+      "created_by": 42
+    },
+    {
+      "id": 4,
+      "chat_id": 42,
+      "chat_title": "",
+      "num": 4,
+      "text": "renew passport",
+      "due_at": "2027-05-10T06:00:00Z",
+      "due_text": "۱۰ مه ۲۰۲۷ ۰۹:۳۰",
+      "due_full": "دوشنبه ۱۰ مه ۲۰۲۷ ۰۹:۳۰",
+      "overdue": false,
+      "recur": "",
+      "recur_text": "",
+      "assignee": null,
+      "created_by": 42
+    },
+    {
+      "id": 2,
+      "chat_id": 42,
+      "chat_title": "",
+      "num": 2,
+      "text": "call mom",
+      "due_at": null,
+      "due_text": null,
+      "due_full": null,
+      "overdue": false,
+      "recur": "",
+      "recur_text": "",
+      "assignee": null,
+      "created_by": 42
+    },
+    {
+      "id": 6,
+      "chat_id": 42,
+      "chat_title": "",
+      "num": 6,
+      "text": "ask the neighbour",
+      "due_at": null,
+      "due_text": null,
+      "due_full": null,
+      "overdue": false,
+      "recur": "",
+      "recur_text": "",
+      "assignee": {
+        "id": 777,
+        "username": ""
+      },
+      "created_by": 42
+    }
+  ],
+  "page": 0,
+  "pages": 1,
+  "rendered_at": "2026-03-01T12:00:00Z"
+}
