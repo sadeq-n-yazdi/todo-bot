@@ -105,6 +105,14 @@ type Store interface {
 	// MarkReminderSent is the conditional pending->sent transition (sets
 	// msg_id, sent_at, clears the claim). ok=false if it was no longer pending.
 	MarkReminderSent(ctx context.Context, id int64, msgID int, at time.Time) (ok bool, err error)
+	// MarkReminderAcked records that the user pressed Done on the sent
+	// reminder id, at at. ok=true only for the first call on a sent
+	// reminder; it is false if the reminder is missing, not sent, or
+	// already acked. Of several concurrent callers, exactly one gets
+	// ok=true. service.AckReminder uses it for repeating items (#157).
+	// It changes no field of model.Reminder (SQL providers keep the mark
+	// in claim_until, which is unused once a row is sent).
+	MarkReminderAcked(ctx context.Context, id int64, at time.Time) (ok bool, err error)
 	// NextReminderAt returns the earliest time a pending reminder becomes
 	// claimable: MIN(max(fire_at, claim_until)). ok=false if none.
 	NextReminderAt(ctx context.Context) (t time.Time, ok bool, err error)

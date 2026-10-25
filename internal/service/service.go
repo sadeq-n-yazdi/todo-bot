@@ -96,7 +96,9 @@ type Service interface {
 	// Snooze creates a 'snooze' reminder; arg is ui.Snooze10m / Snooze1h / SnoozeTomorrow.
 	Snooze(ctx context.Context, a Actor, reminderID int64, arg string) (model.Reminder, error)
 	// AckReminder handles Done on a reminder message (see ARCHITECTURE §5).
-	AckReminder(ctx context.Context, a Actor, reminderID int64) (model.Todo, error)
+	// changed is true only if this call changed something: like Complete,
+	// the "did" notice is sent only then (#157).
+	AckReminder(ctx context.Context, a Actor, reminderID int64) (t model.Todo, changed bool, err error)
 	// SetTZ stores the user's TZ, re-anchors their recurring todos and
 	// recomputes digests they set.
 	SetTZ(ctx context.Context, userID int64, tz string) error

@@ -251,16 +251,7 @@ func (s *Svc) Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, 
 		if t.Status != model.TodoOpen {
 			return nil
 		}
-		// Write only if the row is still as read: open and, if it
-		// repeats, with the same due date.
-		read := t.DueAt
-		write := func(t model.Todo) error {
-			ok, err := tx.UpdateOpenTodo(ctx, t, read)
-			if err == nil && !ok {
-				err = errNotChanged
-			}
-			return err
-		}
+		write := openWrite(ctx, tx, t.DueAt)
 		if t.Recur != "" {
 			if t.DueAt != nil && t.DueAt.After(now.Add(completeAheadWindow)) {
 				return nil
@@ -299,15 +290,25 @@ func (s *Svc) Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, 
 	return out, changed, nil
 }
 
-// errNotChanged rolls back a Complete whose conditional write lost to
-// another call.
+// errNotChanged rolls back a Complete or AckReminder whose conditional
+// write lost to another call.
 var errNotChanged = errors.New("service: todo changed meanwhile")
 
-func markDone(ctx context.Context, tx store.Store, t model.Todo, now time.Time) (model.Todo, error) {
-	return markDoneWith(ctx, tx, t, now, func(t model.Todo) error { return tx.UpdateTodo(ctx, t) })
+// openWrite returns the conditional write of Complete and AckReminder: it
+// writes the todo only if the row is still as read, that is open and, if
+// it repeats, with the due date read. Otherwise it returns errNotChanged.
+func openWrite(ctx context.Context, tx store.Store, read *time.Time) func(model.Todo) error {
+	return func(t model.Todo) error {
+		ok, err := tx.UpdateOpenTodo(ctx, t, read)
+		if err == nil && !ok {
+			err = errNotChanged
+		}
+		return err
+	}
 }
 
-// markDoneWith is markDone with write as the write of the todo row.
+// markDoneWith marks t done, with write as the write of the todo row, and
+// cancels its pending reminders.
 func markDoneWith(ctx context.Context, tx store.Store, t model.Todo, now time.Time, write func(model.Todo) error) (model.Todo, error) {
 	t.Status, t.DoneAt, t.UpdatedAt = model.TodoDone, &now, now
 	if err := write(t); err != nil {
@@ -439,13 +440,22 @@ func (s *Svc) Snooze(ctx context.Context, a Actor, reminderID int64, arg string)
 // is completed. A recurring item is left alone, because the scheduler
 // already advanced it when the reminder fired; advancing here too would skip
 // the next occurrence. Only leftover snoozes of the occurrence are dropped.
-func (s *Svc) AckReminder(ctx context.Context, a Actor, reminderID int64) (model.Todo, error) {
+//
+// changed is true only if this call changed something, so the caller sends
+// the "did" notice one time, also when several presses race on several
+// nodes (#157). A one-off item is written with store.UpdateOpenTodo, as in
+// Complete. For a recurring item the winner is the first call that marks
+// the sent reminder acked (store.MarkReminderAcked); only the winner drops
+// the snoozes. A press on a reminder that is not marked sent yet changes
+// nothing on a recurring item.
+func (s *Svc) AckReminder(ctx context.Context, a Actor, reminderID int64) (model.Todo, bool, error) {
 	now := s.clk.Now().UTC()
 	r, err := s.st.GetReminder(ctx, reminderID)
 	if err != nil {
-		return model.Todo{}, err
+		return model.Todo{}, false, err
 	}
 	var out model.Todo
+	changed := false
 	err = s.st.WithTx(ctx, func(tx store.Store) error {
 		t, err := ownedTodo(ctx, tx, a, r.TodoID)
 		if err != nil {
@@ -456,14 +466,27 @@ func (s *Svc) AckReminder(ctx context.Context, a Actor, reminderID int64) (model
 			return nil
 		}
 		if t.Recur != "" {
+			ok, err := tx.MarkReminderAcked(ctx, r.ID, now)
+			if err != nil || !ok {
+				return err
+			}
+			changed = true
 			return tx.CancelPending(ctx, t.ID, model.ReminderSnooze)
 		}
-		out, err = markDone(ctx, tx, t, now)
+		out, err = markDoneWith(ctx, tx, t, now, openWrite(ctx, tx, t.DueAt))
+		changed = err == nil
 		return err
 	})
-	if err != nil {
-		return model.Todo{}, err
+	if errors.Is(err, errNotChanged) {
+		// Another call changed the row first; nothing was written here.
+		out, err = ownedTodo(ctx, s.st, a, r.TodoID)
+		return out, false, err
 	}
-	s.wake()
-	return out, nil
+	if err != nil {
+		return model.Todo{}, false, err
+	}
+	if changed {
+		s.wake()
+	}
+	return out, changed, nil
 }

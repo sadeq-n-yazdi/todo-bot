@@ -286,20 +286,21 @@ func (f *fakeSvc12) Snooze(_ context.Context, a service.Actor, id int64, arg str
 	return model.Reminder{ID: id + 1000, TodoID: r.TodoID, ChatID: r.ChatID, FireAt: f.clk.Now().Add(d), Kind: model.ReminderSnooze, State: model.ReminderPending}, nil
 }
 
-func (f *fakeSvc12) AckReminder(_ context.Context, a service.Actor, id int64) (model.Todo, error) {
+func (f *fakeSvc12) AckReminder(_ context.Context, a service.Actor, id int64) (model.Todo, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rec("AckReminder")
 	r, ok := f.reminders[id]
 	if !ok {
-		return model.Todo{}, service.ErrNotFound
+		return model.Todo{}, false, service.ErrNotFound
 	}
 	if r.ChatID != a.ChatID {
-		return model.Todo{}, service.ErrForeignChat
+		return model.Todo{}, false, service.ErrForeignChat
 	}
 	t := f.find(r.TodoID)
+	changed := t.Status == model.TodoOpen
 	t.Status = model.TodoDone
-	return *t, nil
+	return *t, changed, nil
 }
 
 func (f *fakeSvc12) SetTZ(_ context.Context, userID int64, tz string) error {

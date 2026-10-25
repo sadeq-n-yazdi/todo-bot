@@ -310,7 +310,7 @@ func TestAuthorisationEitherOr(t *testing.T) {
 			return err
 		}},
 		{"AckReminder", func(e *env, a Actor, _ model.Todo, rem model.Reminder) error {
-			_, err := e.svc.AckReminder(ctx, a, rem.ID)
+			_, _, err := e.svc.AckReminder(ctx, a, rem.ID)
 			return err
 		}},
 		{"Complete", func(e *env, a Actor, td model.Todo, _ model.Reminder) error {
@@ -391,7 +391,7 @@ func TestAssigneeAckCompletesAndCreatorSeesIt(t *testing.T) {
 	td := e.assigned(at(15, 0), "")
 	e.clk.Set(at(15, 1).UTC())
 	rs := e.claim(e.svc, e.clk.Now())
-	done, err := e.svc.AckReminder(ctx, bob, rs[0].ID)
+	done, _, err := e.svc.AckReminder(ctx, bob, rs[0].ID)
 	e.must(err)
 	if done.Status != model.TodoDone || done.ID != td.ID || done.ChatID != groupChat || done.AssigneeName != "bob_x" {
 		t.Fatalf("done = %+v", done)
@@ -461,7 +461,7 @@ func TestAssigneeAckOnRecurringLeavesItAlone(t *testing.T) {
 	e.clk.Set(at(18, 1).UTC())
 	rs := e.claim(e.svc, e.clk.Now())
 	e.must(e.svc.ReminderSent(ctx, rs[0].ID, 1, e.clk.Now()))
-	got, err := e.svc.AckReminder(ctx, bob, rs[0].ID)
+	got, _, err := e.svc.AckReminder(ctx, bob, rs[0].ID)
 	e.must(err)
 	if got.Status != model.TodoOpen || got.AssigneeID != 8 || got.ID != td.ID {
 		t.Fatalf("ack = %+v", got)

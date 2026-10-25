@@ -117,9 +117,8 @@ func (f *fakeAssign) Complete(_ context.Context, a service.Actor, id int64) (mod
 	t.Status = model.TodoDone
 	return *t, changed, nil
 }
-func (f *fakeAssign) AckReminder(_ context.Context, a service.Actor, rid int64) (model.Todo, error) {
-	t, _, err := f.Complete(context.Background(), a, f.rems[rid])
-	return t, err
+func (f *fakeAssign) AckReminder(_ context.Context, a service.Actor, rid int64) (model.Todo, bool, error) {
+	return f.Complete(context.Background(), a, f.rems[rid])
 }
 
 const (
