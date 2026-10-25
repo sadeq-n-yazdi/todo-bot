@@ -146,30 +146,50 @@ func (s *Svc) addTodoTx(ctx context.Context, tx store.Store, a Actor, assigneeID
 		ChatID: a.ChatID, Text: strings.TrimSpace(r.Text), Status: model.TodoOpen,
 		TZ: u.TZ, CreatedBy: a.UserID, CreatedAt: now, UpdatedAt: now,
 	}
-	if r.Due != nil {
-		d := r.Due.UTC()
-		t.DueAt = &d
-	}
-	if r.Rule != nil {
-		t.Recur = r.Rule.String()
-		if t.DueAt == nil || !t.DueAt.After(now) {
-			next := r.Rule.Next(now, s.locOrDefault(u.TZ))
-			if next.IsZero() {
-				return model.Todo{}, fmt.Errorf("service: recurrence %q has no next occurrence", t.Recur)
-			}
-			next = next.UTC()
-			t.DueAt = &next
-		}
+	var remindAt *time.Time
+	t.DueAt, t.Recur, remindAt, err = scheduleOf(r, s.locOrDefault(u.TZ), now)
+	if err != nil {
+		return model.Todo{}, err
 	}
 	if err := tx.InsertTodo(ctx, &t); err != nil {
 		return model.Todo{}, err
 	}
-	if t.DueAt != nil && t.DueAt.After(now) && (r.Rule != nil || !dateOnlySentinel(r, s.locOrDefault(u.TZ), now)) {
-		if err := tx.InsertReminder(ctx, newReminder(t, *t.DueAt, model.ReminderDue, now)); err != nil {
+	if remindAt != nil {
+		if err := tx.InsertReminder(ctx, newReminder(t, *remindAt, model.ReminderDue, now)); err != nil {
 			return model.Todo{}, err
 		}
 	}
 	return t, nil
+}
+
+// scheduleOf turns a parsed When into the schedule of an item, for an
+// actor in zone loc at now. Add and edit both use it, so they always agree.
+//
+// due is the item's due time in UTC, or nil. rule is the rule text, or "".
+// A rule whose parsed due time is missing or not in the future starts at
+// its next occurrence after now. remindAt is the time of the 'due'
+// reminder, or nil when there must be none: no due time, a due time that
+// is not in the future, or the parser's date-only sentinel.
+func scheduleOf(r nlparse.Result, loc *time.Location, now time.Time) (due *time.Time, rule string, remindAt *time.Time, err error) {
+	if r.Due != nil {
+		d := r.Due.UTC()
+		due = &d
+	}
+	if r.Rule != nil {
+		rule = r.Rule.String()
+		if due == nil || !due.After(now) {
+			next := r.Rule.Next(now, loc)
+			if next.IsZero() {
+				return nil, "", nil, fmt.Errorf("service: recurrence %q has no next occurrence", rule)
+			}
+			next = next.UTC()
+			due = &next
+		}
+	}
+	if due != nil && due.After(now) && (r.Rule != nil || !dateOnlySentinel(r, loc, now)) {
+		remindAt = due
+	}
+	return due, rule, remindAt, nil
 }
 
 // List implements Service: open todos, ui.PageSize per page. An out-of-range
