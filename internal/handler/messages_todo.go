@@ -36,6 +36,10 @@ func init() {
 		"todo.assign.unknown":       "@%s hasn't started the bot yet — ask them to open @%s and press Start.",
 		"todo.assign.did":           "✅ %s did: %s",
 		"todo.assign.unknown.nobot": "@%s hasn't started the bot yet — ask them to open the bot and press Start.",
+		// The "Open app" button (#131) and the title of the menu button.
+		"todo.app.open": "📱 Open the app",
+		"todo.app.hint": "See and change your lists in the app.",
+		"todo.app.menu": "Open",
 	})
 	i18n.Register(i18n.Fa, map[string]string{
 		"todo.help": "<b>ربات کارها</b>\n" +
@@ -70,5 +74,8 @@ func init() {
 		"todo.assign.unknown":       "@%s هنوز ربات را شروع نکرده است — از او بخواهید @%s را باز کند و Start را بزند.",
 		"todo.assign.did":           "✅ %s انجام داد: %s",
 		"todo.assign.unknown.nobot": "@%s هنوز ربات را شروع نکرده است — از او بخواهید ربات را باز کند و Start را بزند.",
+		"todo.app.open":             "📱 باز کردن برنامه",
+		"todo.app.hint":             "فهرست\u200cهای خود را در برنامه ببینید و تغییر دهید.",
+		"todo.app.menu":             "باز کردن",
 	})
 }
