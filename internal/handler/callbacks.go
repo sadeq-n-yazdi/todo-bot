@@ -109,13 +109,15 @@ func (h *Handler) actionCallback(ctx context.Context, cb *tg.Callback, r req, ac
 	// that the item belongs to the callback's chat (Actor.ChatID).
 	switch act.Kind {
 	case ui.ActDone:
-		done, err := h.Svc.Complete(ctx, r.Actor, act.ID)
+		done, changed, err := h.Svc.Complete(ctx, r.Actor, act.ID)
 		if isGone(err) {
 			return gone, nil
 		} else if err != nil {
 			return "", err
 		}
-		h.notifyDid(ctx, r, done)
+		if changed { // one notice, also when two presses race (#147)
+			h.notifyDid(ctx, r, done)
+		}
 		return "", h.showList(ctx, cb, r, 0, lc.T("settings.cb.done", echo(done.Text)))
 	case ui.ActDeleteConfirm:
 		err := h.Svc.Delete(ctx, r.Actor, act.ID)

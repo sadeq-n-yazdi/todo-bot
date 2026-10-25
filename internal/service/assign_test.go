@@ -248,7 +248,7 @@ func TestListAssigned(t *testing.T) {
 	e.addFor(bob, 8, "own chat", at(13, 0), "") // no assignee stored
 	e.addFor(aliceG, 0, "not bob's", nil, "")
 	done := e.addFor(aliceG, 8, "done one", at(14, 0), "")
-	_, err := e.svc.Complete(ctx, aliceG, done.ID)
+	_, _, err := e.svc.Complete(ctx, aliceG, done.ID)
 	e.must(err)
 
 	got, err := e.svc.ListAssigned(ctx, 8)
@@ -314,7 +314,7 @@ func TestAuthorisationEitherOr(t *testing.T) {
 			return err
 		}},
 		{"Complete", func(e *env, a Actor, td model.Todo, _ model.Reminder) error {
-			_, err := e.svc.Complete(ctx, a, td.ID)
+			_, _, err := e.svc.Complete(ctx, a, td.ID)
 			return err
 		}},
 		{"Delete", func(e *env, a Actor, td model.Todo, _ model.Reminder) error {
@@ -434,7 +434,7 @@ func TestRecurringAssignedKeepsAssignee(t *testing.T) {
 
 	// Complete by the assignee, within the 12h window, advances again.
 	e.clk.Set(next.Add(-time.Hour))
-	got, err = e.svc.Complete(ctx, bob, td.ID)
+	got, _, err = e.svc.Complete(ctx, bob, td.ID)
 	e.must(err)
 	next2 := time.Date(2026, 10, 12, 18, 0, 0, 0, time.UTC)
 	if got.AssigneeID != 8 || got.DueAt == nil || !got.DueAt.Equal(next2) {

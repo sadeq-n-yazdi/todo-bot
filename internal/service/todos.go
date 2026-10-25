@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -47,6 +48,11 @@ func newReminder(t model.Todo, at time.Time, kind model.ReminderKind, now time.T
 // `from` (in the todo's own zone) and replaces its pending 'due' reminder.
 // It reports false, changing nothing, when the todo has no usable rule.
 func (s *Svc) advanceRecurring(ctx context.Context, tx store.Store, t *model.Todo, from, now time.Time) (bool, error) {
+	return s.advanceWith(ctx, tx, t, from, now, func(t model.Todo) error { return tx.UpdateTodo(ctx, t) })
+}
+
+// advanceWith is advanceRecurring with write as the write of the todo row.
+func (s *Svc) advanceWith(ctx context.Context, tx store.Store, t *model.Todo, from, now time.Time, write func(model.Todo) error) (bool, error) {
 	if t.Recur == "" {
 		return false, nil
 	}
@@ -62,7 +68,7 @@ func (s *Svc) advanceRecurring(ctx context.Context, tx store.Store, t *model.Tod
 	next = next.UTC()
 	t.DueAt = &next
 	t.UpdatedAt = now
-	if err := tx.UpdateTodo(ctx, *t); err != nil {
+	if err := write(*t); err != nil {
 		return false, err
 	}
 	if err := tx.CancelPending(ctx, t.ID, model.ReminderDue); err != nil {
@@ -207,7 +213,12 @@ func (s *Svc) Todo(ctx context.Context, a Actor, id int64) (model.Todo, error) {
 // pending reminders. A recurring item advances to its next occurrence only
 // if it is due within 12 hours; otherwise it is returned unchanged so the
 // caller can show the next due date.
-func (s *Svc) Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, error) {
+//
+// changed is true only if this call changed the item. The write is
+// conditional (store.UpdateOpenTodo): of several concurrent calls on one
+// open item, also on several nodes, exactly one changes it, so the caller
+// sends the "did" notice one time (#147).
+func (s *Svc) Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, bool, error) {
 	now := s.clk.Now().UTC()
 	var out model.Todo
 	changed := false
@@ -220,6 +231,16 @@ func (s *Svc) Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, 
 		if t.Status != model.TodoOpen {
 			return nil
 		}
+		// Write only if the row is still as read: open and, if it
+		// repeats, with the same due date.
+		read := t.DueAt
+		write := func(t model.Todo) error {
+			ok, err := tx.UpdateOpenTodo(ctx, t, read)
+			if err == nil && !ok {
+				err = errNotChanged
+			}
+			return err
+		}
 		if t.Recur != "" {
 			if t.DueAt != nil && t.DueAt.After(now.Add(completeAheadWindow)) {
 				return nil
@@ -228,7 +249,7 @@ func (s *Svc) Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, 
 			if t.DueAt != nil && t.DueAt.After(from) {
 				from = *t.DueAt
 			}
-			ok, err := s.advanceRecurring(ctx, tx, &t, from, now)
+			ok, err := s.advanceWith(ctx, tx, &t, from, now, write)
 			if err != nil {
 				return err
 			}
@@ -240,22 +261,36 @@ func (s *Svc) Complete(ctx context.Context, a Actor, todoID int64) (model.Todo, 
 				return nil
 			}
 		}
-		out, err = markDone(ctx, tx, t, now)
-		changed = true
+		out, err = markDoneWith(ctx, tx, t, now, write)
+		changed = err == nil
 		return err
 	})
+	if errors.Is(err, errNotChanged) {
+		// Another call changed the row first; nothing was written here.
+		out, err = ownedTodo(ctx, s.st, a, todoID)
+		return out, false, err
+	}
 	if err != nil {
-		return model.Todo{}, err
+		return model.Todo{}, false, err
 	}
 	if changed {
 		s.wake()
 	}
-	return out, nil
+	return out, changed, nil
 }
 
+// errNotChanged rolls back a Complete whose conditional write lost to
+// another call.
+var errNotChanged = errors.New("service: todo changed meanwhile")
+
 func markDone(ctx context.Context, tx store.Store, t model.Todo, now time.Time) (model.Todo, error) {
+	return markDoneWith(ctx, tx, t, now, func(t model.Todo) error { return tx.UpdateTodo(ctx, t) })
+}
+
+// markDoneWith is markDone with write as the write of the todo row.
+func markDoneWith(ctx context.Context, tx store.Store, t model.Todo, now time.Time, write func(model.Todo) error) (model.Todo, error) {
 	t.Status, t.DoneAt, t.UpdatedAt = model.TodoDone, &now, now
-	if err := tx.UpdateTodo(ctx, t); err != nil {
+	if err := write(t); err != nil {
 		return model.Todo{}, err
 	}
 	if err := tx.CancelPending(ctx, t.ID); err != nil {

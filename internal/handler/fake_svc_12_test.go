@@ -214,16 +214,17 @@ func (f *fakeSvc12) own(a service.Actor, id int64) (*model.Todo, error) {
 	return t, nil
 }
 
-func (f *fakeSvc12) Complete(_ context.Context, a service.Actor, id int64) (model.Todo, error) {
+func (f *fakeSvc12) Complete(_ context.Context, a service.Actor, id int64) (model.Todo, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rec("Complete")
 	t, err := f.own(a, id)
 	if err != nil {
-		return model.Todo{}, err
+		return model.Todo{}, false, err
 	}
+	changed := t.Status == model.TodoOpen
 	t.Status = model.TodoDone
-	return *t, nil
+	return *t, changed, nil
 }
 
 func (f *fakeSvc12) Delete(_ context.Context, a service.Actor, id int64) error {

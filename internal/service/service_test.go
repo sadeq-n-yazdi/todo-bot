@@ -277,7 +277,7 @@ func TestCompleteOneOffCancelsReminders(t *testing.T) {
 	td := e.add(alice, "call", at(18, 0), nil)
 	_, err := e.svc.Remind(ctx, alice, td.ID, *at(17, 0))
 	e.must(err)
-	got, err := e.svc.Complete(ctx, alice, td.ID)
+	got, _, err := e.svc.Complete(ctx, alice, td.ID)
 	e.must(err)
 	if got.Status != model.TodoDone {
 		t.Fatalf("status = %s", got.Status)
@@ -291,7 +291,7 @@ func TestCompleteRecurringTwelveHourRule(t *testing.T) {
 	e := newEnv(t)
 	// due in 10h: within the window -> advances
 	near := e.add(alice, "near", at(22, 0), mustRule(t, "daily 22:00"))
-	got, err := e.svc.Complete(ctx, alice, near.ID)
+	got, _, err := e.svc.Complete(ctx, alice, near.ID)
 	e.must(err)
 	want := time.Date(2026, 10, 11, 22, 0, 0, 0, time.UTC)
 	if got.Status != model.TodoOpen || !got.DueAt.Equal(want) {
@@ -306,7 +306,7 @@ func TestCompleteRecurringTwelveHourRule(t *testing.T) {
 	e.clk.Set(t0)
 	// due in 30h: outside the window -> unchanged, still open
 	far := e.add(alice, "far", dayPtr(2026, 10, 11, 18), mustRule(t, "daily 18:00"))
-	got, err = e.svc.Complete(ctx, alice, far.ID)
+	got, _, err = e.svc.Complete(ctx, alice, far.ID)
 	e.must(err)
 	if got.Status != model.TodoOpen || !got.DueAt.Equal(*far.DueAt) {
 		t.Fatalf("far changed: %+v", got)

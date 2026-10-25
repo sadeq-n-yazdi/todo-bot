@@ -101,20 +101,21 @@ func (f *fakeSvc11) byID(id int64) *model.Todo {
 	return nil
 }
 
-func (f *fakeSvc11) Complete(_ context.Context, a service.Actor, id int64) (model.Todo, error) {
+func (f *fakeSvc11) Complete(_ context.Context, a service.Actor, id int64) (model.Todo, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	t := f.byID(id)
 	switch {
 	case f.failWith != nil:
-		return model.Todo{}, f.failWith
+		return model.Todo{}, false, f.failWith
 	case t == nil:
-		return model.Todo{}, service.ErrNotFound
+		return model.Todo{}, false, service.ErrNotFound
 	case t.ChatID != a.ChatID:
-		return model.Todo{}, service.ErrForeignChat
+		return model.Todo{}, false, service.ErrForeignChat
 	}
+	changed := t.Status == model.TodoOpen
 	t.Status = model.TodoDone
-	return *t, nil
+	return *t, changed, nil
 }
 
 func (f *fakeSvc11) Delete(_ context.Context, a service.Actor, id int64) error {

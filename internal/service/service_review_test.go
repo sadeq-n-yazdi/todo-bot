@@ -74,7 +74,7 @@ func TestCompleteRecurringDropsSnoozes(t *testing.T) {
 	_, err := e.svc.Snooze(ctx, alice, fired.ID, ui.Snooze1h)
 	e.must(err)
 	e.clk.Set(utc(2026, 10, 11, 8, 0)) // next due 18:00 is within 12h
-	got, err := e.svc.Complete(ctx, alice, td.ID)
+	got, _, err := e.svc.Complete(ctx, alice, td.ID)
 	e.must(err)
 	if !got.DueAt.Equal(utc(2026, 10, 12, 18, 0)) {
 		t.Fatalf("not advanced: %v", got.DueAt)
@@ -90,12 +90,12 @@ func TestCompleteTwelveHourBoundary(t *testing.T) {
 	e := newEnv(t)
 	exact := e.add(alice, "exact", dayPtr(2026, 10, 11, 0), mustRule(t, "daily 00:00"))
 	over := e.add(alice, "over", func() *time.Time { v := utc(2026, 10, 11, 0, 0).Add(time.Second); return &v }(), mustRule(t, "daily 00:00"))
-	got, err := e.svc.Complete(ctx, alice, exact.ID)
+	got, _, err := e.svc.Complete(ctx, alice, exact.ID)
 	e.must(err)
 	if !got.DueAt.Equal(utc(2026, 10, 12, 0, 0)) {
 		t.Fatalf("exactly now+12h did not advance: %v", got.DueAt)
 	}
-	got, err = e.svc.Complete(ctx, alice, over.ID)
+	got, _, err = e.svc.Complete(ctx, alice, over.ID)
 	e.must(err)
 	if !got.DueAt.Equal(utc(2026, 10, 11, 0, 0).Add(time.Second)) {
 		t.Fatalf("now+12h+1s advanced: %v", got.DueAt)
