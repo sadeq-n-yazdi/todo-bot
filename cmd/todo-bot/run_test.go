@@ -47,6 +47,24 @@ func (s *syncBuf) String() string {
 	return s.b.String()
 }
 
+// watchBuf is a syncBuf that closes seen when its text first contains want.
+type watchBuf struct {
+	syncBuf
+	want string
+	seen chan struct{}
+	once sync.Once
+}
+
+func newWatchBuf(want string) *watchBuf { return &watchBuf{want: want, seen: make(chan struct{})} }
+
+func (w *watchBuf) Write(p []byte) (int, error) {
+	n, err := w.syncBuf.Write(p)
+	if strings.Contains(w.String(), w.want) {
+		w.once.Do(func() { close(w.seen) })
+	}
+	return n, err
+}
+
 func envOf(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
 func dbURL(dir string) string {
@@ -162,18 +180,21 @@ func TestErrorsDoNotLeakSecrets(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name+"/"+c.sub, func(t *testing.T) {
 			tgServerURL = c.tgURL
-			if c.tgURL != "" {
-				// Migrate first so the short deadline below times startup,
-				// not schema creation (slow under -race on CI runners).
-				var discard syncBuf
-				if code := run(context.Background(), []string{"migrate"}, envOf(c.env), &discard, &discard); code != 0 {
-					t.Fatalf("migrate exit %d: %s", code, discard.String())
-				}
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+			// The run is stopped when it starts to retry getMe, and not
+			// after a fixed time: a time limit also bounds the open of the
+			// database, which is slow on a loaded host.
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			var out, errb syncBuf
-			if code := run(ctx, []string{c.sub}, envOf(c.env), &out, &errb); code != c.wantCode {
+			var out syncBuf
+			errb := newWatchBuf("retrying")
+			go func() {
+				select {
+				case <-errb.seen:
+					cancel()
+				case <-ctx.Done():
+				}
+			}()
+			if code := run(ctx, []string{c.sub}, envOf(c.env), &out, errb); code != c.wantCode {
 				t.Errorf("exit %d, want %d; stderr: %s", code, c.wantCode, errb.String())
 			}
 			all := errb.String() + out.String()
