@@ -208,3 +208,81 @@ describe("the Edit entry of the item sheet", () => {
     expect(getEdit()?.chat).toBe(user.id);
   });
 });
+
+describe("the edit form in the Mini App", () => {
+  function fakeTelegram() {
+    const button = () => {
+      const clicks = new Set<() => void>();
+      const calls: string[] = [];
+      return {
+        clicks,
+        calls,
+        setText: vi.fn(),
+        show: vi.fn(() => calls.push("show")),
+        hide: vi.fn(() => calls.push("hide")),
+        enable: vi.fn(),
+        disable: vi.fn(),
+        showProgress: vi.fn(),
+        hideProgress: vi.fn(),
+        onClick: vi.fn((fn: () => void) => clicks.add(fn)),
+        offClick: vi.fn((fn: () => void) => clicks.delete(fn)),
+        tap() {
+          clicks.forEach((fn) => fn());
+        },
+      };
+    };
+    const tg = { MainButton: button(), BackButton: button(), HapticFeedback: { notificationOccurred: vi.fn() } };
+    (window as unknown as { Telegram: unknown }).Telegram = { WebApp: tg };
+    return tg;
+  }
+
+  afterEach(() => {
+    delete (window as unknown as { Telegram?: unknown }).Telegram;
+  });
+
+  it("keeps the BackButton shown after the item sheet, and Back closes the form", async () => {
+    const tg = fakeTelegram();
+    withItem(editItem());
+    render(
+      <>
+        <Actions
+          user={user}
+          miniapp={true}
+          onChanged={() => {}}
+          onSaved={() => {}}
+          onSignInBrowser={() => {}}
+          onLogout={async () => {}}
+        />
+        <Edit />
+      </>,
+    );
+    openItem(item(), user.id);
+    fireEvent.click(await screen.findByRole("button", { name: "web.edit.open" }));
+    await screen.findByRole("textbox", { name: "web.edit.when" });
+    // Let the deferred cleanups of the item sheet run.
+    await new Promise((r) => setTimeout(r, 80));
+
+    expect(tg.BackButton.calls.at(-1)).toBe("show");
+    expect(tg.MainButton.calls.at(-1)).toBe("show");
+    tg.BackButton.tap();
+    await waitFor(() => expect(getEdit()).toBeNull());
+  });
+
+  it("saves with the MainButton", async () => {
+    const tg = fakeTelegram();
+    withItem(editItem());
+    let body: unknown;
+    routes[`PATCH ${base}`] = (b) => {
+      body = b;
+      return json(item());
+    };
+    render(<Edit />);
+    openEdit(item(), user.id, true);
+    const box = await screen.findByRole("textbox", { name: "web.actions.text" });
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe("buy milk"));
+    fireEvent.input(box, { target: { value: "buy bread" } });
+    tg.MainButton.tap();
+    await waitFor(() => expect(body).toEqual({ text: "buy bread" }));
+    await waitFor(() => expect(getEdit()).toBeNull());
+  });
+});
