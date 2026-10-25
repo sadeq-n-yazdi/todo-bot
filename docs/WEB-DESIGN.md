@@ -776,7 +776,7 @@ A Go-only contributor runs `make ci` as today, and needs no Node.
 | Binary growth (`build-linux -tags webui` against `main`) | 2 MiB | W3 records both sizes in its PR |
 | Idle RSS growth | 8 MiB | W3 records `VmRSS` before and after, on a local run |
 
-- The server serves the files directly from the embedded `fs.FS`. It does not copy them to memory.
+- The server serves the files directly from the embedded `fs.FS`. It does not copy them to memory. The PWA page (`/`) is the only exception: for each request, the server reads the page (about 1 KB) and adds `<meta name="todo-bot" content="<bot username>">` before `</head>`. The login screen uses this name for its link to the Mini App.
 - The cache headers of §7.5 keep the hashed files in the browser cache for one year. Thus a reload gets only the small HTML files.
 - The server does not compress responses. Caddy (`encode zstd gzip`) and Cloudflare compress them.
 - `GOMEMLIMIT=40MiB` and `MemoryMax=96M` do not change. vps03 has about 149 MB of free memory and 608 MB of free disk. The binary and its `.prev` copy need about 40 MB.

@@ -14,7 +14,8 @@ import (
 
 // The static files come straight from Deps.Assets, the embedded fs.FS
 // (docs/WEB-DESIGN.md §8.5). The server does not copy them to memory and
-// does not compress them; Caddy and Cloudflare compress.
+// does not compress them; Caddy and Cloudflare compress. The PWA page is the
+// one exception: it is read into memory to add the bot name (withBotMeta).
 
 // handlePage serves the HTML page of the PWA ("/", "/index.html") or of the
 // Mini App ("/tg/"), with its CSP. A binary with the placeholder has no
