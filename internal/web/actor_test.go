@@ -69,6 +69,12 @@ func TestActorRefusals(t *testing.T) {
 func TestRoutesUnderChatUseTheActor(t *testing.T) {
 	h := newHarness(t)
 	tok := h.signIn(userAnn)
+	// Item 1 is in the chat of Ann. Thus a built item route (W8) does not
+	// answer 404 for chat 42, and a 404 there comes from the middleware.
+	if err := h.st.EnsureChat(context.Background(), model.Chat{ID: idAnn, Kind: model.ChatPrivate, CreatedAt: testNow}); err != nil {
+		t.Fatal(err)
+	}
+	h.addTodo(model.Todo{ChatID: idAnn, Text: "x", CreatedBy: idAnn})
 	routes := []struct{ method, path string }{
 		{"GET", "/api/chats/%s/items"},
 		{"GET", "/api/chats/%s/members"},
@@ -129,13 +135,7 @@ func TestStubRoutes(t *testing.T) {
 	}{
 		{"GET", "/api/chats/42/items", mini},
 		{"GET", "/api/assigned", mini},
-		{"POST", "/api/parse", mini},
-		{"GET", "/api/chats/42/members", mini},
-		{"POST", "/api/chats/42/items", mini},
-		{"POST", "/api/chats/42/items/1/done", mini},
-		{"DELETE", "/api/chats/42/items/1", mini},
-		{"POST", "/api/chats/42/items/1/remind", mini},
-		{"PUT", "/api/me/settings", mini},
+		// W8 built endpoints 15 to 21; their own tests cover them.
 		{"GET", "/api/chats/42/items/1", mini},
 		{"PATCH", "/api/chats/42/items/1", mini},
 		{"GET", "/auth/telegram?id=42", ""},
