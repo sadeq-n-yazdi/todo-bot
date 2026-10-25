@@ -69,18 +69,22 @@ func TestActorRefusals(t *testing.T) {
 func TestRoutesUnderChatUseTheActor(t *testing.T) {
 	h := newHarness(t)
 	tok := h.signIn(userAnn)
-	// Item 1 is in the chat of Ann. Thus a built item route (W8) does not
-	// answer 404 for chat 42, and a 404 there comes from the middleware.
+	// Items 1, 2 and 3 are in the chat of Ann. Thus a built item route does
+	// not answer 404 for chat 42, and a 404 there comes from the middleware.
+	// Done and Delete use their own items, so that the other routes still
+	// find item 1 open.
 	if err := h.st.EnsureChat(context.Background(), model.Chat{ID: idAnn, Kind: model.ChatPrivate, CreatedAt: testNow}); err != nil {
 		t.Fatal(err)
 	}
-	h.addTodo(model.Todo{ChatID: idAnn, Text: "x", CreatedBy: idAnn})
+	for range 3 {
+		h.addTodo(model.Todo{ChatID: idAnn, Text: "x", CreatedBy: idAnn})
+	}
 	routes := []struct{ method, path string }{
 		{"GET", "/api/chats/%s/items"},
 		{"GET", "/api/chats/%s/members"},
 		{"POST", "/api/chats/%s/items"},
-		{"POST", "/api/chats/%s/items/1/done"},
-		{"DELETE", "/api/chats/%s/items/1"},
+		{"POST", "/api/chats/%s/items/2/done"},
+		{"DELETE", "/api/chats/%s/items/3"},
 		{"POST", "/api/chats/%s/items/1/remind"},
 		{"GET", "/api/chats/%s/items/1"},
 		{"PATCH", "/api/chats/%s/items/1"},
@@ -135,9 +139,8 @@ func TestStubRoutes(t *testing.T) {
 	}{
 		{"GET", "/api/chats/42/items", mini},
 		{"GET", "/api/assigned", mini},
-		// W8 built endpoints 15 to 21; their own tests cover them.
-		{"GET", "/api/chats/42/items/1", mini},
-		{"PATCH", "/api/chats/42/items/1", mini},
+		// W8 built endpoints 15 to 21 and W11 built 22 and 23; their own
+		// tests cover them.
 		{"GET", "/auth/telegram?id=42", ""},
 	} {
 		var opts []reqOpt
