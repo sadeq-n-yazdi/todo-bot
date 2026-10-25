@@ -84,13 +84,15 @@ func (h *Handler) actionCallback(ctx context.Context, cb *tg.Callback, r req, ac
 	case ui.ActCancel:
 		return "", h.showList(ctx, cb, r, 0, "")
 	case ui.ActReminderDone:
-		td, err := h.Svc.AckReminder(ctx, r.Actor, act.ID)
+		td, changed, err := h.Svc.AckReminder(ctx, r.Actor, act.ID)
 		if isGone(err) {
 			return gone, nil
 		} else if err != nil {
 			return "", err
 		}
-		h.notifyDid(ctx, r, td)
+		if changed { // one notice, also when two presses race (#157)
+			h.notifyDid(ctx, r, td)
+		}
 		h.editCallbackMsg(ctx, cb, tg.OutMessage{Text: lc.T("settings.cb.ack", echo(td.Text))})
 		return "", nil
 	case ui.ActSnooze:

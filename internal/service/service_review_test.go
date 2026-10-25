@@ -348,7 +348,7 @@ func TestWakeOnReminderActions(t *testing.T) {
 	}{
 		{"ReminderSent", func() error { return e.svc.ReminderSent(ctx, recurring.ID, 1, e.clk.Now()) }},
 		{"Snooze", func() error { _, err := e.svc.Snooze(ctx, alice, recurring.ID, ui.Snooze10m); return err }},
-		{"AckReminder", func() error { _, err := e.svc.AckReminder(ctx, alice, oneOff.ID); return err }},
+		{"AckReminder", func() error { _, _, err := e.svc.AckReminder(ctx, alice, oneOff.ID); return err }},
 		{"ReminderFailed", func() error {
 			rs := e.claim(e.svc, utc(2026, 10, 10, 18, 20))
 			if len(rs) == 0 {

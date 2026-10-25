@@ -87,6 +87,16 @@ WHERE id = ? AND state = 'pending'`, nullInt(int64(msgID)), at.Unix(), id)
 	return n > 0, err
 }
 
+// MarkReminderAcked marks a sent reminder as acked, one time: it sets
+// acked_at (0 = not acked) only while it is still 0.
+func (d *DB) MarkReminderAcked(ctx context.Context, id int64, at time.Time) (bool, error) {
+	res, err := d.q.ExecContext(ctx, `
+UPDATE reminders SET acked_at = ?
+WHERE id = ? AND state = 'sent' AND acked_at = 0`, max(at.Unix(), 1), id)
+	n, err := affected(res, err, fmt.Sprintf("mark reminder %d acked", id))
+	return n > 0, err
+}
+
 // NextReminderAt returns MIN(max(fire_at, claim_until)) over pending
 // reminders, ok=false if there are none.
 func (d *DB) NextReminderAt(ctx context.Context) (time.Time, bool, error) {

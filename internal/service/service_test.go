@@ -236,7 +236,7 @@ func TestDoneAfterFiredDoesNotSkipNextOccurrence(t *testing.T) {
 	e.must(e.svc.ReminderSent(ctx, rs[0].ID, 55, e.clk.Now()))
 
 	e.clk.Advance(5 * time.Minute)
-	got, err := e.svc.AckReminder(ctx, alice, rs[0].ID)
+	got, _, err := e.svc.AckReminder(ctx, alice, rs[0].ID)
 	e.must(err)
 	want := time.Date(2026, 10, 11, 18, 0, 0, 0, time.UTC)
 	if got.Status != model.TodoOpen || got.DueAt == nil || !got.DueAt.Equal(want) {
@@ -256,17 +256,17 @@ func TestAckCompletesOneOff(t *testing.T) {
 	e.clk.Set(at(13, 1).UTC())
 	rs := e.claim(e.svc, e.clk.Now())
 	e.must(e.svc.ReminderSent(ctx, rs[0].ID, 3, e.clk.Now()))
-	got, err := e.svc.AckReminder(ctx, alice, rs[0].ID)
+	got, changed, err := e.svc.AckReminder(ctx, alice, rs[0].ID)
 	e.must(err)
-	if got.Status != model.TodoDone || got.DoneAt == nil {
+	if !changed || got.Status != model.TodoDone || got.DoneAt == nil {
 		t.Fatalf("not done: %+v", got)
 	}
-	again, err := e.svc.AckReminder(ctx, alice, rs[0].ID) // idempotent
+	again, changed, err := e.svc.AckReminder(ctx, alice, rs[0].ID) // idempotent
 	e.must(err)
-	if again.Status != model.TodoDone {
+	if changed || again.Status != model.TodoDone {
 		t.Fatalf("second ack: %+v", again)
 	}
-	if _, err := e.svc.AckReminder(ctx, Actor{UserID: 9, ChatID: 9}, rs[0].ID); !errors.Is(err, ErrForeignChat) {
+	if _, _, err := e.svc.AckReminder(ctx, Actor{UserID: 9, ChatID: 9}, rs[0].ID); !errors.Is(err, ErrForeignChat) {
 		t.Fatalf("foreign ack = %v", err)
 	}
 	_ = td
