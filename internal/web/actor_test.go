@@ -139,9 +139,8 @@ func TestStubRoutes(t *testing.T) {
 	}{
 		{"GET", "/api/chats/42/items", mini},
 		{"GET", "/api/assigned", mini},
-		// W8 built endpoints 15 to 21 and W11 built 22 and 23; their own
-		// tests cover them.
-		{"GET", "/auth/telegram?id=42", ""},
+		// W8 built endpoints 15 to 21, W11 built 22 and 23, and W13 built
+		// 24; their own tests cover them.
 	} {
 		var opts []reqOpt
 		if rt.tok != "" {
@@ -158,20 +157,5 @@ func TestStubRoutes(t *testing.T) {
 		if rt.tok != "" {
 			wantErr(t, h.do(rt.method, rt.path, `{}`), 401, "unauthenticated")
 		}
-	}
-}
-
-func TestStubLimitsPerIP(t *testing.T) {
-	h := newHarness(t)
-	for _, rt := range []struct {
-		method, path string
-		n            int
-	}{{"GET", "/auth/telegram", widgetPerMin}} {
-		for range rt.n {
-			if w := h.do(rt.method, rt.path, `{}`, peer("10.7.7.7:1")); w.Code != 501 {
-				t.Fatalf("%s: %d", rt.path, w.Code)
-			}
-		}
-		wantErr(t, h.do(rt.method, rt.path, `{}`, peer("10.7.7.7:1")), 429, "rate_limited")
 	}
 }

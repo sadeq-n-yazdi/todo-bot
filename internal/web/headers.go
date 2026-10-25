@@ -2,16 +2,23 @@ package web
 
 import "net/http"
 
-// Content Security Policies (docs/WEB-DESIGN.md §11.1, §11.2). W13 adds the
-// widget hosts to cspPWA. Both pages load the Vazirmatn font from Google
-// Fonts: the stylesheet from fontsCSS and the font files from fontsFiles.
+// Content Security Policies (docs/WEB-DESIGN.md §11.1, §11.2). Both pages
+// load the Vazirmatn font from Google Fonts: the stylesheet from fontsCSS and
+// the font files from fontsFiles.
 const (
 	fontsCSS   = "https://fonts.googleapis.com"
 	fontsFiles = "https://fonts.gstatic.com"
 
+	// The Telegram Login Widget (§3.4) on the login screen of "/": the
+	// script comes from widgetScript, and it puts an iframe of widgetFrame on
+	// the page. Only cspPWA allows them, not the Mini App.
+	widgetScript = "https://telegram.org"
+	widgetFrame  = "https://oauth.telegram.org"
+
 	// cspPWA is the policy of "/" and of the other static files.
-	cspPWA = "default-src 'none'; script-src 'self'; style-src 'self' " + fontsCSS + "; img-src 'self' data:; " +
-		"connect-src 'self'; manifest-src 'self'; worker-src 'self'; font-src 'self' " + fontsFiles + "; " +
+	cspPWA = "default-src 'none'; script-src 'self' " + widgetScript + "; style-src 'self' " + fontsCSS + "; " +
+		"img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; " +
+		"frame-src " + widgetFrame + "; font-src 'self' " + fontsFiles + "; " +
 		"base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 	// cspMiniApp is the policy of "/tg/". Telegram Web frames the Mini App
 	// from web.telegram.org (the K and A versions both use this host).

@@ -3,20 +3,18 @@ import { ApiError, api } from "../api";
 import "../code/code.css";
 import { tr } from "../code/text";
 import { getLang, loadCatalog } from "../i18n";
+import { Widget, botName, installedIOS, loginErrorText, takeLoginError } from "./widget";
 
-// The bot name is known only after a sign-in, so the link to the Mini App
-// needs it from the page: <meta name="todo-bot" content="bot_username">.
-function botName(): string {
-  const m = document.querySelector('meta[name="todo-bot"]');
-  const v = m?.getAttribute("content") ?? "";
-  return /^[A-Za-z0-9_]{3,64}$/.test(v) ? v : "";
-}
-
-/** The login screen of the PWA: the steps, and the field for the code from the Mini App. */
+/**
+ * The login screen of the PWA: the steps, the field for the code from the Mini
+ * App, and the Telegram Login Widget (not in an installed iOS app).
+ */
 export function Login(props: { onSignedIn: () => void }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The code of a widget sign-in that failed. The text comes at render, so that it follows the catalog.
+  const [widgetError, setWidgetError] = useState("");
   const [, setReady] = useState(0);
 
   // The catalog is public. Load it, so that the screen has its text before a session exists.
@@ -29,6 +27,9 @@ export function Login(props: { onSignedIn: () => void }) {
     };
   }, []);
 
+  // A widget sign-in that failed comes back as /#login-error=<code>.
+  useEffect(() => setWidgetError(takeLoginError()), []);
+
   // A request that ends after the screen is gone must not set state.
   const mounted = useRef(true);
   useEffect(() => () => void (mounted.current = false), []);
@@ -38,6 +39,7 @@ export function Login(props: { onSignedIn: () => void }) {
     if (busy || code.trim() === "") return;
     setBusy(true);
     setError("");
+    setWidgetError("");
     try {
       // The code goes only in the JSON body, never in a URL.
       await api("POST", "/api/auth/code/redeem", { code });
@@ -52,6 +54,8 @@ export function Login(props: { onSignedIn: () => void }) {
   }
 
   const bot = botName();
+  const widget = bot !== "" && !installedIOS();
+  const shown = error || (widgetError && loginErrorText(widgetError));
   return (
     <main data-testid="login" class="screen login">
       <h1>{tr("web.login.title")}</h1>
@@ -79,15 +83,16 @@ export function Login(props: { onSignedIn: () => void }) {
           value={code}
           onInput={(e) => setCode((e.target as HTMLInputElement).value)}
         />
-        {error && (
+        {shown && (
           <p role="alert" class="error">
-            {error}
+            {shown}
           </p>
         )}
         <button class="btn" type="submit" disabled={busy || code.trim() === ""}>
           {busy ? tr("web.login.busy") : tr("web.login.submit")}
         </button>
       </form>
+      {widget && <Widget bot={bot} />}
     </main>
   );
 }
