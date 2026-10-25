@@ -24,22 +24,31 @@ func shouldNotifyDid(a service.Actor, done model.Todo) bool {
 
 // notifyDid tells the chat of the item that its assignee completed it. The
 // text is in the locale of the creator of the item. The caller checks
-// shouldNotifyDid and that the Done changed the item. A send error gives
-// only a warning in the log: the item is already done.
+// shouldNotifyDid and that the Done changed the item.
+//
+// The handler reads the prefs and builds the text. The send runs in a
+// goroutine, as the sign-in notice does, so a slow Telegram does not hold
+// the response; s.codes.notices counts it, and tests wait on it. A send
+// error gives only a warning in the log: the item is already done.
 func (s *Server) notifyDid(r *http.Request, done model.Todo) {
-	ctx := context.WithoutCancel(r.Context())
+	base := context.WithoutCancel(r.Context())
 	lc := i18n.Default("")
-	if p, err := s.d.Svc.Prefs(ctx, done.CreatedBy, ""); err != nil {
+	if p, err := s.d.Svc.Prefs(base, done.CreatedBy, ""); err != nil {
 		s.log.Warn("web: did notice prefs", "user", done.CreatedBy, "err", err)
 	} else {
 		lc = p.Locale
 	}
-	text := lc.T("web.tg.did", ui.Mention(done.AssigneeID, done.AssigneeName, lc), echoText(done.Text))
-	ctx, cancel := context.WithTimeout(ctx, noticeTimeout)
-	defer cancel()
-	if _, err := s.d.Send.Send(ctx, done.ChatID, tg.OutMessage{Text: text}); err != nil {
-		s.log.Warn("web: did notice", "chat", done.ChatID, "err", err)
-	}
+	chatID := done.ChatID
+	msg := tg.OutMessage{Text: lc.T("web.tg.did", ui.Mention(done.AssigneeID, done.AssigneeName, lc), echoText(done.Text))}
+	s.codes.notices.Add(1)
+	go func() {
+		defer s.codes.notices.Done()
+		ctx, cancel := context.WithTimeout(base, noticeTimeout)
+		defer cancel()
+		if _, err := s.d.Send.Send(ctx, chatID, msg); err != nil {
+			s.log.Warn("web: did notice", "chat", chatID, "err", err)
+		}
+	}()
 }
 
 // echoText shortens text to didEchoRunes runes (plus an ellipsis) and

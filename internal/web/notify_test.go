@@ -28,6 +28,7 @@ func TestDidNoticeOneTimeInCreatorLocale(t *testing.T) {
 	p := chatPath(idAnn, fmt.Sprintf("/items/%d/done", it.ID))
 	wantStatus(t, e.do("POST", p, `{}`, bearer(e.ann)), 200)
 	wantErr(t, e.do("POST", p, `{}`, bearer(e.ann)), 404, "not_found")
+	e.srv.codes.notices.Wait()
 	msgs := e.send.Messages()
 	if len(msgs) != 1 {
 		t.Fatalf("%d messages, want 1: %+v", len(msgs), msgs)
@@ -45,6 +46,7 @@ func TestDidNoticeFarsiCreator(t *testing.T) {
 	it := e.assignToAnn("fix the door")
 	e.send.Reset()
 	wantStatus(t, e.do("POST", chatPath(idAnn, fmt.Sprintf("/items/%d/done", it.ID)), `{}`, bearer(e.ann)), 200)
+	e.srv.codes.notices.Wait()
 	msgs := e.send.Messages()
 	if len(msgs) != 1 || !strings.Contains(msgs[0].Msg.Text, "انجام داد") {
 		t.Fatalf("messages %+v", msgs)
@@ -68,6 +70,7 @@ func TestDidNoticeOnlyForAssigneeFromAnotherChat(t *testing.T) {
 	wantStatus(t, w, 201)
 	it = decodeBody[itemDTO](t, w)
 	wantStatus(t, e.do("POST", chatPath(idBob, fmt.Sprintf("/items/%d/done", it.ID)), `{}`, bearer(e.bob)), 200)
+	e.srv.codes.notices.Wait()
 	if msgs := e.send.Messages(); len(msgs) != 0 {
 		t.Fatalf("notices %+v", msgs)
 	}
@@ -84,6 +87,7 @@ func TestDidNoticeNotForUnchangedRepeat(t *testing.T) {
 	if resp := decodeBody[doneResponse](t, w); !resp.StillOpen {
 		t.Fatalf("done %+v", resp)
 	}
+	e.srv.codes.notices.Wait()
 	if msgs := e.send.Messages(); len(msgs) != 0 {
 		t.Fatalf("notices %+v", msgs)
 	}
@@ -95,6 +99,7 @@ func TestDidNoticeSendErrorKeeps200(t *testing.T) {
 	e.send.ErrFn = func(int64, tg.OutMessage) error { return errors.New("telegram is down") }
 	w := e.do("POST", chatPath(idAnn, fmt.Sprintf("/items/%d/done", it.ID)), `{}`, bearer(e.ann))
 	wantStatus(t, w, 200)
+	e.srv.codes.notices.Wait()
 	if !strings.Contains(e.log.String(), "did notice") {
 		t.Errorf("no warning in the log:\n%s", e.log)
 	}

@@ -30,18 +30,21 @@ type parseResponse struct {
 	RecurText string     `json:"recur_text"`
 }
 
-// itemText applies the first two steps of §5.4 to the text of an item:
-// i18n.NormalizeDigits, then strings.TrimSpace. It refuses an empty text
-// (empty_text) and a text of more than maxItemRunes runes (too_long).
+// itemText applies the first two steps of §5.4 to the text of an item. It
+// counts the runes of the text after i18n.NormalizeDigits and
+// strings.TrimSpace, and refuses an empty text (empty_text) and a text of
+// more than maxItemRunes runes (too_long). It returns the raw text, only
+// trimmed: the item keeps the digits as the user wrote them, as /add does.
+// The parser normalises the digits itself to find the date.
 func itemText(raw string) (string, error) {
-	text := strings.TrimSpace(i18n.NormalizeDigits(raw))
+	norm := strings.TrimSpace(i18n.NormalizeDigits(raw))
 	switch {
-	case text == "":
+	case norm == "":
 		return "", errEmptyText
-	case utf8.RuneCountInString(text) > maxItemRunes:
+	case utf8.RuneCountInString(norm) > maxItemRunes:
 		return "", errTooLong
 	}
-	return text, nil
+	return strings.TrimSpace(raw), nil
 }
 
 // parseItem parses text in the time zone and the calendar of the user of

@@ -160,6 +160,10 @@ func (s *Server) handleDoneItem(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, itemErr(err))
 		return
 	}
+	// Known issue: two Done requests at the same moment (for example on two
+	// nodes) can both see the item open and both send the notice. A fix
+	// needs Complete to report whether this call changed the row, which is
+	// a change of the service contract (a follow-up).
 	if changedByDone(before, done) && shouldNotifyDid(a, done) {
 		s.notifyDid(r, done)
 	}

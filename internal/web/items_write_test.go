@@ -29,6 +29,7 @@ type writeEnv struct {
 func newWriteEnv(t *testing.T) *writeEnv {
 	t.Helper()
 	h := newHarness(t)
+	t.Cleanup(h.srv.codes.notices.Wait) // the "did" notices in flight
 	h.srv.d.Config.DefaultHour, h.srv.d.Config.DefaultMinute = 8, 30
 	h.setUser(idAnn, i18n.Fa, calendar.Gregorian, "Asia/Tehran")
 	h.seedFixture()
@@ -114,11 +115,27 @@ func TestAddItem(t *testing.T) {
 	if rs := e.pending(it.ID); len(rs) != 1 || rs[0].Kind != model.ReminderDue {
 		t.Errorf("reminders %+v", rs)
 	}
-	// The digits of the text are normalised (§5.4 step 1).
+	// The item keeps the digits as the user wrote them, as /add does
+	// (§5.4 step 1), in the answer and in the database.
 	w = e.do("POST", chatPath(idAnn, "/items"), `{"text":"خرید ۲ نان"}`, bearer(e.ann))
 	wantStatus(t, w, 201)
-	if it := decodeBody[itemDTO](t, w); it.Text != "خرید 2 نان" || it.DueAt != nil {
+	it = decodeBody[itemDTO](t, w)
+	if it.Text != "خرید ۲ نان" || it.DueAt != nil {
 		t.Errorf("item %+v", it)
+	}
+	if td := e.todo(it.ID); td.Text != "خرید ۲ نان" {
+		t.Errorf("stored text %q", td.Text)
+	}
+	// Persian digits in the text and in the time: the time still parses.
+	// 09:30 in Tehran is 06:00 UTC.
+	w = e.do("POST", chatPath(idAnn, "/items"), `{"text":"خرید ۲ نان tomorrow ۰۹:۳۰"}`, bearer(e.ann))
+	wantStatus(t, w, 201)
+	it = decodeBody[itemDTO](t, w)
+	if want := time.Date(2026, 3, 2, 6, 0, 0, 0, time.UTC); it.Text != "خرید ۲ نان" || it.DueAt == nil || !it.DueAt.Equal(want) {
+		t.Errorf("item %+v, want due %v", it, want)
+	}
+	if td := e.todo(it.ID); td.Text != "خرید ۲ نان" {
+		t.Errorf("stored text %q", td.Text)
 	}
 	// A repeat.
 	w = e.do("POST", chatPath(idAnn, "/items"), `{"text":"water the plants every monday 07:00"}`, bearer(e.ann))
@@ -323,6 +340,12 @@ func TestRemindErrors(t *testing.T) {
 		t.Errorf("reminders after errors: %+v", rs)
 	}
 	wantErr(t, e.do("POST", chatPath(idAnn, "/items/99999/remind"), `{"preset":"1h"}`, bearer(e.ann)), 404, "not_found")
+	// An item of another chat: 404, and it gets no reminder.
+	bobs := e.openItem(e.bob, idBob, "bob's own")
+	wantErr(t, e.do("POST", chatPath(idAnn, fmt.Sprintf("/items/%d/remind", bobs.ID)), `{"preset":"1h"}`, bearer(e.ann)), 404, "not_found")
+	if rs := e.pending(bobs.ID); len(rs) != 0 {
+		t.Errorf("an item of another chat got reminders: %+v", rs)
+	}
 	// A done item has no reminders any more.
 	wantStatus(t, e.do("POST", chatPath(idAnn, fmt.Sprintf("/items/%d/done", it.ID)), `{}`, bearer(e.ann)), 200)
 	wantErr(t, e.do("POST", p, `{"preset":"1h"}`, bearer(e.ann)), 404, "not_found")
