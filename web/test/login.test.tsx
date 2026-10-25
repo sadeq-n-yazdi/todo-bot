@@ -36,6 +36,13 @@ afterEach(async () => {
 
 const calls = (path: string) => fetchMock.mock.calls.filter((c) => c[0] === path);
 
+// until waits on real time (setTimeout stays real) until cond holds. Unlike
+// vi.waitFor, it does not advance the fake timers on each try, so the fake
+// clock moves only when the test advances it.
+async function until(cond: () => boolean): Promise<void> {
+  while (!cond()) await new Promise((r) => setTimeout(r, 5));
+}
+
 describe("Login", () => {
   it("sends the code in the JSON body, never in a URL, then signs in", async () => {
     const done = vi.fn();
@@ -131,10 +138,20 @@ describe("CodeScreen", () => {
 
   it("counts down and then offers a new code", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
-    const expires = new Date(Date.now() + 3000).toISOString();
+    // jsdom runs its frames on setInterval, which is fake here. Without frames,
+    // Preact runs the effects after its real 35 ms timeout, and the interval of
+    // the clock is the only fake timer.
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const start = Date.now();
+    const expires = new Date(start + 3000).toISOString();
     fetchMock.mockImplementation(async () => json(201, { code: "ABCD-EFGH", expires_at: expires }));
     render(<CodeScreen screen="code" />);
-    await vi.waitFor(() => expect(screen.queryByText("ABCD-EFGH")).not.toBeNull());
+    await until(() => screen.queryByText("ABCD-EFGH") !== null);
+    // The clock starts in an effect after the code shows. Advance only when
+    // its interval is there, or no tick falls in the first second.
+    await until(() => vi.getTimerCount() === 1);
+    expect(Date.now()).toBe(start); // only the test moves the fake clock
     await vi.advanceTimersByTimeAsync(1000);
     expect(screen.getByTestId("left").textContent).toContain("0:02");
     await vi.advanceTimersByTimeAsync(2500);
