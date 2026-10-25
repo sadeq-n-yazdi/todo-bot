@@ -1,0 +1,246 @@
+/* The sheets, the settings menu, the header buttons and the row buttons.
+   Tokens only, logical properties only, no inline styles (CSP). */
+
+.bar-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bar .btn,
+.sheet .btn {
+  display: inline-block;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.bar .btn.add {
+  padding-block: 6px;
+}
+
+.sheet .btn.plain {
+  background: var(--bg2);
+  color: var(--fg);
+}
+
+.sheet .btn.danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.bar .btn[disabled],
+.sheet .btn[disabled],
+.sheet fieldset[disabled] .btn {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.icon-btn {
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Rows: the check mark and the body that opens the item sheet. */
+.row-check {
+  flex: none;
+  inline-size: 22px;
+  block-size: 22px;
+  margin-block-start: 1px;
+  padding: 0;
+  border: 2px solid var(--hint);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.row-check:hover,
+.row-check:focus-visible {
+  border-color: var(--accent);
+}
+
+.row-open {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+/* The sheet sits at the bottom of the viewport. */
+.sheet-shade {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgb(0 0 0 / 40%);
+  z-index: 10;
+}
+
+.sheet {
+  inline-size: 100%;
+  max-inline-size: 32rem;
+  max-block-size: 90vh;
+  overflow-y: auto;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  border-start-start-radius: 16px;
+  border-start-end-radius: 16px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  margin-block-end: var(--gap);
+}
+
+.sheet-head h2 {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.sheet-close {
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--hint);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sheet-form,
+.sheet-actions,
+.sheet-menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field > span {
+  color: var(--hint);
+  font-size: 0.875em;
+}
+
+.field textarea,
+.field input,
+.field select {
+  inline-size: 100%;
+  padding: 10px;
+  border: 1px solid var(--hint);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+.preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-block-size: 1.4em;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--bg2);
+  font-size: 0.875em;
+}
+
+.preview-label {
+  color: var(--hint);
+}
+
+.preview-text {
+  overflow-wrap: anywhere;
+}
+
+.sheet-item {
+  margin-block-end: var(--gap);
+}
+
+.sheet-item p {
+  margin-block: 0 4px;
+}
+
+.sheet-item-text {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sheet-item .due,
+.sheet-item .recur {
+  color: var(--hint);
+  font-size: 0.875em;
+}
+
+.sheet-item .overdue {
+  color: var(--danger);
+}
+
+.presets,
+.choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.presets legend,
+.choice legend {
+  margin-block-end: 6px;
+  padding: 0;
+  color: var(--hint);
+  font-size: 0.875em;
+}
+
+.choice {
+  margin-block-end: var(--gap);
+}
+
+.sheet-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sheet-confirm p {
+  margin-block: 0 var(--gap);
+}
+
+.toast {
+  position: fixed;
+  inset-block-end: calc(16px + env(safe-area-inset-bottom));
+  inset-inline: 16px;
+  max-inline-size: 32rem;
+  margin: 0 auto;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--fg);
+  color: var(--bg);
+  text-align: center;
+  z-index: 20;
+}
