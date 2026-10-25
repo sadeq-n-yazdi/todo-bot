@@ -31,12 +31,17 @@ type mockTelegram struct {
 	// blocked lists chats for which sendMessage answers 403 "bot was blocked
 	// by the user", like Telegram does for a user who blocked the bot.
 	blocked map[int64]bool
+
+	// members holds the getChatMember status of each pair of chat and user.
+	// A pair that is not in the map answers "left".
+	members map[[2]int64]string
 }
 
 // tgCall is one recorded Bot API call.
 type tgCall struct {
 	Token, Method string
 	ChatID        int64
+	UserID        int64 // user_id of getChatMember
 	Text          string
 	Offset        int64
 
@@ -110,6 +115,7 @@ func (m *mockTelegram) serve(w http.ResponseWriter, r *http.Request) {
 	c := tgCall{Token: token, Method: method, Text: r.Form.Get("text")}
 	c.ChatID, _ = strconv.ParseInt(r.Form.Get("chat_id"), 10, 64)
 	c.Offset, _ = strconv.ParseInt(r.Form.Get("offset"), 10, 64)
+	c.UserID, _ = strconv.ParseInt(r.Form.Get("user_id"), 10, 64)
 	c.readMarkup(r.Form.Get)
 	m.mu.Lock()
 	idx := len(m.calls)
@@ -156,9 +162,29 @@ func (m *mockTelegram) serve(w http.ResponseWriter, r *http.Request) {
 		m.mu.Unlock()
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":` + strconv.Itoa(id) +
 			`,"date":1,"chat":{"id":` + strconv.FormatInt(c.ChatID, 10) + `,"type":"private"}}}`))
+	case "getChatMember":
+		m.mu.Lock()
+		status, ok := m.members[[2]int64{c.ChatID, c.UserID}]
+		m.mu.Unlock()
+		if !ok {
+			status = "left"
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"status":"` + status + `","user":{"id":` +
+			strconv.FormatInt(c.UserID, 10) + `,"is_bot":false,"first_name":"U"}}}`))
 	default:
 		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
 	}
+}
+
+// setMember makes getChatMember for user in chat answer status, for example
+// "member" or "left".
+func (m *mockTelegram) setMember(chat, user int64, status string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.members == nil {
+		m.members = map[[2]int64]string{}
+	}
+	m.members[[2]int64{chat, user}] = status
 }
 
 // blockChat makes sendMessage to chat fail with 403.
