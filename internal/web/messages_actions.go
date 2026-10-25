@@ -54,6 +54,7 @@ func init() {
 		"web.actions.logout":         "Log out",
 		"web.actions.logout_all":     "Log out everywhere",
 		"web.actions.logged_out":     "You are logged out. Close the app and open it again from the bot.",
+		"web.actions.logout_offline": "You are offline. Log out again when you are online.",
 	})
 	i18n.Register(i18n.Fa, map[string]string{
 		"web.actions.add":              "افزودن",
@@ -100,5 +101,6 @@ func init() {
 		"web.actions.logout":           "خروج",
 		"web.actions.logout_all":       "خروج از همه\u200cجا",
 		"web.actions.logged_out":       "از حساب خارج شدید. برنامه را ببندید و دوباره از ربات باز کنید.",
+		"web.actions.logout_offline":   "اتصال ندارید. وقتی آنلاین شدید، دوباره خارج شوید.",
 	})
 }

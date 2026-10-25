@@ -4,8 +4,12 @@ import { ApiError } from "../api";
 import { t } from "../i18n";
 import { useBackButton } from "./telegram";
 
+/** An error whose message is already a text for the user. */
+export class ShownError extends Error {}
+
 /** The text to show for a failed request: the `message` of the server, or a local string. */
 export function errText(e: unknown): string {
+  if (e instanceof ShownError) return e.message;
   if (e instanceof ApiError) {
     if (e.status === 0) return t("web.actions.offline");
     if (e.message) return e.message;

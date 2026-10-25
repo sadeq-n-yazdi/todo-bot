@@ -7,7 +7,8 @@ import type { Me, User } from "../types";
 import { AddSheet } from "./add";
 import { ItemSheet } from "./item";
 import { SettingsSheet } from "./settings";
-import { closeSheet, openAdd, openSettings, useSheet } from "./store";
+import { useLive } from "./sheet";
+import { closeSheet, getSheet, openAdd, openSettings, type Sheet, useSheet } from "./store";
 import "./actions.css";
 
 export { closeSheet, openAdd, openSettings };
@@ -44,9 +45,13 @@ export function Actions(props: {
   // A new user (or logout) closes any open sheet.
   useEffect(() => closeSheet, [props.user.id]);
 
-  const changed = (note: string) => {
-    closeSheet();
-    setToast(note);
+  const live = useLive();
+
+  // `from` is the sheet that saved the change. If the user closed it (or
+  // opened another one) while the request ran, the open sheet stays.
+  const changed = (note: string, from: Sheet) => {
+    if (getSheet() === from) closeSheet();
+    if (live.current) setToast(note);
     props.onChanged();
   };
 
@@ -58,7 +63,7 @@ export function Actions(props: {
           miniapp={props.miniapp}
           chat={startChat(props.user.id)}
           onClose={closeSheet}
-          onAdded={() => changed(t("web.actions.added"))}
+          onAdded={() => changed(t("web.actions.added"), sheet)}
         />
       ) : null}
       {sheet.kind === "item" ? (
@@ -69,7 +74,7 @@ export function Actions(props: {
           run={sheet.run}
           miniapp={props.miniapp}
           onClose={closeSheet}
-          onChanged={changed}
+          onChanged={(note) => changed(note, sheet)}
         />
       ) : null}
       {sheet.kind === "settings" ? (

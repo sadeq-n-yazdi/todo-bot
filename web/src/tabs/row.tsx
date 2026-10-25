@@ -9,7 +9,8 @@ import type { Item } from "./model";
  * ("tomorrow") is out of date. They have no buttons.
  *
  * Online, the check mark marks the item as done, and a tap on the body opens
- * the item sheet (docs/WEB-DESIGN.md section 7.3). In "Assigned to me"
+ * the item sheet (docs/WEB-DESIGN.md section 7.3). A <button> may hold only
+ * phrasing content, so the body is made of spans; the CSS makes them blocks. In "Assigned to me"
  * (showChat) the actions go through the private chat of the viewer.
  */
 export function Row(props: { item: Item; offline: boolean; showChat: boolean; viewerId: number }) {
@@ -21,10 +22,10 @@ export function Row(props: { item: Item; offline: boolean; showChat: boolean; vi
 
   const body = (
     <>
-      <div class="row-text" dir="auto">
+      <span class="row-text" dir="auto">
         {it.text}
-      </div>
-      <div class="row-meta">
+      </span>
+      <span class="row-meta">
         {due ? <span class={it.overdue ? "due overdue" : "due"}>{due}</span> : null}
         {it.recur_text ? (
           <span class="recur">
@@ -45,7 +46,7 @@ export function Row(props: { item: Item; offline: boolean; showChat: boolean; vi
             <bdi>{it.chat_title}</bdi>
           </span>
         ) : null}
-      </div>
+      </span>
     </>
   );
 

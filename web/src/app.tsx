@@ -5,6 +5,7 @@ import { clearCache } from "./cache";
 import { applyLang, loadCatalog, num, t } from "./i18n";
 import type { Me, User } from "./types";
 import { Actions, closeSheet, openAdd, openSettings } from "./actions/index";
+import { ShownError } from "./actions/sheet";
 import { useBackButton } from "./actions/telegram";
 import { CodeScreen } from "./code/index";
 import { Edit } from "./edit/index";
@@ -88,7 +89,7 @@ export function App(props: { mode: Mode; initData?: string; screen?: "signout" }
         const me = await fetchMe();
         applyLang(me.user.lang, me.user.dir);
         await loadCatalog(me.user.lang);
-        storeUser(me.user);
+        if (!miniapp) storeUser(me.user);
         set({ phase: "ready", user: me.user, start, offline: false });
       } catch (e) {
         const saved = !miniapp && e instanceof ApiError && e.status === 0 ? storedUser() : null;
@@ -135,13 +136,19 @@ export function App(props: { mode: Mode; initData?: string; screen?: "signout" }
     [miniapp],
   );
 
-  useBackButton(miniapp && codeOpen, () => setCodeOpen(false));
+  // The code screen comes from Settings (codeOpen) or from a start_param=code
+  // launch (start). Back leaves both.
+  const showCode = codeOpen || (state.phase === "ready" && state.start === "code");
+  useBackButton(miniapp && showCode && !props.screen, () => {
+    setCodeOpen(false);
+    setState((s) => (s.phase === "ready" ? { ...s, start: "" } : s));
+  });
 
   // The settings menu: apply the answer of PUT /api/me/settings at once.
   const saved = async (me: Me) => {
     applyLang(me.user.lang, me.user.dir);
     await loadCatalog(me.user.lang);
-    storeUser(me.user);
+    if (!miniapp) storeUser(me.user);
     setState((s) => (s.phase === "ready" ? { ...s, user: me.user } : s));
   };
 
@@ -151,6 +158,8 @@ export function App(props: { mode: Mode; initData?: string; screen?: "signout" }
       await api("POST", everywhere ? "/api/auth/logout-all" : "/api/auth/logout");
     } catch (e) {
       // A 401 means that the session has already ended.
+      // Offline: say so, and keep the session. The user can try again later.
+      if (e instanceof ApiError && e.status === 0) throw new ShownError(t("web.actions.logout_offline"));
       if (!(e instanceof ApiError) || e.status !== 401) throw e;
     }
     if (user) clearCache(user.id);
@@ -183,7 +192,7 @@ export function App(props: { mode: Mode; initData?: string; screen?: "signout" }
       );
     case "ready": {
       const u = state.user;
-      const screen = props.screen ?? (codeOpen || state.start === "code" ? "code" : undefined);
+      const screen = props.screen ?? (showCode ? "code" : undefined);
       return (
         <div class="app">
           <header class="bar">

@@ -102,14 +102,20 @@ export function AddSheet(props: {
   }, [text]);
 
   const canAdd = text.trim() !== "" && !busy;
+  // One request at a time, also for two fast taps before the button turns off.
+  const inFlight = useRef(false);
   const add = async () => {
-    if (!canAdd) return;
+    if (!canAdd || inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError("");
     try {
       const item = await api<Item>("POST", `/api/chats/${chat}/items`, { text, assignee_id: assignee });
-      if (live.current) props.onAdded(item);
+      // The parent stays mounted: it must load the lists again even when the
+      // sheet closed while the request ran.
+      props.onAdded(item);
     } catch (e) {
+      inFlight.current = false;
       if (live.current) {
         setError(errText(e));
         setBusy(false);

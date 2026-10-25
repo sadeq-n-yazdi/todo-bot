@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api";
 import { t } from "../i18n";
 import type { Item } from "../tabs/model";
@@ -37,14 +37,22 @@ export function ItemSheet(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  // One request at a time: two Done requests could send the "did" notice twice.
+  // The ref closes the gap before the disabled buttons render.
+  const inFlight = useRef(false);
+
   async function run(fn: () => Promise<string>) {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError("");
     try {
       const note = await fn();
-      if (live.current) props.onChanged(note);
+      // The parent stays mounted, so it hears of the change even when the
+      // sheet closed while the request ran.
+      props.onChanged(note);
     } catch (e) {
+      inFlight.current = false;
       if (live.current) {
         setError(errText(e));
         setBusy(false);
