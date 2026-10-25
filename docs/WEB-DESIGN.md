@@ -381,9 +381,9 @@ Error codes for every endpoint with a session: 401 `unauthenticated`, 401 `sessi
 ### 5.4 Rules of the endpoints
 
 - **Add (17).** The server follows the same steps as `/add`:
-  1. Apply `i18n.NormalizeDigits`, then `strings.TrimSpace`.
-  2. Refuse more than 1000 runes (`too_long`), the same limit as `maxTodoChars` in the handler.
-  3. Call `Parser.Parse(text, now)` with `now` in the user's time zone.
+  1. Apply `i18n.NormalizeDigits`, then `strings.TrimSpace`, to a copy of the text. Use this copy only for the checks of steps 1 and 2. If the copy is empty, answer 422 `empty_text`. The item keeps the digits as the user wrote them, as `/add` does.
+  2. Refuse more than 1000 runes in the copy (`too_long`). This is the same limit as `maxTodoChars` in the handler.
+  3. Apply `strings.TrimSpace` to the text. Then call `Parser.Parse(text, now)` with `now` in the user's time zone. The parser changes the digits itself when it finds the date.
   4. Check `assignee_id`. It must be 0, or a user in `TODO_ALLOWED_USERS` that `NamedUsers` returns. Otherwise answer 422 `unknown_assignee`.
   5. Call `AddTodoFor(actor, assigneeID, result)`.
 
